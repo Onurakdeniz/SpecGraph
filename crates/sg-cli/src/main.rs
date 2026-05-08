@@ -1,6 +1,10 @@
-use anyhow::Context;
+use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
-use sg_core::{InitOptions, ReplayOptions, SpecGraphStore};
+use serde_json::json;
+use sg_core::{
+    AppendOperationOptions, FindingSeverity, InitOptions, ReplayOptions, SpecGraphStore,
+};
+use sg_core::{SpecProjection, TextItem};
 use std::env;
 use std::path::PathBuf;
 
@@ -18,6 +22,8 @@ struct Cli {
 enum Commands {
     /// Initialize .specgraph metadata in the current repository.
     Init(InitArgs),
+    /// Spec authoring and validation commands.
+    Spec(SpecArgs),
     /// Graph inspection and replay commands.
     Graph(GraphArgs),
 }
@@ -33,6 +39,75 @@ struct InitArgs {
     actor: String,
 
     /// Graph branch recorded in the initial event.
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct SpecArgs {
+    #[command(subcommand)]
+    command: SpecCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum SpecCommand {
+    /// Create a spec directly from CLI arguments.
+    Create(SpecCreateArgs),
+    /// Import a YAML spec projection into graph facts.
+    Import(SpecImportArgs),
+    /// Validate imported spec graph facts.
+    Validate,
+}
+
+#[derive(Debug, Args)]
+struct SpecCreateArgs {
+    /// Spec identifier, for example AUTH-001.
+    #[arg(long)]
+    spec: String,
+
+    /// Human-readable spec title.
+    #[arg(long)]
+    title: String,
+
+    /// Module touched by the spec.
+    #[arg(long)]
+    module: Option<String>,
+
+    /// Optional priority such as P1.
+    #[arg(long)]
+    priority: Option<String>,
+
+    /// Optional spec summary.
+    #[arg(long)]
+    summary: Option<String>,
+
+    /// Requirement in ID:TEXT form. Can be repeated.
+    #[arg(long = "requirement", value_name = "ID:TEXT")]
+    requirements: Vec<String>,
+
+    /// Acceptance criterion in ID:TEXT form. Can be repeated.
+    #[arg(long = "acceptance-criterion", alias = "ac", value_name = "ID:TEXT")]
+    acceptance_criteria: Vec<String>,
+
+    /// Actor recorded in the operation event.
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+
+    /// Graph branch recorded in the operation event.
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct SpecImportArgs {
+    /// YAML spec projection path.
+    path: PathBuf,
+
+    /// Actor recorded in the operation event.
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+
+    /// Graph branch recorded in the operation event.
     #[arg(long, default_value = "main")]
     graph_branch: String,
 }
@@ -76,6 +151,60 @@ fn main() -> anyhow::Result<()> {
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
         }
+        Commands::Spec(args) => match args.command {
+            SpecCommand::Create(args) => {
+                let projection = SpecProjection {
+                    spec: args.spec.clone(),
+                    title: args.title,
+                    module: args.module,
+                    priority: args.priority,
+                    summary: args.summary,
+                    requirements: parse_text_items(&args.requirements)?,
+                    acceptance_criteria: parse_text_items(&args.acceptance_criteria)?,
+                };
+                let receipt = store.append_operation(AppendOperationOptions {
+                    operation: "Spec.Create".to_string(),
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                    input: json!({ "spec": args.spec }),
+                    delta: projection.to_delta(),
+                })?;
+                println!("specCreated: {}", projection.spec);
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+            SpecCommand::Import(args) => {
+                let path = resolve_path(&root, args.path);
+                let receipt = store.import_spec_file(&path, args.actor, args.graph_branch)?;
+                println!("specImported: {}", path.display());
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+            SpecCommand::Validate => {
+                let report = store.validate_specs()?;
+                println!("stateHash: {}", report.state_hash);
+                if report.findings.is_empty() {
+                    println!("findings: 0");
+                    println!("validation: ok");
+                } else {
+                    println!("findings: {}", report.findings.len());
+                    for finding in &report.findings {
+                        println!(
+                            "{:?} {}: {}",
+                            finding.severity, finding.code, finding.message
+                        );
+                    }
+                    let errors = report
+                        .findings
+                        .iter()
+                        .filter(|finding| finding.severity == FindingSeverity::Error)
+                        .count();
+                    if errors > 0 {
+                        bail!("spec validation failed with {errors} error finding(s)");
+                    }
+                }
+            }
+        },
         Commands::Graph(args) => match args.command {
             GraphCommand::Replay(args) => {
                 let report = store.replay(ReplayOptions {
@@ -107,4 +236,27 @@ fn default_project_name(root: &PathBuf) -> anyhow::Result<String> {
         .and_then(|value| value.to_str())
         .map(ToOwned::to_owned)
         .context("failed to infer project name")
+}
+
+fn resolve_path(root: &std::path::Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    }
+}
+
+fn parse_text_items(values: &[String]) -> anyhow::Result<Vec<TextItem>> {
+    values
+        .iter()
+        .map(|value| {
+            let (id, text) = value
+                .split_once(':')
+                .with_context(|| format!("expected ID:TEXT item, got `{value}`"))?;
+            Ok(TextItem {
+                id: id.trim().to_string(),
+                text: text.trim().to_string(),
+            })
+        })
+        .collect()
 }

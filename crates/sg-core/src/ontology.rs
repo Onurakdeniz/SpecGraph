@@ -69,7 +69,10 @@ impl MvpOntology {
         self.edge_types.contains(value)
     }
 
-    pub fn validate_graph(&self, graph: &Graph) -> Vec<Finding> {
+    /// Validate graph integrity needed for replay: legal types, existing endpoints,
+    /// and valid endpoint type pairs. This intentionally does not enforce higher
+    /// workflow completeness rules like "Spec must have an acceptance criterion".
+    pub fn validate_integrity(&self, graph: &Graph) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         for node in graph.nodes.values() {
@@ -80,6 +83,13 @@ impl MvpOntology {
             self.validate_edge(edge, graph, &mut findings);
         }
 
+        findings
+    }
+
+    /// Validate all MVP rules, including spec completeness.
+    pub fn validate_graph(&self, graph: &Graph) -> Vec<Finding> {
+        let mut findings = self.validate_integrity(graph);
+        self.validate_spec_completeness(graph, &mut findings);
         findings
     }
 
@@ -106,7 +116,10 @@ impl MvpOntology {
             });
         }
 
-        if !graph.nodes.contains_key(&edge.from) {
+        let from = graph.nodes.get(&edge.from);
+        let to = graph.nodes.get(&edge.to);
+
+        if from.is_none() {
             findings.push(Finding {
                 code: "ontology.missing_edge_from".to_string(),
                 severity: FindingSeverity::Error,
@@ -119,7 +132,7 @@ impl MvpOntology {
             });
         }
 
-        if !graph.nodes.contains_key(&edge.to) {
+        if to.is_none() {
             findings.push(Finding {
                 code: "ontology.missing_edge_to".to_string(),
                 severity: FindingSeverity::Error,
@@ -131,5 +144,130 @@ impl MvpOntology {
                 related_edges: vec![edge.id.clone()],
             });
         }
+
+        if let (Some(from), Some(to), Some((allowed_from, allowed_to))) =
+            (from, to, endpoint_types(&edge.edge_type))
+        {
+            if !allowed_from.contains(&from.node_type.as_str())
+                || !allowed_to.contains(&to.node_type.as_str())
+            {
+                findings.push(Finding {
+                    code: "ontology.invalid_edge_endpoint_type".to_string(),
+                    severity: FindingSeverity::Error,
+                    message: format!(
+                        "Edge `{}` of type `{}` cannot connect `{}` to `{}`",
+                        edge.id, edge.edge_type, from.node_type, to.node_type
+                    ),
+                    related_nodes: vec![edge.from.clone(), edge.to.clone()],
+                    related_edges: vec![edge.id.clone()],
+                });
+            }
+        }
+    }
+
+    fn validate_spec_completeness(&self, graph: &Graph, findings: &mut Vec<Finding>) {
+        for spec in graph.nodes.values().filter(|node| node.node_type == "Spec") {
+            let has_requirement = graph
+                .edges
+                .values()
+                .any(|edge| edge.from == spec.id && edge.edge_type == "HAS_REQUIREMENT");
+            if !has_requirement {
+                findings.push(Finding {
+                    code: "spec.has_requirement".to_string(),
+                    severity: FindingSeverity::Error,
+                    message: format!("Spec `{}` must have at least one requirement", spec.id),
+                    related_nodes: vec![spec.id.clone()],
+                    related_edges: vec![],
+                });
+            }
+
+            let has_acceptance_criterion = graph
+                .edges
+                .values()
+                .any(|edge| edge.from == spec.id && edge.edge_type == "HAS_ACCEPTANCE_CRITERION");
+            if !has_acceptance_criterion {
+                findings.push(Finding {
+                    code: "spec.has_acceptance_criterion".to_string(),
+                    severity: FindingSeverity::Error,
+                    message: format!(
+                        "Spec `{}` must have at least one acceptance criterion",
+                        spec.id
+                    ),
+                    related_nodes: vec![spec.id.clone()],
+                    related_edges: vec![],
+                });
+            }
+        }
+    }
+}
+
+fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {
+    match edge_type {
+        "HAS_MODULE" => Some((&["Project"], &["Module"])),
+        "TOUCHES_MODULE" => Some((&["Spec"], &["Module"])),
+        "HAS_REQUIREMENT" => Some((&["Spec"], &["Requirement"])),
+        "HAS_ACCEPTANCE_CRITERION" => Some((&["Spec"], &["AcceptanceCriterion"])),
+        "HAS_ACTION_GRAPH" => Some((&["Spec"], &["ActionGraph"])),
+        "HAS_ACTION_GROUP" => Some((&["ActionGraph"], &["ActionGroup"])),
+        "HAS_ACTION" => Some((&["ActionGroup"], &["ActionNode"])),
+        "HAS_COMMIT_PLAN" => Some((&["ActionGroup"], &["CommitPlan"])),
+        "BOUND_TO_BRANCH" => Some((&["Spec"], &["GitBranch"])),
+        "STARTS_FROM_SNAPSHOT" => Some((&["GitBranch"], &["GraphSnapshot"])),
+        "IMPLEMENTS_ACTION_GROUP" => Some((&["GitCommit"], &["ActionGroup"])),
+        "FOLLOWS_COMMIT_PLAN" => Some((&["GitCommit"], &["CommitPlan"])),
+        "CHANGES_FILE" => Some((&["GitCommit"], &["CodeFile"])),
+        "VERIFIES" => Some((&["TestCase"], &["AcceptanceCriterion"])),
+        "VALIDATED_BY" => Some((
+            &["Spec", "GitCommit", "CodeFile", "TestCase"],
+            &["ValidationRun"],
+        )),
+        "HAS_FINDING" => Some((&["ValidationRun"], &["Finding"])),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Edge, Graph, Node};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn invalid_edge_endpoint_type_fails_validation() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "spec".to_string(),
+            Node {
+                id: "spec".to_string(),
+                stable_key: "spec:AUTH-001".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+        graph.nodes.insert(
+            "module".to_string(),
+            Node {
+                id: "module".to_string(),
+                stable_key: "module:Identity".to_string(),
+                node_type: "Module".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+        graph.edges.insert(
+            "bad".to_string(),
+            Edge {
+                id: "bad".to_string(),
+                stable_key: "bad".to_string(),
+                edge_type: "HAS_REQUIREMENT".to_string(),
+                from: "spec".to_string(),
+                to: "module".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_integrity(&graph);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "ontology.invalid_edge_endpoint_type"));
     }
 }

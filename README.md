@@ -9,11 +9,26 @@ This repository currently contains a Rust workspace with:
 - `sg-core`: graph types, operation receipts, JSONL event replay, canonical hashing, and MVP ontology validation.
 - `sg-cli`: the `sg` command-line interface.
 
+Implemented commands:
+
+- `sg init`
+- `sg spec create`
+- `sg spec import`
+- `sg spec validate`
+- `sg graph replay --check`
+
 ## Quick Start
 
 ```bash
 cargo run -p sg-cli -- --version
 cargo run -p sg-cli -- init --project-name demo
+cargo run -p sg-cli -- spec create \
+  --spec AUTH-001 \
+  --title "Password reset" \
+  --module Identity \
+  --requirement "REQ-001:User can request a password reset email" \
+  --acceptance-criterion "AC-001:Endpoint returns a generic response"
+cargo run -p sg-cli -- spec validate
 cargo run -p sg-cli -- graph replay --check
 ```
 
@@ -33,6 +48,34 @@ cargo run -p sg-cli -- graph replay --check
 ```
 
 For v0.1, JSONL events are the canonical history. Snapshots and indexes are derived, rebuildable state.
+
+## YAML Spec Projection
+
+Specs can also be imported from YAML:
+
+```yaml
+spec: AUTH-001
+title: Password reset
+module: Identity
+priority: P1
+summary: Allow users to request a password reset email without exposing account existence.
+requirements:
+  - id: REQ-001
+    text: User can request a password reset email.
+acceptanceCriteria:
+  - id: AC-001
+    text: Endpoint returns the same response for existing and non-existing emails.
+```
+
+```bash
+cargo run -p sg-cli -- spec import specs/AUTH-001.yaml
+cargo run -p sg-cli -- spec validate
+```
+
+`sg spec validate` currently enforces MVP ontology integrity plus:
+
+- every `Spec` has at least one `Requirement`
+- every `Spec` has at least one `AcceptanceCriterion`
 
 ## Validation
 

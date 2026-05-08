@@ -1,9 +1,11 @@
 use crate::hashing::state_hash;
 use crate::model::{
-    Event, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt, OperationRequest, Snapshot,
+    Event, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt, OperationRequest,
+    Snapshot,
 };
 use crate::ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
-use serde_json::json;
+use crate::spec::SpecProjection;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -85,6 +87,21 @@ pub struct ReplayReport {
     pub last_sequence: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct AppendOperationOptions {
+    pub operation: String,
+    pub actor: String,
+    pub graph_branch: String,
+    pub input: Value,
+    pub delta: GraphDelta,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpecValidationReport {
+    pub state_hash: String,
+    pub findings: Vec<Finding>,
+}
+
 impl SpecGraphStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -112,6 +129,23 @@ impl SpecGraphStore {
 
     pub fn replay(&self, options: ReplayOptions) -> Result<ReplayReport> {
         replay_events(self.root(), options)
+    }
+
+    pub fn append_operation(&self, options: AppendOperationOptions) -> Result<OperationReceipt> {
+        append_operation(self.root(), options)
+    }
+
+    pub fn import_spec_file(
+        &self,
+        path: &Path,
+        actor: String,
+        graph_branch: String,
+    ) -> Result<OperationReceipt> {
+        import_spec_file(self.root(), path, actor, graph_branch)
+    }
+
+    pub fn validate_specs(&self) -> Result<SpecValidationReport> {
+        validate_specs(self.root())
     }
 }
 
@@ -227,6 +261,128 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
     Ok(receipt)
 }
 
+pub fn import_spec_file(
+    root: &Path,
+    path: &Path,
+    actor: String,
+    graph_branch: String,
+) -> Result<OperationReceipt> {
+    let bytes = fs::read(path).map_err(|source| StoreError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let projection: SpecProjection =
+        serde_yaml::from_slice(&bytes).map_err(|source| StoreError::Yaml {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let spec_id = projection.spec.clone();
+    let delta = projection.to_delta();
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Spec.Import".to_string(),
+            actor,
+            graph_branch,
+            input: json!({
+                "path": path.display().to_string(),
+                "spec": spec_id,
+            }),
+            delta,
+        },
+    )
+}
+
+pub fn validate_specs(root: &Path) -> Result<SpecValidationReport> {
+    let report = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let findings = MvpOntology::new().validate_graph(&report.graph);
+    Ok(SpecValidationReport {
+        state_hash: report.state_hash,
+        findings,
+    })
+}
+
+pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<OperationReceipt> {
+    let store = SpecGraphStore::new(root);
+    store.ensure_exists()?;
+    let sg_dir = store.specgraph_dir();
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let pre_state_hash = replay.state_hash;
+    let mut graph = replay.graph;
+
+    graph.apply_delta(&options.delta);
+
+    let integrity_findings = MvpOntology::new().validate_integrity(&graph);
+    let error_count = integrity_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if error_count > 0 {
+        return Err(StoreError::OntologyValidationFailed(error_count));
+    }
+
+    let operation_id = format!("op_{}", Uuid::new_v4().simple());
+    let event_id = format!("evt_{}", Uuid::new_v4().simple());
+    let timestamp = OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("RFC3339 formatting should succeed");
+    let post_state_hash = state_hash(&graph, CORE_ONTOLOGY_VERSION);
+
+    let request = OperationRequest {
+        operation_id: operation_id.clone(),
+        operation: options.operation,
+        actor: options.actor,
+        timestamp: timestamp.clone(),
+        ontology_version: CORE_ONTOLOGY_VERSION.to_string(),
+        graph_branch: options.graph_branch,
+        input: options.input,
+    };
+
+    let event = Event {
+        event_id: event_id.clone(),
+        sequence: replay.last_sequence + 1,
+        operation_id: operation_id.clone(),
+        operation: request.operation.clone(),
+        actor: request.actor.clone(),
+        timestamp,
+        ontology_version: request.ontology_version.clone(),
+        graph_branch: request.graph_branch.clone(),
+        pre_state_hash: pre_state_hash.clone(),
+        post_state_hash: post_state_hash.clone(),
+        delta: options.delta,
+        signatures: vec![],
+    };
+
+    append_event(&sg_dir.join("events").join("00000001.jsonl"), &event)?;
+
+    let receipt = OperationReceipt {
+        operation_id,
+        operation: request.operation,
+        accepted: true,
+        pre_state_hash,
+        post_state_hash: post_state_hash.clone(),
+        event_ids: vec![event_id],
+        findings: vec![],
+    };
+    write_json(
+        &sg_dir
+            .join("operations")
+            .join("receipts")
+            .join(format!("{}.json", receipt.operation_id)),
+        &receipt,
+    )?;
+    write_snapshot(
+        &sg_dir,
+        &graph,
+        replay.last_sequence + 1,
+        &post_state_hash,
+        &request.graph_branch,
+    )?;
+
+    Ok(receipt)
+}
+
 pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport> {
     let sg_dir = root.join(".specgraph");
     if !sg_dir.exists() {
@@ -312,7 +468,7 @@ pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport
     }
 
     let ontology = MvpOntology::new();
-    let findings = ontology.validate_graph(&graph);
+    let findings = ontology.validate_integrity(&graph);
     let error_count = findings
         .iter()
         .filter(|finding| finding.severity == FindingSeverity::Error)
@@ -474,5 +630,106 @@ mod tests {
             error,
             StoreError::PreStateHashMismatch { .. } | StoreError::PostStateHashMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn spec_import_creates_graph_facts_and_validates() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let spec_path = tmp.path().join("AUTH-001.yaml");
+        fs::write(
+            &spec_path,
+            r#"
+spec: AUTH-001
+title: Password reset
+module: Identity
+requirements:
+  - id: REQ-001
+    text: User can request a password reset email.
+acceptanceCriteria:
+  - id: AC-001
+    text: Endpoint returns a generic response.
+"#,
+        )
+        .unwrap();
+
+        import_spec_file(
+            tmp.path(),
+            &spec_path,
+            "test".to_string(),
+            "main".to_string(),
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert_eq!(replay.events_replayed, 2);
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "Spec"));
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "HAS_REQUIREMENT"));
+
+        let validation = validate_specs(tmp.path()).unwrap();
+        assert!(validation.findings.is_empty());
+    }
+
+    #[test]
+    fn spec_validate_reports_missing_requirement_and_acceptance_criterion() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let projection = SpecProjection {
+            spec: "AUTH-001".to_string(),
+            title: "Password reset".to_string(),
+            module: Some("Identity".to_string()),
+            priority: None,
+            summary: None,
+            requirements: vec![],
+            acceptance_criteria: vec![],
+        };
+
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap();
+
+        let validation = validate_specs(tmp.path()).unwrap();
+        assert!(validation
+            .findings
+            .iter()
+            .any(|finding| finding.code == "spec.has_requirement"));
+        assert!(validation
+            .findings
+            .iter()
+            .any(|finding| finding.code == "spec.has_acceptance_criterion"));
     }
 }

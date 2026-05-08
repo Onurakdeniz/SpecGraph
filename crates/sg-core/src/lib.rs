@@ -8,11 +8,14 @@ pub mod canonical;
 pub mod hashing;
 pub mod model;
 pub mod ontology;
+pub mod spec;
 pub mod store;
 
 pub use hashing::state_hash;
 pub use model::*;
 pub use ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
+pub use spec::{SpecProjection, TextItem};
 pub use store::{
-    init_project, replay_events, InitOptions, ReplayOptions, ReplayReport, SpecGraphStore,
+    import_spec_file, init_project, replay_events, AppendOperationOptions, InitOptions,
+    ReplayOptions, ReplayReport, SpecGraphStore, SpecValidationReport,
 };
