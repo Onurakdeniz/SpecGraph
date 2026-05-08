@@ -31,6 +31,7 @@ impl MvpOntology {
                 "GitBranch",
                 "GitCommit",
                 "CodeFile",
+                "CodeSymbol",
                 "TestCase",
                 "ValidationRun",
                 "Finding",

@@ -6,6 +6,7 @@
 
 pub mod adoption;
 pub mod canonical;
+pub mod code_indexer;
 pub mod git;
 pub mod graph_merge;
 pub mod hashing;
@@ -15,6 +16,7 @@ pub mod ontology;
 pub mod ontology_pack;
 pub mod policy;
 pub mod proposal;
+pub mod query;
 pub mod spec;
 pub mod store;
 pub mod trace;
@@ -34,6 +36,9 @@ pub use store::{
 };
 
 pub use adoption::{scan_repository, AdoptionMode};
+pub use code_indexer::{
+    observations_to_delta, CodeIndexObservation, CodeIndexer, CodeSymbolObservation,
+};
 pub use graph_merge::{detect_merge_conflicts, diff_graphs, GraphDiff, MergeConflict};
 pub use impact::{analyze_impact, ImpactAnalysis};
 pub use ontology_pack::{
@@ -43,5 +48,7 @@ pub use policy::{
     evaluate_policies, PolicyCheckInput, PolicyDecision, PolicyEffect, PolicyReport, Waiver,
 };
 pub use proposal::{Proposal, TrustState};
+
+pub use query::GraphQuery;
 
 pub use trace::{validate_trace_links, LinksManifest, TestLink};

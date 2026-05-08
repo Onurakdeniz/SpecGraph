@@ -69,4 +69,13 @@ sg graph diff --snapshot .specgraph/snapshots/snap_x.json
 
 ## Current Boundary
 
-The implementation now includes deterministic foundations for the full system: ontology pack validation, policy decisions, waivers, impact analysis, proposal trust states, graph diff primitives, merge conflict detection primitives, and adoption modes. Advanced production integrations such as a hosted GitHub App, Studio UI, and real LLM patch sandbox are represented by trusted data models and CLI foundations, not external services.
+The implementation now includes deterministic foundations for the full system: ontology pack validation, policy decisions, waivers, impact analysis, proposal trust states, graph diff primitives, merge conflict detection primitives, adoption modes, deterministic query helpers, and multi-language code indexer contracts. Advanced production integrations such as a hosted GitHub App, Studio UI, and real LLM patch sandbox are represented by trusted data models and CLI foundations, not external services.
+
+
+## Internal Query and Code Indexer Contracts
+
+The trusted core exposes:
+
+- `GraphQuery` for deterministic node/edge traversal used by validators and policies.
+- `CodeIndexer` for language-specific indexer adapters.
+- `CodeIndexObservation` and `CodeSymbolObservation` so indexers produce observed facts instead of trusted facts directly.
