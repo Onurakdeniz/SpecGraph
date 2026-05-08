@@ -20,11 +20,14 @@ Implemented commands:
 - `sg action list`
 - `sg git install-hooks`
 - `sg git validate-message`
+- `sg git validate-bindings`
+- `sg git record-commit`
 - `sg code index`
 - `sg trace import`
 - `sg trace validate`
 - `sg ci validate`
 - `sg graph replay --check`
+- `sg graph status`
 
 ## Quick Start
 
