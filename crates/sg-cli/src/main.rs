@@ -2,10 +2,12 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_core::{
-    validate_commit_binding, validate_trace_links, AppendOperationOptions, BindBranchOptions,
-    CommitValidationInput, Edge, Finding, FindingSeverity, GenerateActionGraphOptions, GraphDelta,
-    InitOptions, LinksManifest, Node, RecordCommitOptions, ReplayOptions, SpecGraphStore,
-    SpecProjection, TestLink, TextItem,
+    analyze_impact, diff_graphs, evaluate_policies, load_pack, scan_repository,
+    validate_commit_binding, validate_pack, validate_trace_links, AdoptionMode,
+    AppendOperationOptions, BindBranchOptions, CommitValidationInput, Edge, Finding,
+    FindingSeverity, GenerateActionGraphOptions, Graph, GraphDelta, InitOptions, LinksManifest,
+    Node, PolicyCheckInput, Proposal, RecordCommitOptions, ReplayOptions, Snapshot, SpecGraphStore,
+    SpecProjection, TestLink, TextItem, TrustState,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -29,6 +31,16 @@ enum Commands {
     Init(InitArgs),
     /// Spec authoring and validation commands.
     Spec(SpecArgs),
+    /// Ontology pack commands.
+    Ontology(OntologyArgs),
+    /// Built-in policy engine commands.
+    Policy(PolicyArgs),
+    /// Existing repository adoption commands.
+    Adopt(AdoptArgs),
+    /// Impact analysis commands.
+    Impact(ImpactArgs),
+    /// Untrusted proposal commands.
+    Proposal(ProposalArgs),
     /// ActionGraph and CommitPlan commands.
     Action(ActionArgs),
     /// Git hook and commit binding commands.
@@ -104,6 +116,111 @@ struct SpecBindBranchArgs {
     spec: String,
     #[arg(long)]
     branch: Option<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct OntologyArgs {
+    #[command(subcommand)]
+    command: OntologyCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum OntologyCommand {
+    /// Validate an ontology pack manifest YAML/JSON file.
+    ValidatePack { file: PathBuf },
+}
+
+#[derive(Debug, Args)]
+struct PolicyArgs {
+    #[command(subcommand)]
+    command: PolicyCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum PolicyCommand {
+    /// Run built-in policy checks for an operation.
+    Check(PolicyCheckArgs),
+}
+
+#[derive(Debug, Args)]
+struct PolicyCheckArgs {
+    #[arg(long)]
+    operation: String,
+    #[arg(long = "changed-file")]
+    changed_files: Vec<String>,
+    #[arg(long = "role")]
+    roles: Vec<String>,
+    #[arg(long = "approval")]
+    approvals: Vec<String>,
+    /// Waiver in POLICY:REASON:APPROVED_BY form.
+    #[arg(long = "waiver", value_name = "POLICY:REASON:APPROVED_BY")]
+    waivers: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct AdoptArgs {
+    #[command(subcommand)]
+    command: AdoptCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AdoptCommand {
+    /// Scan existing source files into CodeFile baseline facts.
+    Scan(AdoptScanArgs),
+}
+
+#[derive(Debug, Args)]
+struct AdoptScanArgs {
+    #[arg(long, default_value = "observe")]
+    mode: String,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ImpactArgs {
+    #[command(subcommand)]
+    command: ImpactCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ImpactCommand {
+    /// Analyze graph impact from one root node.
+    Analyze(ImpactAnalyzeArgs),
+}
+
+#[derive(Debug, Args)]
+struct ImpactAnalyzeArgs {
+    #[arg(long = "node")]
+    nodes: Vec<String>,
+    #[arg(long, default_value_t = 2)]
+    depth: usize,
+}
+
+#[derive(Debug, Args)]
+struct ProposalArgs {
+    #[command(subcommand)]
+    command: ProposalCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProposalCommand {
+    /// Store an untrusted proposal node without accepting it as trusted graph facts.
+    Create(ProposalCreateArgs),
+}
+
+#[derive(Debug, Args)]
+struct ProposalCreateArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long)]
+    title: String,
     #[arg(long, default_value = "local:user")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -266,6 +383,14 @@ struct GraphArgs {
 enum GraphCommand {
     Replay(ReplayArgs),
     Status,
+    /// Diff current replayed graph against a snapshot JSON file.
+    Diff(GraphDiffArgs),
+}
+
+#[derive(Debug, Args)]
+struct GraphDiffArgs {
+    #[arg(long)]
+    snapshot: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -282,12 +407,17 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Init(args) => handle_init(&store, &root, args)?,
         Commands::Spec(args) => handle_spec(&store, &root, args)?,
+        Commands::Ontology(args) => handle_ontology(&root, args)?,
+        Commands::Policy(args) => handle_policy(&store, args)?,
+        Commands::Adopt(args) => handle_adopt(&store, &root, args)?,
+        Commands::Impact(args) => handle_impact(&store, args)?,
+        Commands::Proposal(args) => handle_proposal(&store, args)?,
         Commands::Action(args) => handle_action(&store, args)?,
         Commands::Git(args) => handle_git(&store, &root, args)?,
         Commands::Code(args) => handle_code(&store, &root, args)?,
         Commands::Trace(args) => handle_trace(&store, &root, args)?,
         Commands::Ci(args) => handle_ci(&store, &root, args)?,
-        Commands::Graph(args) => handle_graph(&store, args)?,
+        Commands::Graph(args) => handle_graph(&store, &root, args)?,
     }
 
     Ok(())
@@ -357,6 +487,119 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
         }
         SpecCommand::Validate => {
             validate_specs_or_fail(store)?;
+        }
+    }
+    Ok(())
+}
+
+fn handle_ontology(root: &Path, args: OntologyArgs) -> anyhow::Result<()> {
+    match args.command {
+        OntologyCommand::ValidatePack { file } => {
+            let path = resolve_path(root, file);
+            let pack = load_pack(&path).map_err(anyhow::Error::msg)?;
+            let report = validate_pack(&pack);
+            print_findings(&report.findings);
+            fail_on_errors(&report.findings, "ontology pack validation")?;
+            println!("ontologyPack: {}@{}", report.pack, report.version);
+            println!("validation: ok");
+        }
+    }
+    Ok(())
+}
+
+fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()> {
+    match args.command {
+        PolicyCommand::Check(args) => {
+            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let report = evaluate_policies(
+                &replay.graph,
+                &PolicyCheckInput {
+                    operation: args.operation,
+                    changed_files: args.changed_files,
+                    actor_roles: args.roles,
+                    approvals: args.approvals,
+                    waivers: parse_waivers(&args.waivers)?,
+                },
+            );
+            for decision in report.decisions {
+                println!(
+                    "{:?} {}: {}",
+                    decision.effect, decision.policy, decision.message
+                );
+            }
+            print_findings(&report.findings);
+            fail_on_errors(&report.findings, "policy check")?;
+            println!("policy: ok");
+        }
+    }
+    Ok(())
+}
+
+fn handle_adopt(store: &SpecGraphStore, root: &Path, args: AdoptArgs) -> anyhow::Result<()> {
+    match args.command {
+        AdoptCommand::Scan(args) => {
+            let mode = parse_adoption_mode(&args.mode)?;
+            let delta = scan_repository(root, mode)?;
+            let count = delta.create_nodes.len();
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "ExistingRepo.Adopt".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({"mode": args.mode}),
+                delta,
+            })?;
+            println!("adoptionMode: {:?}", mode);
+            println!("codeFilesAdopted: {count}");
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+    }
+    Ok(())
+}
+
+fn handle_impact(store: &SpecGraphStore, args: ImpactArgs) -> anyhow::Result<()> {
+    match args.command {
+        ImpactCommand::Analyze(args) => {
+            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let analysis = analyze_impact(&replay.graph, args.nodes, args.depth);
+            println!("roots: {}", analysis.roots.join(","));
+            println!("impactedNodes: {}", analysis.impacted_nodes.len());
+            for node in analysis.impacted_nodes {
+                println!("node: {node}");
+            }
+            println!("traversedEdges: {}", analysis.traversed_edges.len());
+        }
+    }
+    Ok(())
+}
+
+fn handle_proposal(store: &SpecGraphStore, args: ProposalArgs) -> anyhow::Result<()> {
+    match args.command {
+        ProposalCommand::Create(args) => {
+            let proposal = Proposal::new(args.id.clone(), args.title.clone());
+            let node = Node {
+                id: node_id("proposal", &args.id),
+                stable_key: format!("proposal:{}", args.id),
+                node_type: "Proposal".to_string(),
+                attributes: BTreeMap::from([
+                    ("id".to_string(), json!(proposal.id)),
+                    ("title".to_string(), json!(proposal.title)),
+                    ("trustState".to_string(), json!(TrustState::Proposed)),
+                ]),
+            };
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "Proposal.Create".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({"proposal": args.id}),
+                delta: GraphDelta {
+                    create_nodes: vec![node],
+                    ..GraphDelta::default()
+                },
+            })?;
+            println!("proposalCreated: {}", args.id);
+            println!("trustState: Proposed");
+            println!("operationId: {}", receipt.operation_id);
         }
     }
     Ok(())
@@ -522,7 +765,7 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
     Ok(())
 }
 
-fn handle_graph(store: &SpecGraphStore, args: GraphArgs) -> anyhow::Result<()> {
+fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow::Result<()> {
     match args.command {
         GraphCommand::Replay(args) => {
             let report = store.replay(ReplayOptions {
@@ -548,6 +791,28 @@ fn handle_graph(store: &SpecGraphStore, args: GraphArgs) -> anyhow::Result<()> {
             for (node_type, count) in counts {
                 println!("{node_type}: {count}");
             }
+        }
+        GraphCommand::Diff(args) => {
+            let report = store.replay(ReplayOptions { check_hashes: true })?;
+            let snapshot_path = resolve_path(root, args.snapshot);
+            let snapshot: Snapshot = serde_json::from_slice(&fs::read(&snapshot_path)?)?;
+            let snapshot_graph = Graph {
+                nodes: snapshot
+                    .nodes
+                    .into_iter()
+                    .map(|node| (node.id.clone(), node))
+                    .collect(),
+                edges: snapshot
+                    .edges
+                    .into_iter()
+                    .map(|edge| (edge.id.clone(), edge))
+                    .collect(),
+            };
+            let diff = diff_graphs(&snapshot_graph, &report.graph);
+            println!("addedNodes: {}", diff.added_nodes.len());
+            println!("removedNodes: {}", diff.removed_nodes.len());
+            println!("addedEdges: {}", diff.added_edges.len());
+            println!("removedEdges: {}", diff.removed_edges.len());
         }
     }
     Ok(())
@@ -729,6 +994,37 @@ fn fail_on_errors(findings: &[Finding], label: &str) -> anyhow::Result<()> {
         bail!("{label} failed with {errors} error finding(s)");
     }
     Ok(())
+}
+
+fn parse_waivers(values: &[String]) -> anyhow::Result<Vec<sg_core::Waiver>> {
+    values
+        .iter()
+        .map(|value| {
+            let mut parts = value.splitn(3, ':');
+            let policy = parts.next().unwrap_or_default().trim();
+            let reason = parts.next().unwrap_or_default().trim();
+            let approved_by = parts.next().unwrap_or_default().trim();
+            if policy.is_empty() || reason.is_empty() || approved_by.is_empty() {
+                bail!("expected waiver in POLICY:REASON:APPROVED_BY form, got `{value}`");
+            }
+            Ok(sg_core::Waiver {
+                policy: policy.to_string(),
+                reason: reason.to_string(),
+                approved_by: approved_by.to_string(),
+                expires_at: None,
+            })
+        })
+        .collect()
+}
+
+fn parse_adoption_mode(value: &str) -> anyhow::Result<AdoptionMode> {
+    match value {
+        "observe" => Ok(AdoptionMode::Observe),
+        "warn" => Ok(AdoptionMode::Warn),
+        "enforce-new-work" => Ok(AdoptionMode::EnforceNewWork),
+        "strict" => Ok(AdoptionMode::Strict),
+        _ => bail!("unknown adoption mode `{value}`"),
+    }
 }
 
 fn default_project_name(root: &Path) -> anyhow::Result<String> {

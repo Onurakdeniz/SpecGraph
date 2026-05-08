@@ -1,0 +1,22 @@
+name: ddd-backend
+version: 0.1.0
+extends:
+  - core@0.1.0
+nodeTypes:
+  - Aggregate
+  - Entity
+  - ValueObject
+  - DomainService
+edgeTypes:
+  - OWNS_AGGREGATE
+  - USES_DOMAIN_SERVICE
+validators:
+  - architecture.no_cross_module_dependency
+  - domain.aggregate_boundary
+policies:
+  - policy.module.boundary
+  - policy.data.migration_approval
+migrations:
+  - from: 0.0.0
+    to: 0.1.0
+    description: Initial DDD backend ontology pack.

@@ -170,6 +170,20 @@ cargo run -p sg-cli -- ci validate --skip-git
 
 Without `--skip-git`, `sg ci validate` also validates commits in `origin/development..HEAD` when a Git repository is available.
 
+## Full-System Foundation Commands
+
+Beyond the MVP loop, the CLI now includes foundations for the broader SpecGraph OS system:
+
+```bash
+cargo run -p sg-cli -- ontology validate-pack docs/ontology-packs/ddd-backend.yaml
+cargo run -p sg-cli -- policy check --operation Merge --changed-file src/lib.rs
+cargo run -p sg-cli -- adopt scan --mode observe
+cargo run -p sg-cli -- impact analyze --node node_spec_auth_001 --depth 2
+cargo run -p sg-cli -- proposal create --id PROP-001 --title "Draft graph delta"
+```
+
+See [`docs/full-system-foundation.md`](docs/full-system-foundation.md).
+
 ## Validation
 
 ```bash
