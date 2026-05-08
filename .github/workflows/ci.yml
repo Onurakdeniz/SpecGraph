@@ -13,5 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format check
+        run: cargo fmt --all -- --check
       - name: Cargo test
         run: cargo test --workspace --all-targets
+      - name: CLI smoke test
+        run: cargo run -p sg-cli -- --version

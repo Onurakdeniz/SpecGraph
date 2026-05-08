@@ -1,0 +1,15 @@
+spec: AUTH-001
+title: Password reset
+module: Identity
+priority: P1
+summary: Allow users to request a password reset email without exposing account existence.
+requirements:
+  - id: REQ-001
+    text: A user can request a password reset email.
+  - id: REQ-002
+    text: The response must not reveal whether the email exists.
+acceptanceCriteria:
+  - id: AC-001
+    text: The endpoint returns a generic response for existing emails.
+  - id: AC-002
+    text: The endpoint returns the same generic response for unknown emails.

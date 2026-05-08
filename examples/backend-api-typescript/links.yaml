@@ -1,0 +1,5 @@
+links:
+  - test: test:identity/password-reset/generic-response-existing
+    acceptanceCriterion: AUTH-001/AC-001
+  - test: test:identity/password-reset/generic-response-unknown
+    acceptanceCriterion: AUTH-001/AC-002
