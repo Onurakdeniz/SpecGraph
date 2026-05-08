@@ -42,6 +42,8 @@ pub enum StoreError {
     SpecNotFound(String),
     #[error("invalid branch name `{0}`; expected `spec/<spec-id>-<slug>` style name")]
     InvalidBranchName(String),
+    #[error("action graph not found for spec: {0}")]
+    ActionGraphNotFound(String),
     #[error("event sequence mismatch in {path}: expected {expected}, got {actual}")]
     SequenceMismatch {
         path: PathBuf,
@@ -109,6 +111,28 @@ pub struct BindBranchOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct GenerateActionGraphOptions {
+    pub spec: String,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionGroupSummary {
+    pub id: String,
+    pub name: String,
+    pub action_count: usize,
+    pub commit_plan_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionGraphSummary {
+    pub spec: String,
+    pub action_graph_id: String,
+    pub groups: Vec<ActionGroupSummary>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SpecValidationReport {
     pub state_hash: String,
     pub findings: Vec<Finding>,
@@ -158,6 +182,17 @@ impl SpecGraphStore {
 
     pub fn bind_spec_branch(&self, options: BindBranchOptions) -> Result<OperationReceipt> {
         bind_spec_branch(self.root(), options)
+    }
+
+    pub fn generate_action_graph(
+        &self,
+        options: GenerateActionGraphOptions,
+    ) -> Result<OperationReceipt> {
+        generate_action_graph(self.root(), options)
+    }
+
+    pub fn list_action_graph(&self, spec: &str) -> Result<ActionGraphSummary> {
+        list_action_graph(self.root(), spec)
     }
 
     pub fn validate_specs(&self) -> Result<SpecValidationReport> {
@@ -308,6 +343,80 @@ pub fn import_spec_file(
             delta,
         },
     )
+}
+
+pub fn generate_action_graph(
+    root: &Path,
+    options: GenerateActionGraphOptions,
+) -> Result<OperationReceipt> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let spec_node = find_spec_node(&replay.graph, &options.spec)
+        .ok_or_else(|| StoreError::SpecNotFound(options.spec.clone()))?;
+    let delta = action_graph_delta(&options.spec, &spec_node.id);
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "ActionGraph.Generate".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({"spec": options.spec}),
+            delta,
+        },
+    )
+}
+
+pub fn list_action_graph(root: &Path, spec: &str) -> Result<ActionGraphSummary> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let spec_node = find_spec_node(&replay.graph, spec)
+        .ok_or_else(|| StoreError::SpecNotFound(spec.to_string()))?;
+    let action_graph_edge = replay
+        .graph
+        .edges
+        .values()
+        .find(|edge| edge.from == spec_node.id && edge.edge_type == "HAS_ACTION_GRAPH")
+        .ok_or_else(|| StoreError::ActionGraphNotFound(spec.to_string()))?;
+    let action_graph_id = action_graph_edge.to.clone();
+
+    let mut groups = replay
+        .graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == action_graph_id && edge.edge_type == "HAS_ACTION_GROUP")
+        .filter_map(|edge| replay.graph.nodes.get(&edge.to))
+        .map(|group| {
+            let action_count = replay
+                .graph
+                .edges
+                .values()
+                .filter(|edge| edge.from == group.id && edge.edge_type == "HAS_ACTION")
+                .count();
+            let commit_plan_count = replay
+                .graph
+                .edges
+                .values()
+                .filter(|edge| edge.from == group.id && edge.edge_type == "HAS_COMMIT_PLAN")
+                .count();
+            ActionGroupSummary {
+                id: group.id.clone(),
+                name: group
+                    .attributes
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&group.id)
+                    .to_string(),
+                action_count,
+                commit_plan_count,
+            }
+        })
+        .collect::<Vec<_>>();
+    groups.sort_by(|left, right| left.name.cmp(&right.name));
+
+    Ok(ActionGraphSummary {
+        spec: spec.to_string(),
+        action_graph_id,
+        groups,
+    })
 }
 
 pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<OperationReceipt> {
@@ -648,6 +757,129 @@ fn write_yaml<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
     })
 }
 
+fn find_spec_node<'a>(graph: &'a Graph, spec: &str) -> Option<&'a Node> {
+    graph.nodes.values().find(|node| {
+        node.node_type == "Spec"
+            && node
+                .attributes
+                .get("spec")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == spec)
+    })
+}
+
+fn action_graph_delta(spec: &str, spec_node_id: &str) -> GraphDelta {
+    let action_graph_id = node_id("action_graph", spec);
+    let mut create_nodes = vec![Node {
+        id: action_graph_id.clone(),
+        stable_key: format!("action-graph:{spec}"),
+        node_type: "ActionGraph".to_string(),
+        attributes: BTreeMap::from([
+            ("spec".to_string(), json!(spec)),
+            ("template".to_string(), json!("mvp-default")),
+        ]),
+    }];
+    let mut create_edges = vec![edge(spec_node_id, "HAS_ACTION_GRAPH", &action_graph_id)];
+
+    for template in ACTION_GROUP_TEMPLATES {
+        let group_id = node_id("action_group", &format!("{spec}/{}", template.name));
+        let action_id = node_id("action_node", &format!("{spec}/{}", template.name));
+        let commit_plan_id = node_id("commit_plan", &format!("{spec}/{}", template.name));
+
+        create_nodes.push(Node {
+            id: group_id.clone(),
+            stable_key: format!("action-group:{spec}/{}", template.name),
+            node_type: "ActionGroup".to_string(),
+            attributes: BTreeMap::from([
+                ("name".to_string(), json!(template.name)),
+                ("description".to_string(), json!(template.description)),
+            ]),
+        });
+        create_nodes.push(Node {
+            id: action_id.clone(),
+            stable_key: format!("action-node:{spec}/{}", template.name),
+            node_type: "ActionNode".to_string(),
+            attributes: BTreeMap::from([
+                ("name".to_string(), json!(template.action)),
+                ("allowedPaths".to_string(), json!(template.allowed_paths)),
+                ("state".to_string(), json!("Pending")),
+            ]),
+        });
+        create_nodes.push(Node {
+            id: commit_plan_id.clone(),
+            stable_key: format!("commit-plan:{spec}/{}", template.name),
+            node_type: "CommitPlan".to_string(),
+            attributes: BTreeMap::from([
+                ("name".to_string(), json!(template.commit_plan)),
+                ("category".to_string(), json!(template.name)),
+                ("state".to_string(), json!("Planned")),
+            ]),
+        });
+
+        create_edges.push(edge(&action_graph_id, "HAS_ACTION_GROUP", &group_id));
+        create_edges.push(edge(&group_id, "HAS_ACTION", &action_id));
+        create_edges.push(edge(&group_id, "HAS_COMMIT_PLAN", &commit_plan_id));
+    }
+
+    GraphDelta {
+        create_nodes,
+        create_edges,
+        ..GraphDelta::default()
+    }
+}
+
+struct ActionGroupTemplate {
+    name: &'static str,
+    description: &'static str,
+    action: &'static str,
+    commit_plan: &'static str,
+    allowed_paths: &'static [&'static str],
+}
+
+const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
+    ActionGroupTemplate {
+        name: "graph",
+        description: "Update SpecGraph metadata and projections.",
+        action: "Update graph facts and spec projections",
+        commit_plan: "Commit graph metadata changes",
+        allowed_paths: &[".specgraph/**", "specs/**", "docs/**"],
+    },
+    ActionGroupTemplate {
+        name: "tests",
+        description: "Add or update tests linked to acceptance criteria.",
+        action: "Add acceptance-criterion tests",
+        commit_plan: "Commit tests for acceptance criteria",
+        allowed_paths: &["tests/**", "**/*test*", "**/*spec*"],
+    },
+    ActionGroupTemplate {
+        name: "implementation",
+        description: "Implement runtime or application code for the spec.",
+        action: "Implement required behavior",
+        commit_plan: "Commit implementation changes",
+        allowed_paths: &["src/**", "crates/**", "packages/**", "apps/**"],
+    },
+    ActionGroupTemplate {
+        name: "interface",
+        description: "Update public interfaces, CLI commands, or API surfaces.",
+        action: "Update interfaces",
+        commit_plan: "Commit interface changes",
+        allowed_paths: &[
+            "crates/*/src/main.rs",
+            "src/**",
+            "openapi/**",
+            "proto/**",
+            "docs/**",
+        ],
+    },
+    ActionGroupTemplate {
+        name: "validation",
+        description: "Run and record validation evidence.",
+        action: "Run validation commands",
+        commit_plan: "Commit validation evidence",
+        allowed_paths: &[".github/**", ".specgraph/validation/**", "docs/**"],
+    },
+];
+
 fn validate_spec_branch_name(spec: &str, branch: &str) -> Result<()> {
     let expected_prefix = format!("spec/{spec}").to_ascii_lowercase();
     if branch.to_ascii_lowercase().starts_with(&expected_prefix) {
@@ -964,5 +1196,90 @@ acceptanceCriteria:
         .unwrap_err();
 
         assert!(matches!(error, StoreError::InvalidBranchName(_)));
+    }
+
+    #[test]
+    fn generate_action_graph_creates_groups_actions_and_commit_plans() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let projection = SpecProjection {
+            spec: "AUTH-001".to_string(),
+            title: "Password reset".to_string(),
+            module: Some("Identity".to_string()),
+            priority: None,
+            summary: None,
+            requirements: vec![crate::spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "User can request reset".to_string(),
+            }],
+            acceptance_criteria: vec![crate::spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Generic response".to_string(),
+            }],
+        };
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap();
+
+        generate_action_graph(
+            tmp.path(),
+            GenerateActionGraphOptions {
+                spec: "AUTH-001".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let summary = list_action_graph(tmp.path(), "AUTH-001").unwrap();
+        assert_eq!(summary.groups.len(), 5);
+        assert!(summary
+            .groups
+            .iter()
+            .all(|group| group.action_count == 1 && group.commit_plan_count == 1));
+
+        let validation = validate_specs(tmp.path()).unwrap();
+        assert!(validation.findings.is_empty());
+    }
+
+    #[test]
+    fn generate_action_graph_requires_existing_spec() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = generate_action_graph(
+            tmp.path(),
+            GenerateActionGraphOptions {
+                spec: "AUTH-404".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, StoreError::SpecNotFound(_)));
     }
 }

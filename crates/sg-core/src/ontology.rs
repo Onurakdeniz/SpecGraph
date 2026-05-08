@@ -212,6 +212,82 @@ impl MvpOntology {
                     related_edges: branch_edges.iter().map(|edge| edge.id.clone()).collect(),
                 });
             }
+
+            let action_graph_edges: Vec<_> = graph
+                .edges
+                .values()
+                .filter(|edge| edge.from == spec.id && edge.edge_type == "HAS_ACTION_GRAPH")
+                .collect();
+            if action_graph_edges.len() > 1 {
+                findings.push(Finding {
+                    code: "action_graph.cardinality".to_string(),
+                    severity: FindingSeverity::Error,
+                    message: format!("Spec `{}` can have at most one ActionGraph", spec.id),
+                    related_nodes: vec![spec.id.clone()],
+                    related_edges: action_graph_edges
+                        .iter()
+                        .map(|edge| edge.id.clone())
+                        .collect(),
+                });
+            }
+
+            for action_graph_edge in action_graph_edges {
+                validate_action_graph(graph, &action_graph_edge.to, findings);
+            }
+        }
+    }
+}
+
+fn validate_action_graph(graph: &Graph, action_graph_id: &str, findings: &mut Vec<Finding>) {
+    let group_edges: Vec<_> = graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == action_graph_id && edge.edge_type == "HAS_ACTION_GROUP")
+        .collect();
+
+    if group_edges.is_empty() {
+        findings.push(Finding {
+            code: "action_graph.has_action_group".to_string(),
+            severity: FindingSeverity::Error,
+            message: format!("ActionGraph `{action_graph_id}` must have at least one ActionGroup"),
+            related_nodes: vec![action_graph_id.to_string()],
+            related_edges: vec![],
+        });
+    }
+
+    for group_edge in group_edges {
+        let has_action = graph
+            .edges
+            .values()
+            .any(|edge| edge.from == group_edge.to && edge.edge_type == "HAS_ACTION");
+        if !has_action {
+            findings.push(Finding {
+                code: "action_group.has_action".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "ActionGroup `{}` must have at least one ActionNode",
+                    group_edge.to
+                ),
+                related_nodes: vec![group_edge.to.clone()],
+                related_edges: vec![],
+            });
+        }
+
+        let has_commit_plan = graph
+            .edges
+            .values()
+            .any(|edge| edge.from == group_edge.to && edge.edge_type == "HAS_COMMIT_PLAN");
+        if !has_commit_plan {
+            findings.push(Finding {
+                code: "commit_plan.required_for_action_group".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "ActionGroup `{}` must have at least one CommitPlan",
+                    group_edge.to
+                ),
+                related_nodes: vec![group_edge.to.clone()],
+                related_edges: vec![],
+            });
         }
     }
 }

@@ -16,6 +16,8 @@ Implemented commands:
 - `sg spec import`
 - `sg spec validate`
 - `sg spec bind-branch`
+- `sg action generate`
+- `sg action list`
 - `sg graph replay --check`
 
 ## Quick Start
@@ -31,6 +33,8 @@ cargo run -p sg-cli -- spec create \
   --acceptance-criterion "AC-001:Endpoint returns a generic response"
 cargo run -p sg-cli -- spec validate
 cargo run -p sg-cli -- spec bind-branch --spec AUTH-001 --branch spec/AUTH-001-password-reset
+cargo run -p sg-cli -- action generate --spec AUTH-001
+cargo run -p sg-cli -- action list --spec AUTH-001
 cargo run -p sg-cli -- graph replay --check
 ```
 
@@ -93,6 +97,23 @@ If `--branch` is omitted, the CLI reads the current Git branch with `git branch 
 - a `GraphSnapshot` node for the pre-binding graph state
 - `Spec BOUND_TO_BRANCH GitBranch`
 - `GitBranch STARTS_FROM_SNAPSHOT GraphSnapshot`
+
+## ActionGraph Generation
+
+Generate the deterministic MVP ActionGraph template for a spec:
+
+```bash
+cargo run -p sg-cli -- action generate --spec AUTH-001
+cargo run -p sg-cli -- action list --spec AUTH-001
+```
+
+The MVP template creates five ActionGroups, each with one ActionNode and one CommitPlan:
+
+- `graph`
+- `tests`
+- `implementation`
+- `interface`
+- `validation`
 
 ## Validation
 

@@ -2,8 +2,8 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_core::{
-    AppendOperationOptions, BindBranchOptions, FindingSeverity, InitOptions, ReplayOptions,
-    SpecGraphStore,
+    AppendOperationOptions, BindBranchOptions, FindingSeverity, GenerateActionGraphOptions,
+    InitOptions, ReplayOptions, SpecGraphStore,
 };
 use sg_core::{SpecProjection, TextItem};
 use std::env;
@@ -26,6 +26,8 @@ enum Commands {
     Init(InitArgs),
     /// Spec authoring and validation commands.
     Spec(SpecArgs),
+    /// ActionGraph and CommitPlan commands.
+    Action(ActionArgs),
     /// Graph inspection and replay commands.
     Graph(GraphArgs),
 }
@@ -136,6 +138,42 @@ struct SpecBindBranchArgs {
 }
 
 #[derive(Debug, Args)]
+struct ActionArgs {
+    #[command(subcommand)]
+    command: ActionCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ActionCommand {
+    /// Generate the MVP template ActionGraph for a spec.
+    Generate(ActionGenerateArgs),
+    /// List ActionGroups and CommitPlans for a spec.
+    List(ActionListArgs),
+}
+
+#[derive(Debug, Args)]
+struct ActionGenerateArgs {
+    /// Spec identifier, for example AUTH-001.
+    #[arg(long)]
+    spec: String,
+
+    /// Actor recorded in the operation event.
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+
+    /// Graph branch recorded in the operation event.
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ActionListArgs {
+    /// Spec identifier, for example AUTH-001.
+    #[arg(long)]
+    spec: String,
+}
+
+#[derive(Debug, Args)]
 struct GraphArgs {
     #[command(subcommand)]
     command: GraphCommand,
@@ -241,6 +279,29 @@ fn main() -> anyhow::Result<()> {
                     if errors > 0 {
                         bail!("spec validation failed with {errors} error finding(s)");
                     }
+                }
+            }
+        },
+        Commands::Action(args) => match args.command {
+            ActionCommand::Generate(args) => {
+                let receipt = store.generate_action_graph(GenerateActionGraphOptions {
+                    spec: args.spec.clone(),
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                })?;
+                println!("actionGraphGenerated: {}", args.spec);
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+            ActionCommand::List(args) => {
+                let summary = store.list_action_graph(&args.spec)?;
+                println!("spec: {}", summary.spec);
+                println!("actionGraph: {}", summary.action_graph_id);
+                for group in summary.groups {
+                    println!(
+                        "group: {} actions={} commitPlans={}",
+                        group.name, group.action_count, group.commit_plan_count
+                    );
                 }
             }
         },
