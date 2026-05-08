@@ -2,11 +2,13 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_core::{
-    AppendOperationOptions, FindingSeverity, InitOptions, ReplayOptions, SpecGraphStore,
+    AppendOperationOptions, BindBranchOptions, FindingSeverity, InitOptions, ReplayOptions,
+    SpecGraphStore,
 };
 use sg_core::{SpecProjection, TextItem};
 use std::env;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[derive(Debug, Parser)]
 #[command(name = "sg", version, about = "SpecGraph OS MVP CLI")]
@@ -55,6 +57,8 @@ enum SpecCommand {
     Create(SpecCreateArgs),
     /// Import a YAML spec projection into graph facts.
     Import(SpecImportArgs),
+    /// Bind a spec to a Git branch and base graph snapshot.
+    BindBranch(SpecBindBranchArgs),
     /// Validate imported spec graph facts.
     Validate,
 }
@@ -102,6 +106,25 @@ struct SpecCreateArgs {
 struct SpecImportArgs {
     /// YAML spec projection path.
     path: PathBuf,
+
+    /// Actor recorded in the operation event.
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+
+    /// Graph branch recorded in the operation event.
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct SpecBindBranchArgs {
+    /// Spec identifier, for example AUTH-001.
+    #[arg(long)]
+    spec: String,
+
+    /// Git branch name. Defaults to the current Git branch.
+    #[arg(long)]
+    branch: Option<String>,
 
     /// Actor recorded in the operation event.
     #[arg(long, default_value = "local:user")]
@@ -177,6 +200,22 @@ fn main() -> anyhow::Result<()> {
                 let path = resolve_path(&root, args.path);
                 let receipt = store.import_spec_file(&path, args.actor, args.graph_branch)?;
                 println!("specImported: {}", path.display());
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+            SpecCommand::BindBranch(args) => {
+                let branch = match args.branch {
+                    Some(value) => value,
+                    None => current_git_branch(&root)?,
+                };
+                let receipt = store.bind_spec_branch(BindBranchOptions {
+                    spec: args.spec.clone(),
+                    branch: branch.clone(),
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                })?;
+                println!("specBound: {}", args.spec);
+                println!("branch: {}", branch);
                 println!("operationId: {}", receipt.operation_id);
                 println!("stateHash: {}", receipt.post_state_hash);
             }
@@ -259,4 +298,29 @@ fn parse_text_items(values: &[String]) -> anyhow::Result<Vec<TextItem>> {
             })
         })
         .collect()
+}
+
+fn current_git_branch(root: &std::path::Path) -> anyhow::Result<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("branch")
+        .arg("--show-current")
+        .output()
+        .context("failed to run git branch --show-current")?;
+
+    if !output.status.success() {
+        bail!("failed to read current Git branch");
+    }
+
+    let branch = String::from_utf8(output.stdout)
+        .context("git branch output was not valid UTF-8")?
+        .trim()
+        .to_string();
+
+    if branch.is_empty() {
+        bail!("current Git branch is empty; pass --branch explicitly");
+    }
+
+    Ok(branch)
 }

@@ -197,6 +197,21 @@ impl MvpOntology {
                     related_edges: vec![],
                 });
             }
+
+            let branch_edges: Vec<_> = graph
+                .edges
+                .values()
+                .filter(|edge| edge.from == spec.id && edge.edge_type == "BOUND_TO_BRANCH")
+                .collect();
+            if branch_edges.len() > 1 {
+                findings.push(Finding {
+                    code: "spec.bound_to_branch_cardinality".to_string(),
+                    severity: FindingSeverity::Error,
+                    message: format!("Spec `{}` can be bound to at most one Git branch", spec.id),
+                    related_nodes: vec![spec.id.clone()],
+                    related_edges: branch_edges.iter().map(|edge| edge.id.clone()).collect(),
+                });
+            }
         }
     }
 }

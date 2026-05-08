@@ -1,7 +1,7 @@
 use crate::hashing::state_hash;
 use crate::model::{
-    Event, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt, OperationRequest,
-    Snapshot,
+    Edge, Event, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt,
+    OperationRequest, Snapshot,
 };
 use crate::ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
 use crate::spec::SpecProjection;
@@ -38,6 +38,10 @@ pub enum StoreError {
     AlreadyExists(PathBuf),
     #[error("SpecGraph store not found at {0}")]
     NotFound(PathBuf),
+    #[error("spec not found: {0}")]
+    SpecNotFound(String),
+    #[error("invalid branch name `{0}`; expected `spec/<spec-id>-<slug>` style name")]
+    InvalidBranchName(String),
     #[error("event sequence mismatch in {path}: expected {expected}, got {actual}")]
     SequenceMismatch {
         path: PathBuf,
@@ -97,6 +101,14 @@ pub struct AppendOperationOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct BindBranchOptions {
+    pub spec: String,
+    pub branch: String,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct SpecValidationReport {
     pub state_hash: String,
     pub findings: Vec<Finding>,
@@ -142,6 +154,10 @@ impl SpecGraphStore {
         graph_branch: String,
     ) -> Result<OperationReceipt> {
         import_spec_file(self.root(), path, actor, graph_branch)
+    }
+
+    pub fn bind_spec_branch(&self, options: BindBranchOptions) -> Result<OperationReceipt> {
+        bind_spec_branch(self.root(), options)
     }
 
     pub fn validate_specs(&self) -> Result<SpecValidationReport> {
@@ -288,6 +304,72 @@ pub fn import_spec_file(
             input: json!({
                 "path": path.display().to_string(),
                 "spec": spec_id,
+            }),
+            delta,
+        },
+    )
+}
+
+pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<OperationReceipt> {
+    validate_spec_branch_name(&options.spec, &options.branch)?;
+
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let spec_node = replay
+        .graph
+        .nodes
+        .values()
+        .find(|node| {
+            node.node_type == "Spec"
+                && node
+                    .attributes
+                    .get("spec")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == options.spec)
+        })
+        .ok_or_else(|| StoreError::SpecNotFound(options.spec.clone()))?;
+
+    let branch_id = node_id("git_branch", &options.branch);
+    let snapshot_id = node_id("graph_snapshot", &replay.state_hash);
+
+    let branch_node = Node {
+        id: branch_id.clone(),
+        stable_key: format!("git-branch:{}", options.branch),
+        node_type: "GitBranch".to_string(),
+        attributes: BTreeMap::from([
+            ("name".to_string(), json!(options.branch)),
+            ("spec".to_string(), json!(options.spec)),
+            ("createdBy".to_string(), json!(options.actor)),
+        ]),
+    };
+
+    let snapshot_node = Node {
+        id: snapshot_id.clone(),
+        stable_key: format!("graph-snapshot:{}", replay.state_hash),
+        node_type: "GraphSnapshot".to_string(),
+        attributes: BTreeMap::from([
+            ("stateHash".to_string(), json!(replay.state_hash)),
+            ("eventSequence".to_string(), json!(replay.last_sequence)),
+        ]),
+    };
+
+    let delta = GraphDelta {
+        create_nodes: vec![branch_node, snapshot_node],
+        create_edges: vec![
+            edge(&spec_node.id, "BOUND_TO_BRANCH", &branch_id),
+            edge(&branch_id, "STARTS_FROM_SNAPSHOT", &snapshot_id),
+        ],
+        ..GraphDelta::default()
+    };
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Spec.BindBranch".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "spec": options.spec,
+                "branch": options.branch,
             }),
             delta,
         },
@@ -566,6 +648,56 @@ fn write_yaml<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
     })
 }
 
+fn validate_spec_branch_name(spec: &str, branch: &str) -> Result<()> {
+    let expected_prefix = format!("spec/{spec}").to_ascii_lowercase();
+    if branch.to_ascii_lowercase().starts_with(&expected_prefix) {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidBranchName(branch.to_string()))
+    }
+}
+
+fn edge(from: &str, edge_type: &str, to: &str) -> Edge {
+    Edge {
+        id: edge_id(from, edge_type, to),
+        stable_key: format!("edge:{from}:{edge_type}:{to}"),
+        edge_type: edge_type.to_string(),
+        from: from.to_string(),
+        to: to.to_string(),
+        attributes: BTreeMap::new(),
+    }
+}
+
+fn node_id(kind: &str, value: &str) -> String {
+    format!("node_{}_{}", stable_fragment(kind), stable_fragment(value))
+}
+
+fn edge_id(from: &str, edge_type: &str, to: &str) -> String {
+    format!(
+        "edge_{}_{}_{}",
+        stable_fragment(from),
+        stable_fragment(edge_type),
+        stable_fragment(to)
+    )
+}
+
+fn stable_fragment(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_separator = false;
+
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_was_separator = false;
+        } else if !last_was_separator {
+            out.push('_');
+            last_was_separator = true;
+        }
+    }
+
+    out.trim_matches('_').to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -731,5 +863,106 @@ acceptanceCriteria:
             .findings
             .iter()
             .any(|finding| finding.code == "spec.has_acceptance_criterion"));
+    }
+
+    #[test]
+    fn bind_branch_creates_git_branch_and_snapshot_edges() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let spec_path = tmp.path().join("AUTH-001.yaml");
+        fs::write(
+            &spec_path,
+            r#"
+spec: AUTH-001
+title: Password reset
+requirements:
+  - id: REQ-001
+    text: User can request a password reset email.
+acceptanceCriteria:
+  - id: AC-001
+    text: Endpoint returns a generic response.
+"#,
+        )
+        .unwrap();
+        import_spec_file(
+            tmp.path(),
+            &spec_path,
+            "test".to_string(),
+            "main".to_string(),
+        )
+        .unwrap();
+
+        bind_spec_branch(
+            tmp.path(),
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "spec/AUTH-001-password-reset".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert_eq!(replay.events_replayed, 3);
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "GitBranch"));
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "GraphSnapshot"));
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "BOUND_TO_BRANCH"));
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "STARTS_FROM_SNAPSHOT"));
+
+        let validation = validate_specs(tmp.path()).unwrap();
+        assert!(validation.findings.is_empty());
+    }
+
+    #[test]
+    fn bind_branch_rejects_invalid_branch_name() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = bind_spec_branch(
+            tmp.path(),
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "feature/password-reset".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::InvalidBranchName(_)));
     }
 }

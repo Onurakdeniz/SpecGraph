@@ -16,6 +16,7 @@ pub use model::*;
 pub use ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
 pub use spec::{SpecProjection, TextItem};
 pub use store::{
-    import_spec_file, init_project, replay_events, AppendOperationOptions, InitOptions,
-    ReplayOptions, ReplayReport, SpecGraphStore, SpecValidationReport,
+    bind_spec_branch, import_spec_file, init_project, replay_events, AppendOperationOptions,
+    BindBranchOptions, InitOptions, ReplayOptions, ReplayReport, SpecGraphStore,
+    SpecValidationReport,
 };

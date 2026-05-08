@@ -15,6 +15,7 @@ Implemented commands:
 - `sg spec create`
 - `sg spec import`
 - `sg spec validate`
+- `sg spec bind-branch`
 - `sg graph replay --check`
 
 ## Quick Start
@@ -29,6 +30,7 @@ cargo run -p sg-cli -- spec create \
   --requirement "REQ-001:User can request a password reset email" \
   --acceptance-criterion "AC-001:Endpoint returns a generic response"
 cargo run -p sg-cli -- spec validate
+cargo run -p sg-cli -- spec bind-branch --spec AUTH-001 --branch spec/AUTH-001-password-reset
 cargo run -p sg-cli -- graph replay --check
 ```
 
@@ -76,6 +78,21 @@ cargo run -p sg-cli -- spec validate
 
 - every `Spec` has at least one `Requirement`
 - every `Spec` has at least one `AcceptanceCriterion`
+
+## Branch Binding
+
+Bind a validated spec to a Git branch and base graph snapshot:
+
+```bash
+cargo run -p sg-cli -- spec bind-branch --spec AUTH-001 --branch spec/AUTH-001-password-reset
+```
+
+If `--branch` is omitted, the CLI reads the current Git branch with `git branch --show-current`. MVP branch names must use the `spec/<spec-id>-<slug>` style. The operation creates:
+
+- a `GitBranch` node
+- a `GraphSnapshot` node for the pre-binding graph state
+- `Spec BOUND_TO_BRANCH GitBranch`
+- `GitBranch STARTS_FROM_SNAPSHOT GraphSnapshot`
 
 ## Validation
 
