@@ -18,6 +18,12 @@ Implemented commands:
 - `sg spec bind-branch`
 - `sg action generate`
 - `sg action list`
+- `sg git install-hooks`
+- `sg git validate-message`
+- `sg code index`
+- `sg trace import`
+- `sg trace validate`
+- `sg ci validate`
 - `sg graph replay --check`
 
 ## Quick Start
@@ -35,6 +41,14 @@ cargo run -p sg-cli -- spec validate
 cargo run -p sg-cli -- spec bind-branch --spec AUTH-001 --branch spec/AUTH-001-password-reset
 cargo run -p sg-cli -- action generate --spec AUTH-001
 cargo run -p sg-cli -- action list --spec AUTH-001
+cat > .specgraph/links.yaml <<'YAML'
+links:
+  - test: test:identity/password-reset/generic-response
+    acceptanceCriterion: AUTH-001/AC-001
+YAML
+cargo run -p sg-cli -- trace import
+cargo run -p sg-cli -- trace validate
+cargo run -p sg-cli -- ci validate --skip-git
 cargo run -p sg-cli -- graph replay --check
 ```
 
@@ -114,6 +128,44 @@ The MVP template creates five ActionGroups, each with one ActionNode and one Com
 - `implementation`
 - `interface`
 - `validation`
+
+## Commit, Code Scope, and CI Enforcement
+
+Install local hooks:
+
+```bash
+cargo run -p sg-cli -- git install-hooks
+```
+
+Validate a commit message file against required trailers and ActionGroup file scope:
+
+```bash
+cargo run -p sg-cli -- git validate-message \
+  --message-file /path/to/COMMIT_EDITMSG \
+  --changed-file crates/sg-core/src/lib.rs
+```
+
+Required trailers:
+
+```text
+Spec: AUTH-001
+ActionGroup: implementation
+CommitPlan: implementation
+```
+
+Index changed files as `CodeFile` facts:
+
+```bash
+cargo run -p sg-cli -- code index --changed-file crates/sg-core/src/lib.rs
+```
+
+Run aggregate MVP validation in CI mode:
+
+```bash
+cargo run -p sg-cli -- ci validate --skip-git
+```
+
+Without `--skip-git`, `sg ci validate` also validates commits in `origin/development..HEAD` when a Git repository is available.
 
 ## Validation
 

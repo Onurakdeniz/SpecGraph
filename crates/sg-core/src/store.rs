@@ -1,3 +1,4 @@
+use crate::git::{parse_commit_trailers, validate_commit_binding, CommitValidationInput};
 use crate::hashing::state_hash;
 use crate::model::{
     Edge, Event, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt,
@@ -44,6 +45,10 @@ pub enum StoreError {
     InvalidBranchName(String),
     #[error("action graph not found for spec: {0}")]
     ActionGraphNotFound(String),
+    #[error("commit validation failed with {0} error finding(s)")]
+    CommitValidationFailed(usize),
+    #[error("trace validation failed with {0} error finding(s)")]
+    TraceValidationFailed(usize),
     #[error("event sequence mismatch in {path}: expected {expected}, got {actual}")]
     SequenceMismatch {
         path: PathBuf,
@@ -113,6 +118,13 @@ pub struct BindBranchOptions {
 #[derive(Debug, Clone)]
 pub struct GenerateActionGraphOptions {
     pub spec: String,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecordCommitOptions {
+    pub input: CommitValidationInput,
     pub actor: String,
     pub graph_branch: String,
 }
@@ -193,6 +205,10 @@ impl SpecGraphStore {
 
     pub fn list_action_graph(&self, spec: &str) -> Result<ActionGraphSummary> {
         list_action_graph(self.root(), spec)
+    }
+
+    pub fn record_git_commit(&self, options: RecordCommitOptions) -> Result<OperationReceipt> {
+        record_git_commit(self.root(), options)
     }
 
     pub fn validate_specs(&self) -> Result<SpecValidationReport> {
@@ -417,6 +433,84 @@ pub fn list_action_graph(root: &Path, spec: &str) -> Result<ActionGraphSummary> 
         action_graph_id,
         groups,
     })
+}
+
+pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<OperationReceipt> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let findings = validate_commit_binding(&replay.graph, &options.input);
+    let error_count = findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if error_count > 0 {
+        return Err(StoreError::CommitValidationFailed(error_count));
+    }
+
+    let trailers = parse_commit_trailers(&options.input.message);
+    let spec = trailers
+        .spec
+        .expect("validated commit must have Spec trailer");
+    let action_group_ref = trailers
+        .action_group
+        .expect("validated commit must have ActionGroup trailer");
+    let commit_plan_ref = trailers
+        .commit_plan
+        .expect("validated commit must have CommitPlan trailer");
+
+    let spec_node = find_spec_node(&replay.graph, &spec)
+        .ok_or_else(|| StoreError::SpecNotFound(spec.clone()))?;
+    let (group_id, commit_plan_id) = find_action_group_and_commit_plan(
+        &replay.graph,
+        &spec_node.id,
+        &action_group_ref,
+        &commit_plan_ref,
+    )
+    .ok_or_else(|| StoreError::CommitValidationFailed(1))?;
+
+    let commit_id = node_id("git_commit", &options.input.commit);
+    let mut create_nodes = vec![Node {
+        id: commit_id.clone(),
+        stable_key: format!("git-commit:{}", options.input.commit),
+        node_type: "GitCommit".to_string(),
+        attributes: BTreeMap::from([
+            ("sha".to_string(), json!(options.input.commit)),
+            ("spec".to_string(), json!(spec)),
+            ("message".to_string(), json!(options.input.message)),
+        ]),
+    }];
+    let mut create_edges = vec![
+        edge(&commit_id, "IMPLEMENTS_ACTION_GROUP", &group_id),
+        edge(&commit_id, "FOLLOWS_COMMIT_PLAN", &commit_plan_id),
+    ];
+
+    for file in &options.input.changed_files {
+        let file_id = node_id("code_file", file);
+        create_nodes.push(Node {
+            id: file_id.clone(),
+            stable_key: format!("code-file:{file}"),
+            node_type: "CodeFile".to_string(),
+            attributes: BTreeMap::from([("path".to_string(), json!(file))]),
+        });
+        create_edges.push(edge(&commit_id, "CHANGES_FILE", &file_id));
+    }
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "GitCommit.Record".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "commit": options.input.commit,
+                "changedFiles": options.input.changed_files,
+            }),
+            delta: GraphDelta {
+                create_nodes,
+                create_edges,
+                ..GraphDelta::default()
+            },
+        },
+    )
 }
 
 pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<OperationReceipt> {
@@ -755,6 +849,50 @@ fn write_yaml<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn find_action_group_and_commit_plan(
+    graph: &Graph,
+    spec_node_id: &str,
+    action_group_ref: &str,
+    commit_plan_ref: &str,
+) -> Option<(String, String)> {
+    let action_graph_id = graph
+        .edges
+        .values()
+        .find(|edge| edge.from == spec_node_id && edge.edge_type == "HAS_ACTION_GRAPH")?
+        .to
+        .clone();
+
+    let group = graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == action_graph_id && edge.edge_type == "HAS_ACTION_GROUP")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .find(|node| node_ref_matches(node, action_group_ref))?;
+
+    let commit_plan = graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == group.id && edge.edge_type == "HAS_COMMIT_PLAN")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .find(|node| node_ref_matches(node, commit_plan_ref))?;
+
+    Some((group.id.clone(), commit_plan.id.clone()))
+}
+
+fn node_ref_matches(node: &Node, reference: &str) -> bool {
+    node.id == reference
+        || node
+            .attributes
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == reference)
+        || node
+            .attributes
+            .get("category")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == reference)
 }
 
 fn find_spec_node<'a>(graph: &'a Graph, spec: &str) -> Option<&'a Node> {
