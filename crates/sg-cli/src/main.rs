@@ -1206,7 +1206,7 @@ fn handle_trace(store: &SpecGraphStore, root: &Path, args: TraceArgs) -> anyhow:
             let findings = validate_trace_links(&replay.graph, &manifest);
             print_findings(&findings);
             fail_on_errors(&findings, "trace import")?;
-            let delta = trace_links_delta(&replay.graph, &manifest.links)?;
+            let delta = trace_manifest_delta(&replay.graph, &manifest)?;
             let receipt = store.append_operation(AppendOperationOptions {
                 operation: "Trace.Import".to_string(),
                 actor: args.actor,
@@ -1452,7 +1452,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         }],
         ..LinksManifest::default()
     };
-    let trace_delta = trace_links_delta(&replay.graph, &manifest.links)?;
+    let trace_delta = trace_manifest_delta(&replay.graph, &manifest)?;
     store.append_operation(AppendOperationOptions {
         operation: "Trace.Import".to_string(),
         actor: "proof".to_string(),
@@ -1863,36 +1863,93 @@ fn read_links_manifest(root: &Path, path: &Path) -> anyhow::Result<LinksManifest
     serde_yaml::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))
 }
 
-fn trace_links_delta(graph: &sg_core::Graph, links: &[TestLink]) -> anyhow::Result<GraphDelta> {
+fn trace_manifest_delta(
+    graph: &sg_core::Graph,
+    manifest: &LinksManifest,
+) -> anyhow::Result<GraphDelta> {
     let mut create_nodes = Vec::new();
     let mut create_edges = Vec::new();
-    for link in links {
-        let Some(ac) = graph.nodes.values().find(|node| {
-            node.node_type == "AcceptanceCriterion"
-                && node
-                    .stable_key
-                    .strip_prefix("acceptance-criterion:")
-                    .is_some_and(|key| key == link.acceptance_criterion)
-        }) else {
-            bail!(
-                "unknown acceptance criterion `{}`",
-                link.acceptance_criterion
-            );
-        };
-        let test_id = node_id("test_case", &link.test);
-        create_nodes.push(Node {
-            id: test_id.clone(),
-            stable_key: format!("test-case:{}", link.test),
-            node_type: "TestCase".to_string(),
-            attributes: BTreeMap::from([("test".to_string(), json!(link.test))]),
-        });
+
+    for link in &manifest.links {
+        let ac = find_node_by_key(
+            graph,
+            "AcceptanceCriterion",
+            "acceptance-criterion",
+            &link.acceptance_criterion,
+        )?;
+        let test_id = ensure_test_node(&mut create_nodes, &link.test);
         create_edges.push(edge(&test_id, "VERIFIES", &ac.id));
     }
+    for link in &manifest.behavior_tests {
+        let behavior = find_node_by_key(graph, "Behavior", "behavior", &link.behavior)?;
+        let test_id = ensure_test_node(&mut create_nodes, &link.test);
+        create_edges.push(edge(&test_id, "TESTS_BEHAVIOR", &behavior.id));
+    }
+    for link in &manifest.risk_tests {
+        let risk = find_node_by_key(graph, "Risk", "risk", &link.risk)?;
+        let test_id = ensure_test_node(&mut create_nodes, &link.test);
+        create_edges.push(edge(&test_id, "TESTS_RISK", &risk.id));
+    }
+    for link in &manifest.regression_tests {
+        let regression = find_node_by_key(graph, "Regression", "regression", &link.regression)?;
+        let test_id = ensure_test_node(&mut create_nodes, &link.test);
+        create_edges.push(edge(&test_id, "TESTS_REGRESSION", &regression.id));
+    }
+    for link in &manifest.policy_tests {
+        let policy = graph
+            .nodes
+            .values()
+            .find(|node| {
+                matches!(
+                    node.node_type.as_str(),
+                    "PolicyRequirement" | "PolicyDecision"
+                ) && node
+                    .stable_key
+                    .split_once(':')
+                    .is_some_and(|(_, key)| key == link.policy)
+            })
+            .ok_or_else(|| anyhow::anyhow!("unknown policy requirement `{}`", link.policy))?;
+        let test_id = ensure_test_node(&mut create_nodes, &link.test);
+        create_edges.push(edge(&test_id, "TESTS_POLICY", &policy.id));
+    }
+
     Ok(GraphDelta {
         create_nodes,
         create_edges,
         ..GraphDelta::default()
     })
+}
+
+fn ensure_test_node(create_nodes: &mut Vec<Node>, test: &str) -> String {
+    let test_id = node_id("test_case", test);
+    if !create_nodes.iter().any(|node| node.id == test_id) {
+        create_nodes.push(Node {
+            id: test_id.clone(),
+            stable_key: format!("test-case:{test}"),
+            node_type: "TestCase".to_string(),
+            attributes: BTreeMap::from([("test".to_string(), json!(test))]),
+        });
+    }
+    test_id
+}
+
+fn find_node_by_key<'a>(
+    graph: &'a sg_core::Graph,
+    node_type: &str,
+    family: &str,
+    key: &str,
+) -> anyhow::Result<&'a Node> {
+    graph
+        .nodes
+        .values()
+        .find(|node| {
+            node.node_type == node_type
+                && node
+                    .stable_key
+                    .strip_prefix(&format!("{family}:"))
+                    .is_some_and(|node_key| node_key == key)
+        })
+        .ok_or_else(|| anyhow::anyhow!("unknown {node_type} `{key}`"))
 }
 
 fn code_index_observations(

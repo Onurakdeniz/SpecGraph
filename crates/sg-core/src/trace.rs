@@ -1,7 +1,7 @@
 use crate::model::{Finding, FindingSeverity, Graph};
 use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_TRACE_LINKS};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +16,10 @@ pub struct LinksManifest {
     pub behavior_tests: Vec<BehaviorTestLink>,
     #[serde(default)]
     pub risk_tests: Vec<RiskTestLink>,
+    #[serde(default)]
+    pub regression_tests: Vec<RegressionTestLink>,
+    #[serde(default)]
+    pub policy_tests: Vec<PolicyTestLink>,
     #[serde(default)]
     pub annotations: Vec<AnnotationLink>,
     #[serde(default)]
@@ -58,6 +62,20 @@ pub struct BehaviorTestLink {
 pub struct RiskTestLink {
     pub test: String,
     pub risk: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegressionTestLink {
+    pub test: String,
+    pub regression: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicyTestLink {
+    pub test: String,
+    pub policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +141,7 @@ pub fn validate_trace_links(graph: &Graph, manifest: &LinksManifest) -> Vec<Find
     validate_code_use_case_links(&keys, manifest, &mut findings);
     validate_route_endpoint_links(&keys, manifest, &mut findings);
     validate_behavior_and_risk_test_links(&keys, manifest, &mut findings);
+    validate_regression_and_policy_test_links(&keys, manifest, &mut findings);
     validate_annotation_links(&keys, manifest, &mut findings);
     validate_inferred_links(&keys, manifest, &mut findings);
 
@@ -139,28 +158,49 @@ struct GraphKeys {
     endpoints: BTreeSet<String>,
     behaviors: BTreeSet<String>,
     risks: BTreeSet<String>,
+    regressions: BTreeSet<String>,
+    policies: BTreeSet<String>,
 }
 
 impl GraphKeys {
     fn from_graph(graph: &Graph) -> Self {
         let mut keys = Self::default();
-        let mut by_type: BTreeMap<&str, &mut BTreeSet<String>> = BTreeMap::from([
-            ("AcceptanceCriterion", &mut keys.acceptance_criteria),
-            ("TestCase", &mut keys.test_cases),
-            ("CodeSymbol", &mut keys.code_symbols),
-            ("CodeRoute", &mut keys.code_routes),
-            ("UseCase", &mut keys.use_cases),
-            ("Endpoint", &mut keys.endpoints),
-            ("Behavior", &mut keys.behaviors),
-            ("Risk", &mut keys.risks),
-        ]);
-
         for node in graph.nodes.values() {
-            if let Some(target) = by_type.get_mut(node.node_type.as_str()) {
-                target.insert(key_without_prefix(&node.stable_key));
+            let key = key_without_prefix(&node.stable_key);
+            match node.node_type.as_str() {
+                "AcceptanceCriterion" => {
+                    keys.acceptance_criteria.insert(key);
+                }
+                "TestCase" => {
+                    keys.test_cases.insert(key);
+                }
+                "CodeSymbol" => {
+                    keys.code_symbols.insert(key);
+                }
+                "CodeRoute" => {
+                    keys.code_routes.insert(key);
+                }
+                "UseCase" => {
+                    keys.use_cases.insert(key);
+                }
+                "Endpoint" => {
+                    keys.endpoints.insert(key);
+                }
+                "Behavior" => {
+                    keys.behaviors.insert(key);
+                }
+                "Risk" => {
+                    keys.risks.insert(key);
+                }
+                "Regression" => {
+                    keys.regressions.insert(key);
+                }
+                "PolicyDecision" | "PolicyRequirement" => {
+                    keys.policies.insert(key);
+                }
+                _ => {}
             }
         }
-
         keys
     }
 }
@@ -303,6 +343,46 @@ fn validate_behavior_and_risk_test_links(
     }
 }
 
+fn validate_regression_and_policy_test_links(
+    keys: &GraphKeys,
+    manifest: &LinksManifest,
+    findings: &mut Vec<Finding>,
+) {
+    for link in &manifest.regression_tests {
+        require_key(
+            &keys.test_cases,
+            &link.test,
+            "trace.unknown_test_case",
+            "RegressionTest link references unknown TestCase",
+            findings,
+        );
+        require_key(
+            &keys.regressions,
+            &link.regression,
+            "trace.unknown_regression",
+            "RegressionTest link references unknown Regression",
+            findings,
+        );
+    }
+
+    for link in &manifest.policy_tests {
+        require_key(
+            &keys.test_cases,
+            &link.test,
+            "trace.unknown_test_case",
+            "PolicyTest link references unknown TestCase",
+            findings,
+        );
+        require_key(
+            &keys.policies,
+            &link.policy,
+            "trace.unknown_policy_requirement",
+            "PolicyTest link references unknown policy requirement",
+            findings,
+        );
+    }
+}
+
 fn validate_annotation_links(
     keys: &GraphKeys,
     manifest: &LinksManifest,
@@ -376,6 +456,8 @@ fn validate_relation(
         "route-endpoint" => keys.code_routes.contains(source) && keys.endpoints.contains(target),
         "tests-behavior" => keys.test_cases.contains(source) && keys.behaviors.contains(target),
         "tests-risk" => keys.test_cases.contains(source) && keys.risks.contains(target),
+        "tests-regression" => keys.test_cases.contains(source) && keys.regressions.contains(target),
+        "tests-policy" => keys.test_cases.contains(source) && keys.policies.contains(target),
         "verifies-acceptance-criterion" => {
             keys.test_cases.contains(source) && keys.acceptance_criteria.contains(target)
         }
@@ -509,6 +591,7 @@ mod tests {
                 confidence: 0.91,
                 trust_state: "Inferred".to_string(),
             }],
+            ..LinksManifest::default()
         };
 
         assert!(validate_trace_links(&graph, &manifest).is_empty());

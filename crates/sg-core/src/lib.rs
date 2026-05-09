@@ -132,7 +132,7 @@ pub use query::{
 
 pub use trace::{
     validate_trace_links, AnnotationLink, BehaviorTestLink, CodeUseCaseLink, InferredLink,
-    LinksManifest, RiskTestLink, RouteEndpointLink, TestLink,
+    LinksManifest, PolicyTestLink, RegressionTestLink, RiskTestLink, RouteEndpointLink, TestLink,
 };
 pub use validation::{
     built_in_validators, find_validator, ValidatorDefinition, ValidatorExecution,

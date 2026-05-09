@@ -266,7 +266,7 @@ Related areas:
 - [x] Expand link manifest for route-to-endpoint links.
 - [x] Expand link manifest for behavior and risk test links.
 - [x] Validate annotation and inferred link records with trust-state rules.
-- [ ] Add full code annotation parser after manifest schema is stable.
+- [~] Add full code annotation parser after manifest schema is stable.
 - [ ] Add test runner result model.
 - [ ] Add `sg test run --record`.
 - [ ] Add `TestRun` evidence links to `ValidationRun`.
@@ -284,7 +284,7 @@ Related areas:
 - [x] Unknown links in manifest fail validation.
 - [x] Required AC without linked TestCase fails.
 - [x] Spec endpoint without linked route creates traceability finding.
-- [ ] Linked required test failing blocks review/merge.
+- [~] Linked required test failing blocks review/merge.
 - [x] Spec endpoint without observed/accepted route creates drift finding.
 - [x] Migration without owner/rollback/approval/test evidence fails according to policy.
 - [x] Architecture pack detects at least one invalid dependency in a fixture.
