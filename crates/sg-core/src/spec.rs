@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpecProjection {
     pub spec: String,
@@ -18,6 +18,26 @@ pub struct SpecProjection {
     pub requirements: Vec<TextItem>,
     #[serde(default)]
     pub acceptance_criteria: Vec<TextItem>,
+    #[serde(default)]
+    pub risks: Vec<TextItem>,
+    #[serde(default)]
+    pub mitigations: Vec<TextItem>,
+    #[serde(default)]
+    pub expected_behaviors: Vec<TextItem>,
+    #[serde(default)]
+    pub forbidden_behaviors: Vec<TextItem>,
+    #[serde(default)]
+    pub use_cases: Vec<TextItem>,
+    #[serde(default)]
+    pub endpoints: Vec<TextItem>,
+    #[serde(default)]
+    pub entities: Vec<TextItem>,
+    #[serde(default)]
+    pub events: Vec<TextItem>,
+    #[serde(default)]
+    pub data_objects: Vec<TextItem>,
+    #[serde(default)]
+    pub tests: Vec<TextItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,11 +110,150 @@ impl SpecProjection {
             create_edges.push(edge(&spec_id, "HAS_ACCEPTANCE_CRITERION", &criterion_id));
         }
 
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "Risk",
+            "risk",
+            "HAS_RISK",
+            &self.risks,
+            BTreeMap::new(),
+        );
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "Mitigation",
+            "mitigation",
+            "HAS_MITIGATION",
+            &self.mitigations,
+            BTreeMap::new(),
+        );
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "Behavior",
+            "behavior",
+            "HAS_BEHAVIOR",
+            &self.expected_behaviors,
+            BTreeMap::from([("expectation".to_string(), json!("expected"))]),
+        );
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "Behavior",
+            "behavior",
+            "HAS_BEHAVIOR",
+            &self.forbidden_behaviors,
+            BTreeMap::from([("expectation".to_string(), json!("forbidden"))]),
+        );
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "UseCase",
+            "use-case",
+            "HAS_USE_CASE",
+            &self.use_cases,
+            BTreeMap::new(),
+        );
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "Endpoint",
+            "endpoint",
+            "HAS_ENDPOINT",
+            &self.endpoints,
+            BTreeMap::new(),
+        );
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "DomainEntity",
+            "domain-entity",
+            "HAS_ENTITY",
+            &self.entities,
+            BTreeMap::new(),
+        );
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "DomainEvent",
+            "domain-event",
+            "HAS_EVENT",
+            &self.events,
+            BTreeMap::new(),
+        );
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "DataObject",
+            "data-object",
+            "HAS_DATA_OBJECT",
+            &self.data_objects,
+            BTreeMap::new(),
+        );
+        add_text_items(
+            &mut create_nodes,
+            &mut create_edges,
+            &spec_id,
+            &self.spec,
+            "TestCase",
+            "test-case",
+            "HAS_TEST_CASE",
+            &self.tests,
+            BTreeMap::new(),
+        );
+
         GraphDelta {
             create_nodes,
             create_edges,
             ..GraphDelta::default()
         }
+    }
+}
+
+fn add_text_items(
+    create_nodes: &mut Vec<Node>,
+    create_edges: &mut Vec<Edge>,
+    spec_id: &str,
+    spec: &str,
+    node_type: &str,
+    family: &str,
+    edge_type: &str,
+    items: &[TextItem],
+    extra_attrs: BTreeMap<String, Value>,
+) {
+    for item in items {
+        let item_id = node_id(family, &format!("{}/{}", spec, item.id));
+        let mut attributes = BTreeMap::from([
+            ("id".to_string(), json!(item.id)),
+            ("text".to_string(), json!(item.text)),
+        ]);
+        attributes.extend(extra_attrs.clone());
+        create_nodes.push(Node {
+            id: item_id.clone(),
+            stable_key: format!("{}:{}/{}", family, spec, item.id),
+            node_type: node_type.to_string(),
+            attributes,
+        });
+        create_edges.push(edge(spec_id, edge_type, &item_id));
     }
 }
 
@@ -165,11 +324,51 @@ mod tests {
                 id: "AC-001".to_string(),
                 text: "Generic response".to_string(),
             }],
+            risks: vec![TextItem {
+                id: "RISK-001".to_string(),
+                text: "Token leakage".to_string(),
+            }],
+            mitigations: vec![TextItem {
+                id: "MIT-001".to_string(),
+                text: "Use single-use tokens".to_string(),
+            }],
+            expected_behaviors: vec![TextItem {
+                id: "BEH-001".to_string(),
+                text: "Always return generic response".to_string(),
+            }],
+            forbidden_behaviors: vec![TextItem {
+                id: "FB-001".to_string(),
+                text: "Reveal account existence".to_string(),
+            }],
+            use_cases: vec![TextItem {
+                id: "UC-001".to_string(),
+                text: "Request password reset".to_string(),
+            }],
+            endpoints: vec![TextItem {
+                id: "POST-/password-reset".to_string(),
+                text: "POST /password-reset".to_string(),
+            }],
+            entities: vec![TextItem {
+                id: "User".to_string(),
+                text: "User aggregate".to_string(),
+            }],
+            events: vec![TextItem {
+                id: "PasswordResetRequested".to_string(),
+                text: "Reset requested".to_string(),
+            }],
+            data_objects: vec![TextItem {
+                id: "PasswordResetToken".to_string(),
+                text: "Token table".to_string(),
+            }],
+            tests: vec![TextItem {
+                id: "tests/auth.spec.ts::reset".to_string(),
+                text: "Reset test".to_string(),
+            }],
         };
 
         let delta = spec.to_delta();
-        assert_eq!(delta.create_nodes.len(), 4);
-        assert_eq!(delta.create_edges.len(), 4);
+        assert!(delta.create_nodes.len() > 4);
+        assert!(delta.create_edges.len() > 4);
         assert!(delta
             .create_edges
             .iter()
@@ -178,5 +377,17 @@ mod tests {
             .create_edges
             .iter()
             .any(|edge| edge.edge_type == "HAS_ACCEPTANCE_CRITERION"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "HAS_RISK"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "HAS_ENDPOINT"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "HAS_DATA_OBJECT"));
     }
 }

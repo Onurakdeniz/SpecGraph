@@ -3092,6 +3092,7 @@ acceptanceCriteria:
             summary: None,
             requirements: vec![],
             acceptance_criteria: vec![],
+            ..SpecProjection::default()
         };
 
         append_operation(
@@ -3262,6 +3263,7 @@ acceptanceCriteria:
                 id: "AC-001".to_string(),
                 text: "Generic response".to_string(),
             }],
+            ..SpecProjection::default()
         };
 
         let receipt = append_operation(
@@ -3446,6 +3448,7 @@ acceptanceCriteria:
                 id: "AC-001".to_string(),
                 text: "Generic response".to_string(),
             }],
+            ..SpecProjection::default()
         };
         let mut create_delta = projection.to_delta();
         for node in &mut create_delta.create_nodes {
@@ -4442,6 +4445,7 @@ acceptanceCriteria:
                 id: "AC-001".to_string(),
                 text: "Generic response".to_string(),
             }],
+            ..SpecProjection::default()
         };
         append_operation(
             tmp.path(),

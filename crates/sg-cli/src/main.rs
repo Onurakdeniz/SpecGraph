@@ -119,6 +119,9 @@ struct SpecImportArgs {
     actor: String,
     #[arg(long, default_value = "main")]
     graph_branch: String,
+    /// Preview the graph delta without appending an event.
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Debug, Args)]
@@ -658,6 +661,7 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
                 summary: args.summary,
                 requirements: parse_text_items(&args.requirements)?,
                 acceptance_criteria: parse_text_items(&args.acceptance_criteria)?,
+                ..SpecProjection::default()
             };
             let receipt = store.append_operation(AppendOperationOptions {
                 operation: "Spec.Create".to_string(),
@@ -673,7 +677,23 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
         }
         SpecCommand::Import(args) => {
             let path = resolve_path(root, args.path);
-            let receipt = store.import_spec_file(&path, args.actor, args.graph_branch)?;
+            let receipt = if args.dry_run {
+                let bytes = fs::read(&path)?;
+                let projection: SpecProjection = serde_yaml::from_slice(&bytes)?;
+                store.append_operation(AppendOperationOptions {
+                    operation: "Spec.Import".to_string(),
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                    input: json!({
+                        "path": path.display().to_string(),
+                        "spec": projection.spec,
+                    }),
+                    dry_run: true,
+                    delta: projection.to_delta(),
+                })?
+            } else {
+                store.import_spec_file(&path, args.actor, args.graph_branch)?
+            };
             println!("specImported: {}", path.display());
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
@@ -1209,6 +1229,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
             id: "AC-001".to_string(),
             text: "Generic response".to_string(),
         }],
+        ..SpecProjection::default()
     };
     store.append_operation(AppendOperationOptions {
         operation: "Spec.Create".to_string(),

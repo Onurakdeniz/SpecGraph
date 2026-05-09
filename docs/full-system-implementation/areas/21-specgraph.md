@@ -17,11 +17,12 @@ Represent requested changes as typed subgraphs including requirements, ACs, beha
 
 ### Partly Implemented
 
-- Rich spec fields are documented but not fully implemented
+- Rich spec projection now imports risks, mitigations, expected/forbidden behaviors, use cases, endpoints, domain entities/events, data objects, and tests as graph facts.
+- Spec import supports dry-run previews through Operation Runtime receipts.
 
 ### Not Implemented / Remaining
 
-- Rich-spec ontology/import mapping
+- Intended graph delta and operation plan
 - Orphan concept detection
 - Intended graph delta and operation plan
 - Risk/security validators
