@@ -1,8 +1,8 @@
 # 12. Actor and Identity Model
 
 **System area:** Actor and Identity Model  
-**Implementation status:** ⬜ Not implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Implementation status:** 🟡 Partly implemented  
+**Status basis:** code audit and implementation slice on `plan/actor-identity-foundation`.
 
 ## Purpose
 
@@ -14,17 +14,26 @@ Represent who acted, who approved, and which roles or permissions applied when t
 
 - Operation examples include actor fields
 - Docs identify identity model as required
+- Operation receipts now include the operation actor
+- Operation ABI rejects missing/invalid actor identifiers
+- Actor, Role, and Permission graph fact types exist in the core ontology
+- `HAS_ROLE` and `GRANTS_PERMISSION` endpoint validation exists
+- CLI supports actor upsert and role grant operations through the Operation Runtime
 
 ### Partly Implemented
 
-- No complete actor/identity implementation is described
+- Actor registry foundation exists as graph-native `Actor` nodes
+- Role/permission model foundation exists as graph-native `Role` and `Permission` nodes
+- Policy manifests can satisfy required roles from actor graph facts when `--actor` is supplied
+- Local identity provider metadata can be recorded, but external provider mapping is still minimal
 
 ### Not Implemented / Remaining
 
-- Actor registry
-- Role and permission model
 - Signature verification
 - GitHub/GitLab/local identity mapping
+- Role revocation and permission revocation
+- Approval authority checks against role/permission graph facts
+- Signed protected-mode identity events
 
 ## Implementation Parts
 
@@ -46,6 +55,8 @@ Protected operations require actors; approval policies verify roles; signatures 
 - Implement or finish: Role and permission model.
 - Implement or finish: Signature verification.
 - Implement or finish: GitHub/GitLab/local identity mapping.
+- Implement or finish: Role/permission revocation commands.
+- Implement or finish: Approval authority checks from the graph identity model.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 
@@ -66,4 +77,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

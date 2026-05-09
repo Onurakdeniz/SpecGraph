@@ -1,6 +1,7 @@
 use crate::model::{Finding, FindingSeverity, Graph};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use time::format_description::well_known::Rfc3339;
@@ -27,6 +28,8 @@ pub struct PolicyDecision {
 #[serde(rename_all = "camelCase")]
 pub struct PolicyCheckInput {
     pub operation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
     #[serde(default)]
     pub changed_files: Vec<String>,
     #[serde(default)]
@@ -162,8 +165,13 @@ pub fn evaluate_policies_with_manifests(
 ) -> PolicyReport {
     let mut report = evaluate_policies(graph, input);
     for manifest in manifests {
-        let manifest_report =
-            evaluate_policy_manifest_inner(input, manifest, OffsetDateTime::now_utc(), false);
+        let manifest_report = evaluate_policy_manifest_inner(
+            input,
+            manifest,
+            OffsetDateTime::now_utc(),
+            false,
+            Some(graph),
+        );
         report.decisions.extend(manifest_report.decisions);
         report.findings.extend(manifest_report.findings);
     }
@@ -183,7 +191,7 @@ pub fn evaluate_policy_manifest(
     input: &PolicyCheckInput,
     manifest: &PolicyManifest,
 ) -> PolicyReport {
-    evaluate_policy_manifest_inner(input, manifest, OffsetDateTime::now_utc(), true)
+    evaluate_policy_manifest_inner(input, manifest, OffsetDateTime::now_utc(), true, None)
 }
 
 fn evaluate_policy_manifest_inner(
@@ -191,6 +199,7 @@ fn evaluate_policy_manifest_inner(
     manifest: &PolicyManifest,
     now: OffsetDateTime,
     include_waiver_validation: bool,
+    graph: Option<&Graph>,
 ) -> PolicyReport {
     let mut report = PolicyReport {
         decisions: Vec::new(),
@@ -215,8 +224,9 @@ fn evaluate_policy_manifest_inner(
             continue;
         }
 
+        let actor_roles = effective_actor_roles(graph, input);
         let missing_approvals = missing_values(&rule.required_approvals, &input.approvals);
-        let missing_roles = missing_values(&rule.required_roles, &input.actor_roles);
+        let missing_roles = missing_values(&rule.required_roles, &actor_roles);
         if missing_approvals.is_empty()
             && missing_roles.is_empty()
             && rule.effect == PolicyEffect::RequireApproval
@@ -252,6 +262,46 @@ fn evaluate_policy_manifest_inner(
     }
 
     report
+}
+
+fn effective_actor_roles(graph: Option<&Graph>, input: &PolicyCheckInput) -> Vec<String> {
+    let mut roles: BTreeSet<String> = input.actor_roles.iter().cloned().collect();
+    if let (Some(graph), Some(actor_id)) = (graph, input.actor.as_deref()) {
+        roles.extend(graph_actor_roles(graph, actor_id));
+    }
+    roles.into_iter().collect()
+}
+
+fn graph_actor_roles(graph: &Graph, actor_id: &str) -> Vec<String> {
+    let actor_stable_key = format!("actor:{actor_id}");
+    let Some(actor_node) = graph.nodes.values().find(|node| {
+        node.node_type == "Actor"
+            && (node.stable_key == actor_stable_key
+                || node
+                    .attributes
+                    .get("actorId")
+                    .and_then(|value| value.as_str())
+                    == Some(actor_id))
+    }) else {
+        return Vec::new();
+    };
+
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.edge_type == "HAS_ROLE" && edge.from == actor_node.id)
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| node.node_type == "Role")
+        .filter_map(role_name)
+        .collect()
+}
+
+fn role_name(node: &crate::model::Node) -> Option<String> {
+    node.attributes
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
+        .or_else(|| node.stable_key.strip_prefix("role:").map(ToOwned::to_owned))
 }
 
 fn validate_waivers(input: &PolicyCheckInput, now: OffsetDateTime) -> Vec<Finding> {
@@ -428,7 +478,9 @@ fn finding(code: &str, severity: FindingSeverity, message: String) -> Finding {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Graph;
+    use crate::model::{Edge, Graph, Node};
+    use serde_json::json;
+    use std::collections::BTreeMap;
 
     #[test]
     fn denies_secret_file_changes() {
@@ -436,6 +488,7 @@ mod tests {
             &Graph::default(),
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec![".env".to_string()],
                 actor_roles: vec![],
                 approvals: vec![],
@@ -467,6 +520,7 @@ mod tests {
         let report = evaluate_policy_manifest(
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec!["migrations/001.sql".to_string()],
                 actor_roles: vec![],
                 approvals: vec![],
@@ -482,6 +536,7 @@ mod tests {
         let allowed = evaluate_policy_manifest(
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec!["migrations/001.sql".to_string()],
                 actor_roles: vec![],
                 approvals: vec!["data-migration".to_string()],
@@ -515,6 +570,7 @@ mod tests {
         let report = evaluate_policy_manifest(
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec!["docs/readme.md".to_string()],
                 actor_roles: vec![],
                 approvals: vec![],
@@ -526,11 +582,79 @@ mod tests {
     }
 
     #[test]
+    fn manifest_required_role_can_resolve_from_actor_graph() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "node_actor_local_developer".to_string(),
+            Node {
+                id: "node_actor_local_developer".to_string(),
+                stable_key: "actor:local:developer".to_string(),
+                node_type: "Actor".to_string(),
+                attributes: BTreeMap::from([("actorId".to_string(), json!("local:developer"))]),
+            },
+        );
+        graph.nodes.insert(
+            "node_role_maintainer".to_string(),
+            Node {
+                id: "node_role_maintainer".to_string(),
+                stable_key: "role:maintainer".to_string(),
+                node_type: "Role".to_string(),
+                attributes: BTreeMap::from([("name".to_string(), json!("maintainer"))]),
+            },
+        );
+        graph.edges.insert(
+            "edge_actor_role".to_string(),
+            Edge {
+                id: "edge_actor_role".to_string(),
+                stable_key: "edge:node_actor_local_developer:HAS_ROLE:node_role_maintainer"
+                    .to_string(),
+                edge_type: "HAS_ROLE".to_string(),
+                from: "node_actor_local_developer".to_string(),
+                to: "node_role_maintainer".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+        let manifest = PolicyManifest {
+            policies: vec![PolicyRule {
+                id: "policy.custom.maintainer".to_string(),
+                description: None,
+                effect: PolicyEffect::RequireApproval,
+                message: Some("Maintainer role required.".to_string()),
+                operations: vec!["Merge".to_string()],
+                changed_file_globs: vec!["src/**".to_string()],
+                required_approvals: vec![],
+                required_roles: vec!["maintainer".to_string()],
+                waivable: false,
+            }],
+        };
+
+        let report = evaluate_policies_with_manifests(
+            &graph,
+            &PolicyCheckInput {
+                operation: "Merge".to_string(),
+                actor: Some("local:developer".to_string()),
+                changed_files: vec!["src/lib.rs".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![],
+            },
+            &[manifest],
+        );
+
+        assert!(report.findings.is_empty());
+        assert!(report
+            .decisions
+            .iter()
+            .any(|decision| decision.effect == PolicyEffect::Allow));
+    }
+
+    #[test]
     fn built_in_policy_accepts_valid_unexpired_waiver() {
         let report = evaluate_policies(
             &Graph::default(),
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec!["migrations/001.sql".to_string()],
                 actor_roles: vec![],
                 approvals: vec![],
@@ -555,6 +679,7 @@ mod tests {
             &Graph::default(),
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec!["migrations/001.sql".to_string()],
                 actor_roles: vec![],
                 approvals: vec![],
@@ -583,6 +708,7 @@ mod tests {
             &Graph::default(),
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec![],
                 actor_roles: vec![],
                 approvals: vec![],
@@ -626,6 +752,7 @@ mod tests {
         let expired = evaluate_policy_manifest(
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec!["docs/readme.md".to_string()],
                 actor_roles: vec![],
                 approvals: vec![],
@@ -646,6 +773,7 @@ mod tests {
         let valid = evaluate_policy_manifest(
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec!["docs/readme.md".to_string()],
                 actor_roles: vec![],
                 approvals: vec![],
@@ -684,6 +812,7 @@ mod tests {
         let report = evaluate_policy_manifest(
             &PolicyCheckInput {
                 operation: "Merge".to_string(),
+                actor: None,
                 changed_files: vec!["src/lib.rs".to_string()],
                 actor_roles: vec![],
                 approvals: vec![],
