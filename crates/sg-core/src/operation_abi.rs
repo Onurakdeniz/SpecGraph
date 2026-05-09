@@ -468,6 +468,18 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
+
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "TestRun.Record",
+            category: "test",
+            description: "Record normalized test-run and test-result evidence linked to a ValidationRun.",
+            required_input_fields: &["runId", "runner", "results"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["TestRun", "TestResult", "ValidationRun"],
+            allowed_create_edge_types: &["HAS_TEST_RUN", "HAS_TEST_RESULT", "TEST_RESULT_FOR"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Validation.Record",

@@ -19,8 +19,8 @@ This directory breaks the full SpecGraph OS system into one Markdown file per **
 | Status | Count |
 |---|---:|
 | ✅ Fully implemented | 0 |
-| 🟡 Partly implemented | 46 |
-| ⬜ Not implemented | 6 |
+| 🟡 Partly implemented | 47 |
+| ⬜ Not implemented | 5 |
 | **Total** | **52** |
 
 ## Source Markdown Read
@@ -78,7 +78,7 @@ Use the full-system phase-gated roadmap in [phase-gated-implementation-plan.md](
 | 32 | [Linking Standards](areas/32-linking-standards.md) | 🟡 Partly implemented |
 | 33 | [Drift Detection](areas/33-drift-detection.md) | 🟡 Partly implemented |
 | 34 | [Test Mapping](areas/34-test-mapping.md) | 🟡 Partly implemented |
-| 35 | [Test Runner Integration](areas/35-test-runner-integration.md) | ⬜ Not implemented |
+| 35 | [Test Runner Integration](areas/35-test-runner-integration.md) | 🟡 Partly implemented |
 | 36 | [CI Enforcement](areas/36-ci-enforcement.md) | 🟡 Partly implemented |
 | 37 | [Graph Diff and Conflicts](areas/37-graph-diff-and-conflicts.md) | 🟡 Partly implemented |
 | 38 | [Graph Branch, Merge, and Rebase](areas/38-graph-branch-merge-and-rebase.md) | 🟡 Partly implemented |

@@ -11,8 +11,9 @@ use sg_core::{
     GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions, LinksManifest,
     Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal, QueryContext,
     QueryLimits, QueryTarget, RecordApprovalOptions, RecordCommitOptions,
-    RecordPolicyReportOptions, ReplayOptions, Snapshot, SpecGraphStore, SpecProjection, TestLink,
-    TextItem, TransitionSpecOptions, TrustState, UpsertActorOptions,
+    RecordPolicyReportOptions, ReplayOptions, Snapshot, SpecGraphStore, SpecProjection,
+    TestCaseResult, TestLink, TestRunRecord, TestStatus, TextItem, TransitionSpecOptions,
+    TrustState, UpsertActorOptions,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -59,6 +60,8 @@ enum Commands {
     Code(CodeArgs),
     /// Test traceability commands.
     Trace(TraceArgs),
+    /// Test runner integration commands.
+    Test(TestArgs),
     /// CI aggregate validation command.
     Ci(CiArgs),
     /// Proof-of-idea scenario runner.
@@ -545,6 +548,39 @@ struct TraceFileArgs {
 }
 
 #[derive(Debug, Args)]
+struct TestArgs {
+    #[command(subcommand)]
+    command: TestCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum TestCommand {
+    /// Record normalized test run results as graph evidence.
+    Run(TestRunArgs),
+}
+
+#[derive(Debug, Args)]
+struct TestRunArgs {
+    #[arg(long, default_value = "manual")]
+    runner: String,
+    #[arg(long = "run-id")]
+    run_id: Option<String>,
+    #[arg(long = "validation-run-id")]
+    validation_run_id: Option<String>,
+    /// Test result in TEST:STATUS form where STATUS is Passed, Failed, or Skipped.
+    #[arg(long = "case", value_name = "TEST:STATUS")]
+    cases: Vec<String>,
+    #[arg(long)]
+    commit: Option<String>,
+    #[arg(long)]
+    record: bool,
+    #[arg(long, default_value = "local:tester")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
 struct CiArgs {
     #[command(subcommand)]
     command: CiCommand,
@@ -668,6 +704,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Git(args) => handle_git(&store, &root, args)?,
         Commands::Code(args) => handle_code(&store, &root, args)?,
         Commands::Trace(args) => handle_trace(&store, &root, args)?,
+        Commands::Test(args) => handle_test(&store, args)?,
         Commands::Ci(args) => handle_ci(&store, &root, args)?,
         Commands::Proof(args) => handle_proof(args)?,
         Commands::Graph(args) => handle_graph(&store, &root, args)?,
@@ -1229,6 +1266,63 @@ fn handle_trace(store: &SpecGraphStore, root: &Path, args: TraceArgs) -> anyhow:
         }
     }
     Ok(())
+}
+
+fn handle_test(store: &SpecGraphStore, args: TestArgs) -> anyhow::Result<()> {
+    match args.command {
+        TestCommand::Run(args) => {
+            let run_id = args.run_id.unwrap_or_else(|| validation_run_id("test-run"));
+            let validation_run_id = args
+                .validation_run_id
+                .unwrap_or_else(|| format!("validation-{run_id}"));
+            let results = args
+                .cases
+                .iter()
+                .map(|case| parse_test_case_result(case))
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            let record = TestRunRecord {
+                run_id: run_id.clone(),
+                runner: args.runner,
+                validation_run_id,
+                commit: args.commit,
+                results,
+            };
+            if args.record {
+                let receipt = store.append_operation(AppendOperationOptions {
+                    operation: "TestRun.Record".to_string(),
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                    input: json!({"runId": run_id, "runner": record.runner, "results": record.results}),
+                    delta: record.to_delta(),
+                    dry_run: false,
+                })?;
+                println!("testRunRecorded: {}", record.run_id);
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            } else {
+                println!("testRun: {} cases={}", record.run_id, record.results.len());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_test_case_result(input: &str) -> anyhow::Result<TestCaseResult> {
+    let Some((test, status)) = input.split_once(':') else {
+        bail!("test case result must be TEST:STATUS");
+    };
+    let status = match status {
+        "Passed" | "passed" => TestStatus::Passed,
+        "Failed" | "failed" => TestStatus::Failed,
+        "Skipped" | "skipped" => TestStatus::Skipped,
+        _ => bail!("test status must be Passed, Failed, or Skipped"),
+    };
+    Ok(TestCaseResult {
+        test: test.to_string(),
+        status,
+        file: None,
+        duration_ms: None,
+    })
 }
 
 fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Result<()> {

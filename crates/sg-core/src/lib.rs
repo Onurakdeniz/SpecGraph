@@ -32,6 +32,7 @@ pub mod query;
 pub mod spec;
 pub mod stable_key;
 pub mod store;
+pub mod test_runner;
 pub mod trace;
 pub mod validation;
 pub use git::{
@@ -130,6 +131,10 @@ pub use query::{
     QueryTarget,
 };
 
+pub use test_runner::{
+    test_result_node_id, test_run_node_id, validate_required_tests_pass, TestCaseResult,
+    TestRunRecord, TestStatus,
+};
 pub use trace::{
     validate_trace_links, AnnotationLink, BehaviorTestLink, CodeUseCaseLink, InferredLink,
     LinksManifest, PolicyTestLink, RegressionTestLink, RiskTestLink, RouteEndpointLink, TestLink,
@@ -140,5 +145,5 @@ pub use validation::{
     VALIDATOR_ARCHITECTURE_PACK, VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE, VALIDATOR_DRIFT,
     VALIDATOR_GIT_BINDING, VALIDATOR_MIGRATION_RUNTIME, VALIDATOR_ONTOLOGY,
     VALIDATOR_ONTOLOGY_PACK, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT,
-    VALIDATOR_TRACE_LINKS,
+    VALIDATOR_TEST_RUNNER, VALIDATOR_TRACE_LINKS,
 };

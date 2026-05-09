@@ -11,6 +11,7 @@ pub const VALIDATOR_OPERATION_ABI: &str = "validator.operation_abi";
 pub const VALIDATOR_POLICY: &str = "validator.policy";
 pub const VALIDATOR_SNAPSHOT: &str = "validator.snapshot";
 pub const VALIDATOR_TRACE_LINKS: &str = "validator.trace_links";
+pub const VALIDATOR_TEST_RUNNER: &str = "validator.test_runner";
 pub const VALIDATOR_ADAPTER_TRUST: &str = "validator.adapter_trust";
 pub const VALIDATOR_ARCHITECTURE_PACK: &str = "validator.architecture_pack";
 pub const VALIDATOR_MIGRATION_RUNTIME: &str = "validator.migration_runtime";
@@ -87,6 +88,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Graph Branch, Merge, and Rebase",
             description: "Validates graph branch base metadata against event replay.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_TEST_RUNNER,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Test Runner Integration",
+            description: "Validates TestRun/TestResult evidence and required linked test pass/fail state.",
         },
         ValidatorDefinition {
             id: VALIDATOR_TRACE_LINKS,
