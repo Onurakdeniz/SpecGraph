@@ -1367,6 +1367,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
             test: "test:identity/password-reset/generic-response".to_string(),
             acceptance_criterion: "AUTH-001/AC-001".to_string(),
         }],
+        ..LinksManifest::default()
     };
     let trace_delta = trace_links_delta(&replay.graph, &manifest.links)?;
     store.append_operation(AppendOperationOptions {
