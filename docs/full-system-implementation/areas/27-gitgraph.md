@@ -17,6 +17,10 @@ Represent Git repositories, branches, commits, PRs, tags, remotes, graph snapsho
 
 ### Partly Implemented
 
+- GitGraph projection now models `GitRemote`, `GitBranch`, `GitCommit`, `GitTag`, `GitMerge`, and `PullRequest` placeholder facts.
+- Graph edges capture branch heads, remotes, commit ancestry, tags, merge base/head/result, and PR source/target branches.
+- `GitGraph.Record` Operation ABI entry accepts the expanded GitGraph facts.
+
 - Branch and commit foundations exist
 - PR, tag, remote, merge graph are not complete
 

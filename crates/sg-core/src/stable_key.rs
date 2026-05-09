@@ -150,6 +150,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "finding:run-001/0/trace.missing",
     },
     StableKeyFamily {
+        prefix: "git-remote",
+        description: "Git remote fact",
+        example: "git-remote:origin",
+    },
+    StableKeyFamily {
         prefix: "git-branch",
         description: "Git branch fact",
         example: "git-branch:spec/AUTH-001-password-reset",
@@ -158,6 +163,21 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "git-commit",
         description: "Git commit fact",
         example: "git-commit:abc123",
+    },
+    StableKeyFamily {
+        prefix: "git-tag",
+        description: "Git tag fact",
+        example: "git-tag:v0.1.0",
+    },
+    StableKeyFamily {
+        prefix: "git-merge",
+        description: "Git merge fact",
+        example: "git-merge:merge-001",
+    },
+    StableKeyFamily {
+        prefix: "pull-request",
+        description: "Pull request placeholder fact",
+        example: "pull-request:github/123",
     },
     StableKeyFamily {
         prefix: "graph-snapshot",

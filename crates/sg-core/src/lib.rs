@@ -14,6 +14,7 @@ pub mod code_indexer;
 pub mod data_graph;
 pub mod drift;
 pub mod git;
+pub mod git_graph;
 pub mod graph_merge;
 pub mod hashing;
 pub mod identity;
@@ -36,6 +37,12 @@ pub mod validation;
 pub use git::{
     parse_commit_trailers, validate_changed_files_against_action_group, validate_commit_binding,
     validate_commit_plan_requirements, CommitTrailers, CommitValidationInput,
+};
+pub use git_graph::{
+    branch_node_id as git_branch_node_id, commit_node_id as git_commit_node_id,
+    merge_node_id as git_merge_node_id, pull_request_node_id, remote_node_id as git_remote_node_id,
+    tag_node_id as git_tag_node_id, GitBranchFact, GitCommitFact, GitGraphProjection, GitMergeFact,
+    GitRemoteFact, GitTagFact, PullRequestFact,
 };
 pub use hashing::state_hash;
 pub use identity::{infer_actor_kind, resolve_actor_identity, ActorIdentity, ActorKind};
