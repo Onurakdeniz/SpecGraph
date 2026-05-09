@@ -118,7 +118,7 @@ Related areas:
 - [x] Add strict event schema validation during replay.
 - [x] Add event sequence, previous-event, pre-state, and post-state continuity checks.
 - [x] Add snapshot verification against replayed state hash.
-- [~] Add stable-key parser and formatter.
+- [x] Add central stable-key registry with parser, formatter, built-in core families, and remediation-rich errors.
 - [x] Add duplicate stable-key detection.
 - [x] Add deterministic query API with stable ordering.
 - [x] Add query cost/limit placeholders.
