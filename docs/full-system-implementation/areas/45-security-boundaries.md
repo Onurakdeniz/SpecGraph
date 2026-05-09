@@ -21,6 +21,7 @@ Protect trusted core from malicious LLMs, hook bypass, event tampering, secret l
 
 - Hashing, policies, locks, proposal states are foundations
 - Dependency and trust-promotion checks are now automated for the current compact Rust workspace
+- Event replay now rejects sequence gaps, previous-event chain breaks, and pre/post hash tampering
 - Signatures/capabilities/sandboxing remain
 
 ### Not Implemented / Remaining
@@ -42,7 +43,7 @@ Policy checks and `python3 scripts/check_architecture_boundaries.py` now; future
 
 ### 3. Validation and Policy Gates
 
-CI repeats checks, hash chain, architecture boundary checks, deny secrets/production by default, migrations require approval, packs are locked/signed/sandboxed
+CI repeats checks, event hash/previous-event chain validation, architecture boundary checks, deny secrets/production by default, migrations require approval, packs are locked/signed/sandboxed
 
 ### 4. Implementation Work Items
 
