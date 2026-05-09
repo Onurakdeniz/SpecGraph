@@ -14,6 +14,7 @@ Enforce that JSONL events win over snapshots, SQLite caches, YAML/Markdown proje
 
 - Project docs define source-of-truth hierarchy
 - README says JSONL is canonical and caches are derived
+- `sg graph rebuild` now recreates derived snapshots and indexes from canonical JSONL events
 
 ### Partly Implemented
 
@@ -22,7 +23,7 @@ Enforce that JSONL events win over snapshots, SQLite caches, YAML/Markdown proje
 
 ### Not Implemented / Remaining
 
-- Cache invalidation/rebuild for all derived state
+- Automatic invalidation/rebuild for every future derived projection type
 - Trust labels for imports/observations/proposals
 - Stale projection diagnostics
 
@@ -34,16 +35,17 @@ Trusted graph facts, projections, observations, snapshots, indexes, Git context
 
 ### 2. Commands / APIs
 
-Spec import, trace import, adopt scan, code index, proposal commands
+Spec import, trace import, adopt scan, code index, proposal commands, `sg graph rebuild`
 
 ### 3. Validation and Policy Gates
 
-If derived state disagrees with replayed events, replay wins and derived state is rebuilt
+If derived state disagrees with replayed events, replay wins and derived snapshots/indexes can be rebuilt from events only
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Cache invalidation/rebuild for all derived state.
+- Preserve explicit rebuild behavior for snapshots/indexes and extend it to future derived state.
+- Implement or finish: Automatic invalidation/rebuild for all derived state.
 - Implement or finish: Trust labels for imports/observations/proposals.
 - Implement or finish: Stale projection diagnostics.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
@@ -54,6 +56,7 @@ If derived state disagrees with replayed events, replay wins and derived state i
 - The documented commands/APIs work for the happy path and at least one intentional failure path.
 - Validation findings identify the graph object, file or command involved, and remediation.
 - The area can be exercised from CLI/CI without relying on untrusted direct mutation.
+- Derived snapshots/indexes can be deleted or tampered with and recreated from the event log without changing trusted facts.
 
 ## Source Notes
 
