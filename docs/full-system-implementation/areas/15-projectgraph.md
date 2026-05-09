@@ -2,7 +2,7 @@
 
 **System area:** ProjectGraph  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** fresh Phase 3.1 implementation audit after adding graph-native project profile facts.
 
 ## Purpose
 
@@ -14,16 +14,20 @@ Represent project identity, type, languages, architecture style, runtime topolog
 
 - sg init creates .specgraph metadata and Project node per MVP backlog
 - ProjectGraph is documented
+- Project profile fact ontology now includes `ProjectType`, `Language`, `ArchitectureStyle`, `PackageManager`, `TestRunner`, and `CIProvider` nodes.
+- `Project.ProfileUpsert` is registered in the Operation ABI and can accept the profile fact nodes and their Project edges.
+- Built-in ontology validation enforces singleton Project profile edges for type, architecture, package manager, test runner, and CI provider.
 
 ### Partly Implemented
 
 - Basic Project exists
-- Full project profile commands and tooling graph are not implemented
+- Graph-native project profile facts exist in `sg-core` and can be routed through Operation Runtime.
+- Dedicated CLI commands and automatic repository detection are not complete.
 
 ### Not Implemented / Remaining
 
-- Project type/language/package/test/CI detection
-- Commands to update architecture
+- Automatic project type/language/package/test/CI detection
+- Commands to update architecture/profile facts
 - Pack/profile compatibility validation
 
 ## Implementation Parts
@@ -43,7 +47,7 @@ Project metadata drives pack selection, indexers, test runner integration, polic
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Project type/language/package/test/CI detection.
+- Implement or finish: automatic Project type/language/package/test/CI detection and CLI/profile commands.
 - Implement or finish: Commands to update architecture.
 - Implement or finish: Pack/profile compatibility validation.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.

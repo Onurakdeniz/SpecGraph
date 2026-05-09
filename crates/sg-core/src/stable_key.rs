@@ -50,6 +50,16 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "approval:APPROVAL-001",
     },
     StableKeyFamily {
+        prefix: "architecture-style",
+        description: "Project architecture style profile fact",
+        example: "architecture-style:hexagonal",
+    },
+    StableKeyFamily {
+        prefix: "ci-provider",
+        description: "Project continuous integration provider profile fact",
+        example: "ci-provider:github-actions",
+    },
+    StableKeyFamily {
         prefix: "code-file",
         description: "Observed or accepted code file",
         example: "code-file:src/identity/password-reset.js",
@@ -90,9 +100,19 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "graph-snapshot:sha256:abc123",
     },
     StableKeyFamily {
+        prefix: "language",
+        description: "Project implementation language profile fact",
+        example: "language:typescript",
+    },
+    StableKeyFamily {
         prefix: "module",
         description: "Project module",
         example: "module:Identity",
+    },
+    StableKeyFamily {
+        prefix: "package-manager",
+        description: "Project package manager profile fact",
+        example: "package-manager:npm",
     },
     StableKeyFamily {
         prefix: "ontology-pack",
@@ -125,6 +145,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "project:demo",
     },
     StableKeyFamily {
+        prefix: "project-type",
+        description: "Project type profile fact",
+        example: "project-type:backend-api",
+    },
+    StableKeyFamily {
         prefix: "proposal",
         description: "Untrusted proposal",
         example: "proposal:PROP-001",
@@ -143,6 +168,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "spec",
         description: "SpecGraph spec",
         example: "spec:AUTH-001",
+    },
+    StableKeyFamily {
+        prefix: "test-runner",
+        description: "Project test runner profile fact",
+        example: "test-runner:vitest",
     },
     StableKeyFamily {
         prefix: "test-case",
@@ -344,6 +374,12 @@ mod tests {
             "git-branch",
             "git-commit",
             "graph-snapshot",
+            "language",
+            "project-type",
+            "architecture-style",
+            "package-manager",
+            "test-runner",
+            "ci-provider",
             "ontology-pack",
             "ontology-migration",
             "ontology-version",
