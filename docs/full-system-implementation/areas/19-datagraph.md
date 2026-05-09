@@ -16,6 +16,9 @@ Represent domain data, persistence structures, read models, queries, migrations,
 
 ### Partly Implemented
 
+- Cross-domain traceability validator now checks architecture, data, and security facts for links to code, tests, or policy evidence.
+- `Trace.CrossDomain` Operation ABI records `TRACE_TO_CODE`, `TRACE_TO_TEST`, and `TRACE_TO_POLICY` edges without bypassing runtime validation.
+
 - Policy foundation can express migration approvals.
 - DataGraph projection now models `Table`, `Column`, `DataContract`, table ownership, contract coverage, and consumers.
 - Built-in validation requires each table to have exactly one owning module and at least one column.

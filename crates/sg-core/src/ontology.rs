@@ -218,6 +218,9 @@ impl MvpOntology {
                 "HAS_TEST_RUN",
                 "HAS_TEST_RESULT",
                 "TEST_RESULT_FOR",
+                "TRACE_TO_CODE",
+                "TRACE_TO_TEST",
+                "TRACE_TO_POLICY",
                 "HAS_VALIDATOR_EXECUTION",
                 "HAS_FINDING",
                 "HAS_POLICY_DECISION",
@@ -1206,6 +1209,30 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "HAS_TEST_RUN" => Some((&["ValidationRun"], &["TestRun"])),
         "HAS_TEST_RESULT" => Some((&["TestRun"], &["TestResult"])),
         "TEST_RESULT_FOR" => Some((&["TestResult"], &["TestCase"])),
+        "TRACE_TO_CODE" => Some((
+            &[
+                "ArchitectureConstraint",
+                "DataContract",
+                "Table",
+                "Risk",
+                "PolicyRequirement",
+            ],
+            &["CodeFile", "CodeSymbol", "CodeRoute"],
+        )),
+        "TRACE_TO_TEST" => Some((
+            &[
+                "ArchitectureConstraint",
+                "DataContract",
+                "Table",
+                "Risk",
+                "PolicyRequirement",
+            ],
+            &["TestCase", "TestRun", "ValidationRun"],
+        )),
+        "TRACE_TO_POLICY" => Some((
+            &["ArchitectureConstraint", "DataContract", "Table", "Risk"],
+            &["PolicyRequirement", "PolicyDecision", "Approval", "Waiver"],
+        )),
         "VALIDATED_BY" => Some((
             &["Project", "Spec", "GitCommit", "CodeFile", "TestCase"],
             &["ValidationRun"],

@@ -278,6 +278,7 @@ Related areas:
 - [x] Add table ownership model.
 - [x] Add migration rollback strategy model.
 - [x] Add migration approval/test evidence validator.
+- [x] Add architecture/data/security cross-domain traceability validator.
 
 ### Gate Checks
 

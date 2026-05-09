@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 pub const CORE_VALIDATOR_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const VALIDATOR_CODE_SCOPE: &str = "validator.code_scope";
+pub const VALIDATOR_CROSS_DOMAIN_TRACE: &str = "validator.cross_domain_trace";
 pub const VALIDATOR_BRANCH_METADATA: &str = "validator.branch_metadata";
 pub const VALIDATOR_GIT_BINDING: &str = "validator.git_binding";
 pub const VALIDATOR_ONTOLOGY: &str = "validator.ontology";
@@ -76,6 +77,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Git Enforcement",
             description: "Validates commit trailers against graph specs, action groups, and commit plans.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_CROSS_DOMAIN_TRACE,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Architecture/data/security traceability",
+            description: "Validates cross-domain traceability from architecture, data, and security facts to code, tests, and policies.",
         },
         ValidatorDefinition {
             id: VALIDATOR_CODE_SCOPE,

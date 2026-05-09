@@ -469,6 +469,18 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
 
+
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Trace.CrossDomain",
+            category: "trace",
+            description: "Record architecture, data, and security traceability to code, tests, and policies.",
+            required_input_fields: &["links"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[],
+            allowed_create_edge_types: &["TRACE_TO_CODE", "TRACE_TO_TEST", "TRACE_TO_POLICY"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "TestRun.Record",

@@ -19,6 +19,9 @@ Protect trusted core from malicious LLMs, hook bypass, event tampering, secret l
 
 ### Partly Implemented
 
+- Cross-domain traceability validator now checks architecture, data, and security facts for links to code, tests, or policy evidence.
+- `Trace.CrossDomain` Operation ABI records `TRACE_TO_CODE`, `TRACE_TO_TEST`, and `TRACE_TO_POLICY` edges without bypassing runtime validation.
+
 - Hashing, policies, locks, proposal states are foundations
 - Dependency and trust-promotion checks are now automated for the current compact Rust workspace
 - Event replay now rejects sequence gaps, previous-event chain breaks, and pre/post hash tampering

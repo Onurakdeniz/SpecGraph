@@ -55,6 +55,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "adapter:postgres-user-repository",
     },
     StableKeyFamily {
+        prefix: "architecture-constraint",
+        description: "Architecture rule or constraint fact",
+        example: "architecture-constraint:hexagonal/no-infra-to-interface",
+    },
+    StableKeyFamily {
         prefix: "architecture-style",
         description: "Project architecture style profile fact",
         example: "architecture-style:hexagonal",
