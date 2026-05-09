@@ -87,7 +87,10 @@ pub use adapter::{
     validate_adapter_delta, AdapterCapability, AdapterDescriptor, ADOPTION_ADAPTER_ID,
     CODE_INDEXER_ADAPTER_ID, SOURCE_TRUST_OBSERVATION, TRUST_STATE_OBSERVED,
 };
-pub use adoption::{scan_repository, AdoptionMode};
+pub use adoption::{
+    adoption_report_delta, adoption_report_from_delta, scan_repository, AdoptionFinding,
+    AdoptionMode, AdoptionReport, AdoptionSeverity,
+};
 pub use architecture_graph::{
     adapter_node_id, dependency_boundary_node_id, port_node_id, AdapterDefinition,
     ArchitectureGraphProjection, DependencyCall, ForbiddenDependency, PortDefinition,

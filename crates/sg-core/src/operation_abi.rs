@@ -532,7 +532,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             description: "Record observed CodeFile baseline facts for an existing repo.",
             required_input_fields: &["mode"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
-            allowed_create_node_types: &["CodeFile"],
+            allowed_create_node_types: &["CodeFile", "AdoptionReport", "AdoptionBaseline"],
             allowed_create_edge_types: &[],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },

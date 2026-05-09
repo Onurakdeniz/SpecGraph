@@ -45,6 +45,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "actor:local:developer",
     },
     StableKeyFamily {
+        prefix: "adoption-report",
+        description: "Existing repository adoption scan report",
+        example: "adoption-report:observe/42",
+    },
+    StableKeyFamily {
         prefix: "approval",
         description: "Approval evidence",
         example: "approval:APPROVAL-001",

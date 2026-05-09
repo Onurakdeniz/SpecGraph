@@ -317,9 +317,9 @@ Related areas:
 - [x] Add invalidation rules.
 - [x] Add `RevalidationQueue` model.
 - [x] Add action replan trigger from impact analysis.
-- [~] Finish `sg init --adopt` flow.
-- [ ] Add adoption module inference.
-- [~] Add adoption reports for observe/warn/enforce-new-work/strict.
+- [~] Finish `sg init --adopt` flow with report-backed scan output.
+- [x] Add adoption module inference.
+- [x] Add adoption reports for observe/warn/enforce-new-work/strict.
 - [ ] Add IssueGraph lifecycle.
 - [ ] Add failing-test-before-fix policy.
 - [ ] Add root cause classification.
@@ -332,8 +332,8 @@ Related areas:
 - [x] Graph merge records a merge dry-run event plan and validates post-merge state.
 - [x] Rebase detects invalidated actions and requires replan.
 - [x] Impact analysis produces deterministic direct and indirect impacts.
-- [~] Existing repo observe mode never blocks legacy code.
-- [~] enforce-new-work mode blocks only new governed work.
+- [x] Existing repo observe mode never blocks legacy code.
+- [x] enforce-new-work mode blocks only new governed work.
 - [ ] Reproducible bug fix cannot close without required regression evidence.
 - [ ] Ontology change cannot release without tests and migration plan.
 

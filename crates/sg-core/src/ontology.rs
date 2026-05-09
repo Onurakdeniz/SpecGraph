@@ -121,6 +121,7 @@ impl MvpOntology {
                 "MergeConflict",
                 "Observation",
                 "AdoptionBaseline",
+                "AdoptionReport",
                 "RevalidationQueue",
             ]
             .into_iter()
