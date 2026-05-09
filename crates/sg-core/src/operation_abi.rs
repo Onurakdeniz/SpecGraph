@@ -322,6 +322,23 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             allowed_create_edge_types: &["HAS_EXECUTION_ATTEMPT", "DEPENDS_ON", "REPLANNED_BY"],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
+
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "GitGraph.Record",
+            category: "git",
+            description: "Record branch, commit, tag, remote, merge, and PR placeholder facts.",
+            required_input_fields: &["gitGraph"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["GitRemote", "GitBranch", "GitCommit", "GitTag", "GitMerge", "PullRequest"],
+            allowed_create_edge_types: &[
+                "HAS_GIT_REMOTE", "HAS_GIT_BRANCH", "HAS_GIT_COMMIT", "HAS_GIT_TAG",
+                "TRACKS_REMOTE", "POINTS_TO_COMMIT", "PARENT_COMMIT", "TAGS_COMMIT",
+                "MERGES_BASE", "MERGES_HEAD", "PRODUCES_COMMIT", "HAS_PULL_REQUEST",
+                "PR_FROM_BRANCH", "PR_TARGET_BRANCH",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "GitCommit.Record",

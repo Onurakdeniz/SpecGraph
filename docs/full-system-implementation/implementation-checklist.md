@@ -219,7 +219,7 @@ Related areas:
 - [x] Add action dependencies and ordering.
 - [x] Expand CommitPlan schema with category, required validation, allowed files, and expected delta.
 - [x] Add GraphDelta trailer support where practical.
-- [~] Expand GitGraph with repository and PR placeholder facts.
+- [x] Expand GitGraph with repository and PR placeholder facts.
 - [~] Ensure CI repeats every hook validation.
 - [ ] Add machine-readable CI output.
 
