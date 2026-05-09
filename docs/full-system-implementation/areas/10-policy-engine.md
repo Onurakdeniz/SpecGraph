@@ -36,6 +36,7 @@ Implement deterministic policy decisions with built-in rules and declarative man
 - Hosting-provider approval sync
 - Policy pack test harness
 - Pack-provided non-waivable policy registry beyond the built-in list
+- Team-scale policy changes now feed impact-driven revalidation queues and action continuation blockers
 
 ## Implementation Parts
 
@@ -87,3 +88,8 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
+
+### Phase 5.7 Policy Impact Replan
+
+- Policy changes can be supplied as impact roots and expanded into affected validations, commit plans, and actions.
+- Affected in-flight actions must be replanned before continuation, preventing old policy assumptions from leaking into team-scale work.

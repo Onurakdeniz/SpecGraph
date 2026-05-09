@@ -21,6 +21,7 @@ Compute what specs, actions, tests, code, data, and policies need revalidation a
 - Direct and indirect traversal is deterministic
 - Impact invalidation rules create graph-native `RevalidationQueue` entries for validations, test runs, findings, commit plans, and actions
 - Invalidated actions can produce a replan delta before continuation
+- Policy/impact changes produce continuation blockers for affected actions until replan occurs
 
 ### Not Implemented / Remaining
 
@@ -72,3 +73,9 @@ This file was derived from the full-system matrix built from these Markdown sour
 - Validation runs, validator executions, findings, test runs, commit plans, and action nodes are queue targets.
 - Queued actions and commit plans set `replanRequired`; `replan_delta_from_queue` marks affected ActionNodes `Replanned` with impact provenance.
 - `Impact.Revalidate` is registered in the Operation ABI for recording queue facts through the runtime.
+
+### Phase 5.7 Policy Impact Replan
+
+- `policy_impact_replan` expands changed policy nodes through impact traversal and builds a revalidation queue.
+- Affected Ready/InProgress/Blocked/Failed actions become continuation blockers until replanned.
+- Completed actions are tracked as impacted but do not block continuation.
