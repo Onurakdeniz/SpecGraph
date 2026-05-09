@@ -18,14 +18,15 @@ Support legacy repos through observed baselines and gradual enforcement modes.
 ### Partly Implemented
 
 - Scan modes exist as foundation
-- Full detection/inference/baseline workflow needs expansion
+- Deterministic adoption reports exist for observe, warn, enforce-new-work, and strict modes
+- Source language/tool detection and path-based module inference exist
+- Enforcement gates distinguish legacy observations from new governed work
 
 ### Not Implemented / Remaining
 
 - init --adopt full flow
-- Language/tool/test detection
-- Module inference
-- Adoption reports
+- Test detection beyond current language/tool scan
+- Full baseline-to-accepted-fact workflow
 
 ## Implementation Parts
 
@@ -45,9 +46,8 @@ Observe reports only, warn warns, enforce-new-work blocks new governed work, str
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: init --adopt full flow.
-- Implement or finish: Language/tool/test detection.
-- Implement or finish: Module inference.
-- Implement or finish: Adoption reports.
+- Implement or finish: Test detection beyond current language/tool scan.
+- Implement or finish: Full baseline-to-accepted-fact workflow.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 
@@ -69,3 +69,10 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
 
+
+### Phase 5.4 Adoption Reports
+
+- `adoption_report_from_delta` creates deterministic reports from observed `CodeFile` facts.
+- Reports include observed files, languages, inferred tools, inferred modules, findings, and blocking status.
+- Observe and warn modes never block legacy observations; enforce-new-work blocks only explicitly new governed files; strict mode blocks unclassified legacy facts.
+- `ExistingRepo.Adopt` can now record `AdoptionReport` and `AdoptionBaseline` facts alongside observed files.
