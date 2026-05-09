@@ -2,7 +2,8 @@ use crate::git::{parse_commit_trailers, validate_commit_binding, CommitValidatio
 use crate::hashing::state_hash;
 use crate::model::{
     Edge, Event, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt,
-    OperationRequest, Snapshot, EVENT_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION,
+    OperationRequest, Snapshot, EVENT_SCHEMA_VERSION, OPERATION_RECEIPT_SCHEMA_VERSION,
+    OPERATION_REQUEST_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION,
 };
 use crate::ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
 use crate::ontology_pack::{load_pack, validate_pack, OntologyPackManifest};
@@ -457,6 +458,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
     let post_state_hash = state_hash(&graph, CORE_ONTOLOGY_VERSION);
 
     let request = OperationRequest {
+        schema_version: OPERATION_REQUEST_SCHEMA_VERSION.to_string(),
         operation_id: operation_id.clone(),
         operation: "Project.Init".to_string(),
         actor: options.actor.clone(),
@@ -520,6 +522,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
     append_event(&sg_dir.join("events").join("00000001.jsonl"), &event)?;
 
     let receipt = OperationReceipt {
+        schema_version: OPERATION_RECEIPT_SCHEMA_VERSION.to_string(),
         operation_id,
         operation: request.operation,
         actor: request.actor,
@@ -1216,6 +1219,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         .expect("RFC3339 formatting should succeed");
 
     let request = OperationRequest {
+        schema_version: OPERATION_REQUEST_SCHEMA_VERSION.to_string(),
         operation_id: operation_id.clone(),
         operation: options.operation,
         actor: options.actor,
@@ -1271,6 +1275,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
     let post_state_hash = state_hash(&graph, CORE_ONTOLOGY_VERSION);
 
     let mut receipt = OperationReceipt {
+        schema_version: OPERATION_RECEIPT_SCHEMA_VERSION.to_string(),
         operation_id: operation_id.clone(),
         operation: request.operation.clone(),
         actor: request.actor.clone(),

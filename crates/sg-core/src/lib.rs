@@ -33,6 +33,7 @@ pub use ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
 pub use operation_abi::{
     built_in_operations, find_operation, validate_operation_postconditions,
     validate_operation_preconditions, validate_operation_request, OperationDefinition,
+    OPERATION_DEFINITION_SCHEMA_VERSION,
 };
 pub use spec::{SpecProjection, TextItem};
 pub use stable_key::{

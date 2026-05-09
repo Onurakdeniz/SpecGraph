@@ -13,6 +13,8 @@ pub const EDGE_SCHEMA_VERSION: &str = "specgraph.edge/v1";
 pub const GRAPH_DELTA_SCHEMA_VERSION: &str = "specgraph.graph-delta/v1";
 pub const EVENT_SCHEMA_VERSION: &str = "specgraph.event/v1";
 pub const SNAPSHOT_SCHEMA_VERSION: &str = "specgraph.snapshot/v1";
+pub const OPERATION_REQUEST_SCHEMA_VERSION: &str = "specgraph.operation-request/v1";
+pub const OPERATION_RECEIPT_SCHEMA_VERSION: &str = "specgraph.operation-receipt/v1";
 
 fn event_schema_version() -> String {
     EVENT_SCHEMA_VERSION.to_string()
@@ -20,6 +22,14 @@ fn event_schema_version() -> String {
 
 fn snapshot_schema_version() -> String {
     SNAPSHOT_SCHEMA_VERSION.to_string()
+}
+
+fn operation_request_schema_version() -> String {
+    OPERATION_REQUEST_SCHEMA_VERSION.to_string()
+}
+
+fn operation_receipt_schema_version() -> String {
+    OPERATION_RECEIPT_SCHEMA_VERSION.to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +133,8 @@ pub struct Event {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OperationRequest {
+    #[serde(default = "operation_request_schema_version")]
+    pub schema_version: String,
     pub operation_id: String,
     pub operation: String,
     pub actor: String,
@@ -138,6 +150,8 @@ pub struct OperationRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OperationReceipt {
+    #[serde(default = "operation_receipt_schema_version")]
+    pub schema_version: String,
     pub operation_id: String,
     pub operation: String,
     #[serde(default)]
@@ -369,6 +383,14 @@ mod tests {
         assert_eq!(GRAPH_DELTA_SCHEMA_VERSION, "specgraph.graph-delta/v1");
         assert_eq!(EVENT_SCHEMA_VERSION, "specgraph.event/v1");
         assert_eq!(SNAPSHOT_SCHEMA_VERSION, "specgraph.snapshot/v1");
+        assert_eq!(
+            OPERATION_REQUEST_SCHEMA_VERSION,
+            "specgraph.operation-request/v1"
+        );
+        assert_eq!(
+            OPERATION_RECEIPT_SCHEMA_VERSION,
+            "specgraph.operation-receipt/v1"
+        );
 
         let event = Event {
             schema_version: EVENT_SCHEMA_VERSION.to_string(),
@@ -404,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_event_and_snapshot_json_deserialize_with_schema_defaults() {
+    fn legacy_event_snapshot_and_operation_json_deserialize_with_schema_defaults() {
         let event: Event = serde_json::from_value(json!({
             "eventId": "evt_legacy",
             "sequence": 1,
@@ -433,5 +455,30 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(snapshot.schema_version, SNAPSHOT_SCHEMA_VERSION);
+
+        let request: OperationRequest = serde_json::from_value(json!({
+            "operationId": "op_legacy",
+            "operation": "Project.Init",
+            "actor": "local:test",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "ontologyVersion": "core@0.1.0",
+            "graphBranch": "main",
+            "dryRun": false,
+            "input": {"projectName": "demo"}
+        }))
+        .unwrap();
+        assert_eq!(request.schema_version, OPERATION_REQUEST_SCHEMA_VERSION);
+
+        let receipt: OperationReceipt = serde_json::from_value(json!({
+            "operationId": "op_legacy",
+            "operation": "Project.Init",
+            "actor": "local:test",
+            "accepted": true,
+            "dryRun": false,
+            "preStateHash": "sha256:pre",
+            "postStateHash": "sha256:post"
+        }))
+        .unwrap();
+        assert_eq!(receipt.schema_version, OPERATION_RECEIPT_SCHEMA_VERSION);
     }
 }

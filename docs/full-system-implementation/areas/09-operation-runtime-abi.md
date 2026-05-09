@@ -13,6 +13,7 @@ Force every graph mutation through a stable operation ABI with preconditions, po
 ### Fully Implemented
 
 - Request, definition, receipt, and operation categories are documented
+- `OperationRequest`, built-in `OperationDefinition`, and `OperationReceipt` schemas carry explicit v1 schema versions with legacy deserialization defaults for requests and receipts
 - README says built-in operation contracts can be listed and checked
 - Operation receipts include actor, state hashes, changed graph objects, event ids, dry-run flag, and findings
 - Missing/invalid operation actors are rejected by ABI validation
@@ -26,7 +27,6 @@ Force every graph mutation through a stable operation ABI with preconditions, po
 
 ### Not Implemented / Remaining
 
-- Versioned operation definitions for every command
 - Dry-run receipts everywhere
 - Transactions and rollback
 - SDK/server ABI compatibility
@@ -45,10 +45,17 @@ sg operation list and every mutating command such as Project.Init, Spec.Create, 
 
 Reject missing inputs, failed preconditions, denied policies, invalid deltas, failed postconditions
 
+
+### Versioned ABI Schemas
+
+- Operation requests use `specgraph.operation-request/v1` and unsupported request schema versions fail ABI validation before preconditions, ontology validation, or event append.
+- Built-in operation definitions use `specgraph.operation-definition/v1`, so `sg operation list` exposes a stable versioned contract for each registered command.
+- Operation receipts use `specgraph.operation-receipt/v1`; persisted receipts and dry-run receipts include the schema version alongside actor, operation id, state hashes, changed graph objects, event ids, and findings.
+- Legacy request/receipt JSON without `schemaVersion` still deserializes to the current v1 default to preserve local history compatibility while new mutations emit explicit versions.
+
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Versioned operation definitions for every command.
 - Implement or finish: Dry-run receipts everywhere.
 - Implement or finish: Transactions and rollback.
 - Implement or finish: SDK/server ABI compatibility.
