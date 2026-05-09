@@ -12,7 +12,9 @@ use crate::ontology_pack::{
 use crate::operation_abi::{
     validate_operation_postconditions, validate_operation_preconditions, validate_operation_request,
 };
-use crate::policy::{PolicyDecision, PolicyReport};
+use crate::policy::{
+    evaluate_policies, PolicyCheckInput, PolicyDecision, PolicyEffect, PolicyReport,
+};
 use crate::query::{QueryContext, QueryCost, QueryTarget};
 use crate::spec::SpecProjection;
 use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_BRANCH_METADATA, VALIDATOR_SNAPSHOT};
@@ -89,6 +91,8 @@ pub enum StoreError {
     OntologyValidationFailed(usize),
     #[error("operation ABI validation failed with {0} error finding(s)")]
     OperationValidationFailed(usize),
+    #[error("policy validation failed with {0} blocking finding(s)")]
+    PolicyValidationFailed(usize),
     #[error("ontology pack validation failed with {0} error finding(s)")]
     OntologyPackValidationFailed(usize),
     #[error("actor not found in identity registry: {0}")]
@@ -1324,6 +1328,26 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         ));
     }
 
+    let policy_report = evaluate_policies(&graph, &policy_check_input(&request, &options.delta));
+    let blocking_policy_count = policy_report
+        .decisions
+        .iter()
+        .filter(|decision| {
+            matches!(
+                decision.effect,
+                PolicyEffect::Deny | PolicyEffect::RequireApproval
+            )
+        })
+        .count()
+        + policy_report
+            .findings
+            .iter()
+            .filter(|finding| finding.severity == FindingSeverity::Error)
+            .count();
+    if blocking_policy_count > 0 {
+        return Err(StoreError::PolicyValidationFailed(blocking_policy_count));
+    }
+
     let ontology = active_ontology(root)?;
     let state_transition_findings =
         ontology.validate_delta_state_transitions(&graph, &options.delta);
@@ -1915,6 +1939,50 @@ fn active_ontology(root: &Path) -> Result<MvpOntology> {
         packs.iter().flat_map(|pack| pack.node_types.clone()),
         packs.iter().flat_map(|pack| pack.edge_types.clone()),
     ))
+}
+
+fn policy_check_input(request: &OperationRequest, delta: &GraphDelta) -> PolicyCheckInput {
+    PolicyCheckInput {
+        operation: request.operation.clone(),
+        actor: Some(request.actor.clone()),
+        changed_files: if request.operation == "Policy.RecordDecision" {
+            Vec::new()
+        } else {
+            changed_files_for_policy(request, delta)
+        },
+        actor_roles: Vec::new(),
+        approvals: Vec::new(),
+        waivers: Vec::new(),
+    }
+}
+
+fn changed_files_for_policy(request: &OperationRequest, delta: &GraphDelta) -> Vec<String> {
+    let mut changed_files = Vec::new();
+
+    if let Some(files) = request
+        .input
+        .get("changedFiles")
+        .and_then(|value| value.as_array())
+    {
+        changed_files.extend(
+            files
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned),
+        );
+    }
+
+    for node in delta.create_nodes.iter().chain(delta.update_nodes.iter()) {
+        if node.node_type == "CodeFile" {
+            if let Some(path) = node.attributes.get("path").and_then(Value::as_str) {
+                changed_files.push(path.to_string());
+            }
+        }
+    }
+
+    changed_files.sort();
+    changed_files.dedup();
+    changed_files
 }
 
 fn write_ontology_lock(sg_dir: &Path, packs: &[OntologyPackManifest]) -> Result<()> {
@@ -3098,6 +3166,116 @@ acceptanceCriteria:
             .nodes
             .values()
             .any(|node| node.node_type == "Spec"));
+    }
+
+    #[test]
+    fn append_operation_policy_gate_blocks_denied_secret_file_before_event_append() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let before = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Code.Index".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"changedFiles": [".env"]}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: "node_code_file_env".to_string(),
+                        stable_key: "code-file:.env".to_string(),
+                        node_type: "CodeFile".to_string(),
+                        attributes: BTreeMap::from([("path".to_string(), json!(".env"))]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::PolicyValidationFailed(_)));
+        let after = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert_eq!(after.events_replayed, before.events_replayed);
+    }
+
+    #[test]
+    fn append_operation_policy_gate_allows_required_approval_from_graph() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:data-approver".to_string(),
+                display_name: Some("Data Approver".to_string()),
+                provider: None,
+                subject: None,
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        record_approval(
+            tmp.path(),
+            RecordApprovalOptions {
+                approval_id: "approval-data-001".to_string(),
+                approval: "data-migration".to_string(),
+                policy: Some("policy.data.migration_approval".to_string()),
+                scope: Some("migrations/001.sql".to_string()),
+                reason: Some("Reviewed migration".to_string()),
+                approved_by: "local:data-approver".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Code.Index".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"changedFiles": ["migrations/001.sql"]}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: "node_code_file_migrations_001_sql".to_string(),
+                        stable_key: "code-file:migrations/001.sql".to_string(),
+                        node_type: "CodeFile".to_string(),
+                        attributes: BTreeMap::from([(
+                            "path".to_string(),
+                            json!("migrations/001.sql"),
+                        )]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+
+        assert!(receipt.accepted);
+        assert_eq!(
+            receipt.created_nodes,
+            vec!["node_code_file_migrations_001_sql"]
+        );
     }
 
     #[test]
