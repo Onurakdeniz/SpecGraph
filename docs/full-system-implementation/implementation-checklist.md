@@ -18,15 +18,15 @@ This checklist turns the core-to-edge implementation plan into trackable work. I
 
 Before any slice is considered complete:
 
-- [ ] State-changing behavior goes through Operation Runtime.
-- [ ] Operation receipt includes actor, operation id, pre-state hash, post-state hash, changed objects, and findings.
-- [ ] New graph facts use stable keys.
-- [ ] New graph facts validate against the active ontology.
+- [~] State-changing behavior goes through Operation Runtime.
+- [x] Operation receipt includes actor, operation id, pre-state hash, post-state hash, changed objects, and findings.
+- [~] New graph facts use stable keys.
+- [x] New graph facts validate against the active ontology.
 - [ ] Policy checks run before acceptance.
 - [~] Validation findings include severity, validator id, related graph/file location, and remediation.
-- [ ] Event replay remains deterministic.
-- [ ] Docs and examples are updated.
-- [ ] At least one happy-path test and one failure-path test exist.
+- [x] Event replay remains deterministic.
+- [~] Docs and examples are updated.
+- [~] At least one happy-path test and one failure-path test exist.
 
 Recommended local validation commands when code changes exist:
 
@@ -79,14 +79,14 @@ Related areas:
 - [ ] Add dependency rules: core cannot depend on filesystem, Git, network, LLM, or UI directly.
 - [ ] Add architecture check or documentation test for dependency rules.
 - [ ] Add benchmark placeholders for replay, validation, indexing, and query performance.
-- [ ] Keep `docs/full-system-implementation/index.md` updated when areas change status.
+- [~] Keep `docs/full-system-implementation/index.md` updated when areas change status.
 
 ### Gate Checks
 
-- [ ] Workspace builds after any refactor.
-- [ ] No trusted-core module imports adapter-only code.
-- [ ] Docs explain where each new capability belongs.
-- [ ] Existing proof path still passes.
+- [x] Workspace builds after any refactor.
+- [~] No trusted-core module imports adapter-only code.
+- [~] Docs explain where each new capability belongs.
+- [x] Existing proof path still passes.
 
 ---
 
@@ -102,24 +102,24 @@ Related areas:
 
 ### Implementation Checklist
 
-- [ ] Finalize `Node`, `Edge`, `GraphDelta`, `GraphSnapshot`, and graph hash model.
-- [ ] Finalize canonical event JSON schema.
-- [ ] Add strict event schema validation during replay.
-- [ ] Add event chain hash continuity checks.
-- [ ] Add snapshot verification against replayed state hash.
-- [ ] Add stable-key parser and formatter.
-- [ ] Add duplicate stable-key detection.
-- [ ] Add deterministic query API with stable ordering.
-- [ ] Add query cost/limit placeholders.
-- [ ] Add cache/index rebuild command or documented rebuild behavior.
+- [~] Finalize `Node`, `Edge`, `GraphDelta`, `GraphSnapshot`, and graph hash model.
+- [~] Finalize canonical event JSON schema.
+- [x] Add strict event schema validation during replay.
+- [~] Add event chain hash continuity checks.
+- [x] Add snapshot verification against replayed state hash.
+- [~] Add stable-key parser and formatter.
+- [x] Add duplicate stable-key detection.
+- [x] Add deterministic query API with stable ordering.
+- [x] Add query cost/limit placeholders.
+- [~] Add cache/index rebuild command or documented rebuild behavior.
 
 ### Gate Checks
 
-- [ ] Same event log always produces same state hash.
-- [ ] Reordered, tampered, or invalid events fail replay.
-- [ ] Duplicate stable keys fail validation.
-- [ ] Query results are deterministic across repeated runs.
-- [ ] Snapshots are rejected if their hash does not match replay.
+- [x] Same event log always produces same state hash.
+- [x] Reordered, tampered, or invalid events fail replay.
+- [x] Duplicate stable keys fail validation.
+- [x] Query results are deterministic across repeated runs.
+- [x] Snapshots are rejected if their hash does not match replay.
 
 ---
 
@@ -138,16 +138,16 @@ Related areas:
 
 ### Implementation Checklist
 
-- [ ] Stabilize `OperationRequest` schema.
-- [ ] Stabilize `OperationDefinition` schema.
+- [~] Stabilize `OperationRequest` schema.
+- [~] Stabilize `OperationDefinition` schema.
 - [~] Stabilize `OperationReceipt` schema.
-- [ ] Add dry-run support for mutating operations.
-- [ ] Route every mutating CLI command through operation runtime.
-- [ ] Add precondition checks.
-- [ ] Add postcondition checks.
-- [ ] Add ontology cardinality checks.
+- [~] Add dry-run support for mutating operations.
+- [~] Route every mutating CLI command through operation runtime.
+- [x] Add precondition checks.
+- [x] Add postcondition checks.
+- [~] Add ontology cardinality checks.
 - [ ] Add ontology state-machine support.
-- [ ] Add pack migration planning model.
+- [~] Add pack migration planning model.
 - [~] Add policy result model persistence or receipt inclusion.
 - [~] Add actor identity resolution.
 - [~] Add role/permission model foundation.
@@ -159,9 +159,9 @@ Related areas:
 
 ### Gate Checks
 
-- [ ] No graph mutation can happen without a receipt.
-- [ ] Failed operations leave no partial graph events.
-- [ ] Invalid ontology delta fails before event append.
+- [~] No graph mutation can happen without a receipt.
+- [~] Failed operations leave no partial graph events.
+- [x] Invalid ontology delta fails before event append.
 - [ ] Denied policy blocks the operation.
 - [~] Approval-required policy cannot pass without valid scoped approval.
 - [x] Expired waiver cannot satisfy a policy.
@@ -200,23 +200,23 @@ Related areas:
 - [ ] Add `sg action complete`.
 - [ ] Add `sg action replan`.
 - [ ] Add action dependencies and ordering.
-- [ ] Expand CommitPlan schema with category, required validation, allowed files, and expected delta.
+- [~] Expand CommitPlan schema with category, required validation, allowed files, and expected delta.
 - [ ] Add GraphDelta trailer support where practical.
-- [ ] Expand GitGraph with repository and PR placeholder facts.
-- [ ] Ensure CI repeats every hook validation.
+- [~] Expand GitGraph with repository and PR placeholder facts.
+- [~] Ensure CI repeats every hook validation.
 - [ ] Add machine-readable CI output.
 
 ### Gate Checks
 
-- [ ] Spec without requirement fails.
-- [ ] Spec without acceptance criterion fails.
+- [x] Spec without requirement fails.
+- [x] Spec without acceptance criterion fails.
 - [ ] Spec cannot enter Implementing without branch binding.
 - [ ] Spec cannot enter Implementing without ActionGraph.
 - [ ] Action cannot complete without required validation evidence.
-- [ ] Commit without `Spec`, `ActionGroup`, and `CommitPlan` trailers fails.
-- [ ] Commit referencing nonexistent spec/action/plan fails.
-- [ ] Changed file outside allowed scope fails.
-- [ ] CI fails when hook checks are bypassed locally.
+- [x] Commit without `Spec`, `ActionGroup`, and `CommitPlan` trailers fails.
+- [x] Commit referencing nonexistent spec/action/plan fails.
+- [x] Changed file outside allowed scope fails.
+- [~] CI fails when hook checks are bypassed locally.
 
 ---
 
@@ -238,10 +238,10 @@ Related areas:
 
 ### Implementation Checklist
 
-- [ ] Formalize adapter trait/capability model.
-- [ ] Mark all adapter output as observations unless accepted by operation.
-- [ ] Stabilize `CodeIndexObservation` schema.
-- [ ] Add source locations for symbols and files.
+- [~] Formalize adapter trait/capability model.
+- [~] Mark all adapter output as observations unless accepted by operation.
+- [~] Stabilize `CodeIndexObservation` schema.
+- [~] Add source locations for symbols and files.
 - [ ] Expand link manifest for code-symbol-to-use-case links.
 - [ ] Expand link manifest for route-to-endpoint links.
 - [ ] Expand link manifest for behavior and risk test links.
@@ -258,9 +258,9 @@ Related areas:
 
 ### Gate Checks
 
-- [ ] Code indexer cannot directly create trusted semantic facts.
-- [ ] Unknown links in manifest fail validation.
-- [ ] Required AC without linked TestCase fails.
+- [~] Code indexer cannot directly create trusted semantic facts.
+- [x] Unknown links in manifest fail validation.
+- [x] Required AC without linked TestCase fails.
 - [ ] Linked required test failing blocks review/merge.
 - [ ] Spec endpoint without observed/accepted route creates drift finding.
 - [ ] Migration without owner/rollback/approval/test evidence fails according to policy.
@@ -281,20 +281,20 @@ Related areas:
 
 ### Implementation Checklist
 
-- [ ] Define graph conflict report schema.
-- [ ] Add graph branch metadata.
-- [ ] Add graph branch base snapshot tracking.
-- [ ] Implement three-way graph diff: base / ours / theirs.
+- [~] Define graph conflict report schema.
+- [~] Add graph branch metadata.
+- [x] Add graph branch base snapshot tracking.
+- [~] Implement three-way graph diff: base / ours / theirs.
 - [ ] Implement dry-run graph merge.
 - [ ] Add conflict checks for type, cardinality, policy, migration, traceability, and ontology version.
 - [ ] Add graph rebase dry-run.
-- [ ] Add impact-carrying edge metadata to ontology.
+- [~] Add impact-carrying edge metadata to ontology.
 - [ ] Add invalidation rules.
 - [ ] Add `RevalidationQueue` model.
 - [ ] Add action replan trigger from impact analysis.
-- [ ] Finish `sg init --adopt` flow.
+- [~] Finish `sg init --adopt` flow.
 - [ ] Add adoption module inference.
-- [ ] Add adoption reports for observe/warn/enforce-new-work/strict.
+- [~] Add adoption reports for observe/warn/enforce-new-work/strict.
 - [ ] Add IssueGraph lifecycle.
 - [ ] Add failing-test-before-fix policy.
 - [ ] Add root cause classification.
@@ -306,9 +306,9 @@ Related areas:
 - [ ] Unresolved graph conflict blocks merge.
 - [ ] Graph merge records a merge event and validates post-merge state.
 - [ ] Rebase detects invalidated actions and requires replan.
-- [ ] Impact analysis produces deterministic direct and indirect impacts.
-- [ ] Existing repo observe mode never blocks legacy code.
-- [ ] enforce-new-work mode blocks only new governed work.
+- [~] Impact analysis produces deterministic direct and indirect impacts.
+- [~] Existing repo observe mode never blocks legacy code.
+- [~] enforce-new-work mode blocks only new governed work.
 - [ ] Reproducible bug fix cannot close without required regression evidence.
 - [ ] Ontology change cannot release without tests and migration plan.
 
@@ -331,18 +331,18 @@ Related areas:
 - [ ] Add PR validation command.
 - [ ] Add check-run annotations or PR comments.
 - [ ] Add protected-branch setup docs.
-- [ ] Add LLM proposal schemas for graph delta, code patch, test suggestion, and ontology/policy change.
-- [ ] Add proposal validation pipeline.
+- [~] Add LLM proposal schemas for graph delta, code patch, test suggestion, and ontology/policy change.
+- [~] Add proposal validation pipeline.
 - [ ] Add isolated patch sandbox.
 - [ ] Add command allowlist for sandbox.
 - [ ] Deny secrets and production access in sandbox.
-- [ ] Add accept/reject proposal operations.
+- [~] Add accept/reject proposal operations.
 
 ### Gate Checks
 
 - [ ] PR with validation errors shows actionable findings.
 - [ ] Provider required checks can block merge.
-- [ ] LLM proposal remains untrusted until accepted by operation.
+- [~] LLM proposal remains untrusted until accepted by operation.
 - [ ] Out-of-scope patch is rejected in sandbox.
 - [ ] Patch cannot access secrets.
 - [ ] Accepted patch has validation evidence and exact diff.
@@ -366,7 +366,7 @@ Related areas:
 - [ ] Add SDK operation receipt handling.
 - [ ] Build Studio read-only graph/spec/action/finding views.
 - [ ] Add Studio operation forms with dry-run preview.
-- [ ] Add example for backend API full loop.
+- [~] Add example for backend API full loop.
 - [ ] Add example for architecture pack boundary validation.
 - [ ] Add example for existing repo adoption.
 - [ ] Add example for issue/fix/regression flow.
@@ -382,7 +382,7 @@ Related areas:
 - [ ] SDK receives same receipts as CLI.
 - [ ] Studio cannot bypass policy or validation.
 - [ ] Every example has happy path and intentional failure path.
-- [ ] Released CLI can run proof scenario.
+- [~] Released CLI can run proof scenario.
 - [ ] Release includes validation evidence.
 
 ---
@@ -391,19 +391,19 @@ Related areas:
 
 The full project is complete when all of these are checked:
 
-- [ ] A new repo can be initialized and governed by SpecGraph OS.
-- [ ] An existing repo can be adopted in observe mode and gradually moved to strict mode.
-- [ ] Specs import into typed graph facts with stable keys.
+- [~] A new repo can be initialized and governed by SpecGraph OS.
+- [~] An existing repo can be adopted in observe mode and gradually moved to strict mode.
+- [x] Specs import into typed graph facts with stable keys.
 - [ ] Spec state transitions are enforced by evidence.
-- [ ] ActionGraphs and CommitPlans are generated and enforced.
+- [~] ActionGraphs and CommitPlans are generated and enforced.
 - [ ] Git branches, commits, PRs, merges, and releases are bound to graph facts.
 - [ ] Code, tests, data, and architecture observations are linked back to graph facts.
-- [ ] Missing traceability blocks completion/merge.
-- [ ] Event replay is deterministic and protected by hash checks.
+- [~] Missing traceability blocks completion/merge.
+- [x] Event replay is deterministic and protected by hash checks.
 - [~] Policies, waivers, approvals, and actors are auditable graph facts.
 - [ ] Graph merge/rebase detects semantic conflicts.
 - [ ] Impact analysis drives revalidation and replan.
 - [ ] Issues and ontology evolution close the learning loop.
-- [ ] LLMs can propose but cannot create trusted facts directly.
+- [~] LLMs can propose but cannot create trusted facts directly.
 - [ ] Studio, SDK, and server use the same operation runtime.
-- [ ] Official examples, proof runner, and release artifacts validate the system end to end.
+- [~] Official examples, proof runner, and release artifacts validate the system end to end.

@@ -2,7 +2,7 @@
 
 This directory breaks the full SpecGraph OS system into one Markdown file per **System Area**. Each file documents what is fully implemented, partly implemented, not implemented, and what must be built to complete the full system rather than only the MVP.
 
-**Status basis:** statuses are inferred from the existing Markdown documentation and README/foundation descriptions. They are not a line-by-line code audit.
+**Status basis:** statuses combine the original Markdown-source matrix with the current implementation checklist/code audit. Use `[x]`, `[~]`, and `[ ]` in `implementation-checklist.md` for the current executable status.
 
 ## Status Legend
 
@@ -17,8 +17,8 @@ This directory breaks the full SpecGraph OS system into one Markdown file per **
 | Status | Count |
 |---|---:|
 | ✅ Fully implemented | 0 |
-| 🟡 Partly implemented | 39 |
-| ⬜ Not implemented | 13 |
+| 🟡 Partly implemented | 40 |
+| ⬜ Not implemented | 12 |
 | **Total** | **52** |
 
 ## Source Markdown Read
@@ -34,8 +34,9 @@ This directory breaks the full SpecGraph OS system into one Markdown file per **
 
 ## Implementation Plan
 
-Start with the ordered roadmap in [implementation-plan.md](implementation-plan.md). It builds from the trusted graph core outward to adapters, integrations, UI, and release.
-- Use [implementation-checklist.md](implementation-checklist.md) as the checkbox tracker with phase gates and validation checks.
+Use the phase-gated roadmap in [phase-gated-implementation-plan.md](phase-gated-implementation-plan.md). It resets delivery to Phase 0 → Phase 1 → Phase 2 before outer features.
+- Keep [implementation-checklist.md](implementation-checklist.md) as the checkbox tracker with phase gates and validation checks.
+- Keep the older conceptual roadmap in [implementation-plan.md](implementation-plan.md) as background context only.
 
 ## System Area Files
 
@@ -52,7 +53,7 @@ Start with the ordered roadmap in [implementation-plan.md](implementation-plan.m
 | 09 | [Operation Runtime ABI](areas/09-operation-runtime-abi.md) | 🟡 Partly implemented |
 | 10 | [Policy Engine](areas/10-policy-engine.md) | 🟡 Partly implemented |
 | 11 | [Waivers and Approvals](areas/11-waivers-and-approvals.md) | 🟡 Partly implemented |
-| 12 | [Actor and Identity Model](areas/12-actor-and-identity-model.md) | ⬜ Not implemented |
+| 12 | [Actor and Identity Model](areas/12-actor-and-identity-model.md) | 🟡 Partly implemented |
 | 13 | [Validation Runtime](areas/13-validation-runtime.md) | 🟡 Partly implemented |
 | 14 | [Query Layer](areas/14-query-layer.md) | 🟡 Partly implemented |
 | 15 | [ProjectGraph](areas/15-projectgraph.md) | 🟡 Partly implemented |
