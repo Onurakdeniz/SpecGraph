@@ -5,14 +5,14 @@ use sg_core::{
     analyze_impact, built_in_non_waivable_policies, built_in_operations, built_in_validators,
     detect_merge_conflicts, diff_graphs, evaluate_policies, evaluate_policies_with_manifests,
     index_source_file, load_pack, load_policy_manifest, observations_to_delta, scan_repository,
-    validate_commit_binding, validate_pack, validate_trace_links, AdoptionMode,
-    AppendOperationOptions, BindBranchOptions, CodeIndexObservation, CommitValidationInput,
-    CreateWaiverOptions, Edge, Finding, FindingSeverity, GenerateActionGraphOptions,
-    GrantRoleOptions, Graph, GraphDelta, InitOptions, LinksManifest, Node, PolicyCheckInput,
-    PolicyEffect, PolicyManifest, PolicyRule, Proposal, QueryContext, QueryLimits, QueryTarget,
-    RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions, Snapshot,
-    SpecGraphStore, SpecProjection, TestLink, TextItem, TransitionSpecOptions, TrustState,
-    UpsertActorOptions,
+    validate_commit_binding, validate_pack, validate_trace_links, ActionLifecycleOptions,
+    AdoptionMode, AppendOperationOptions, BindBranchOptions, CodeIndexObservation,
+    CommitValidationInput, CreateWaiverOptions, Edge, Finding, FindingSeverity,
+    GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions, LinksManifest,
+    Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal, QueryContext,
+    QueryLimits, QueryTarget, RecordApprovalOptions, RecordCommitOptions,
+    RecordPolicyReportOptions, ReplayOptions, Snapshot, SpecGraphStore, SpecProjection, TestLink,
+    TextItem, TransitionSpecOptions, TrustState, UpsertActorOptions,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -412,6 +412,9 @@ struct ActionArgs {
 enum ActionCommand {
     Generate(ActionGenerateArgs),
     List(ActionListArgs),
+    Start(ActionLifecycleArgs),
+    Complete(ActionLifecycleArgs),
+    Replan(ActionLifecycleArgs),
 }
 
 #[derive(Debug, Args)]
@@ -428,6 +431,18 @@ struct ActionGenerateArgs {
 struct ActionListArgs {
     #[arg(long)]
     spec: String,
+}
+
+#[derive(Debug, Args)]
+struct ActionLifecycleArgs {
+    #[arg(long)]
+    action: String,
+    #[arg(long)]
+    reason: Option<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
 }
 
 #[derive(Debug, Args)]
@@ -1065,8 +1080,32 @@ fn handle_action(store: &SpecGraphStore, args: ActionArgs) -> anyhow::Result<()>
                 );
             }
         }
+        ActionCommand::Start(args) => {
+            let receipt = store.start_action(action_lifecycle_options(args))?;
+            println!("actionStarted: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        ActionCommand::Complete(args) => {
+            let receipt = store.complete_action(action_lifecycle_options(args))?;
+            println!("actionCompleted: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        ActionCommand::Replan(args) => {
+            let receipt = store.replan_action(action_lifecycle_options(args))?;
+            println!("actionReplanned: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
     }
     Ok(())
+}
+
+fn action_lifecycle_options(args: ActionLifecycleArgs) -> ActionLifecycleOptions {
+    ActionLifecycleOptions {
+        action: args.action,
+        actor: args.actor,
+        graph_branch: args.graph_branch,
+        reason: args.reason,
+    }
 }
 
 fn handle_git(store: &SpecGraphStore, root: &Path, args: GitArgs) -> anyhow::Result<()> {

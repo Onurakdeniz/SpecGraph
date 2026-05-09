@@ -19,8 +19,8 @@ This directory breaks the full SpecGraph OS system into one Markdown file per **
 | Status | Count |
 |---|---:|
 | ✅ Fully implemented | 0 |
-| 🟡 Partly implemented | 45 |
-| ⬜ Not implemented | 7 |
+| 🟡 Partly implemented | 46 |
+| ⬜ Not implemented | 6 |
 | **Total** | **52** |
 
 ## Source Markdown Read
@@ -69,7 +69,7 @@ Use the full-system phase-gated roadmap in [phase-gated-implementation-plan.md](
 | 23 | [Spec State Machine](areas/23-spec-state-machine.md) | 🟡 Partly implemented |
 | 24 | [ActionGraph](areas/24-actiongraph.md) | 🟡 Partly implemented |
 | 25 | [CommitPlan](areas/25-commitplan.md) | 🟡 Partly implemented |
-| 26 | [Action and Commit State](areas/26-action-and-commit-state.md) | ⬜ Not implemented |
+| 26 | [Action and Commit State](areas/26-action-and-commit-state.md) | 🟡 Partly implemented |
 | 27 | [GitGraph](areas/27-gitgraph.md) | 🟡 Partly implemented |
 | 28 | [Git Enforcement](areas/28-git-enforcement.md) | 🟡 Partly implemented |
 | 29 | [PR and Hosting Integration](areas/29-pr-and-hosting-integration.md) | ⬜ Not implemented |

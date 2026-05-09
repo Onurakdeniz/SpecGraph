@@ -140,6 +140,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "dependency-boundary:interface->infrastructure",
     },
     StableKeyFamily {
+        prefix: "execution-attempt",
+        description: "ActionNode execution attempt evidence",
+        example: "execution-attempt:node_action/auth-001/start-1",
+    },
+    StableKeyFamily {
         prefix: "finding",
         description: "Validation finding evidence",
         example: "finding:run-001/0/trace.missing",

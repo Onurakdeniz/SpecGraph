@@ -17,6 +17,11 @@ Generate executable work graphs from validated specs before implementation start
 
 ### Partly Implemented
 
+- ActionNode lifecycle state machine now covers Ready, InProgress, Completed, Blocked, Failed, Skipped, and Replanned states.
+- `sg action start`, `sg action complete`, and `sg action replan` route through Operation Runtime and record `ExecutionAttempt` evidence.
+- Action dependencies are represented with `DEPENDS_ON`; start is blocked until dependencies are completed.
+- Completion is blocked without passed validation evidence.
+
 - Template generation exists
 - Pack templates, dependencies, execution attempts, replan, lifecycle are future
 

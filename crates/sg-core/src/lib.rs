@@ -67,11 +67,11 @@ pub use store::{
     install_ontology_pack, list_action_graph, list_installed_ontology_packs, rebuild_projections,
     record_approval, record_git_commit, record_policy_report, replay_events, spec_status,
     transition_spec_state, validate_snapshots, ActionGraphSummary, ActionGroupSummary,
-    AppendOperationOptions, BindBranchOptions, CreateWaiverOptions, GenerateActionGraphOptions,
-    GrantRoleOptions, InitOptions, RebuildReport, RecordApprovalOptions, RecordCommitOptions,
-    RecordPolicyReportOptions, ReplayOptions, ReplayReport, SnapshotValidationReport,
-    SpecGraphStore, SpecStatusSummary, SpecValidationReport, TransitionSpecOptions,
-    UpsertActorOptions,
+    ActionLifecycleOptions, AppendOperationOptions, BindBranchOptions, CreateWaiverOptions,
+    GenerateActionGraphOptions, GrantRoleOptions, InitOptions, RebuildReport,
+    RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions,
+    ReplayReport, SnapshotValidationReport, SpecGraphStore, SpecStatusSummary,
+    SpecValidationReport, TransitionSpecOptions, UpsertActorOptions,
 };
 
 pub use adapter::{

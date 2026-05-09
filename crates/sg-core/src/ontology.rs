@@ -82,6 +82,7 @@ impl MvpOntology {
                 "ActionGraph",
                 "ActionGroup",
                 "ActionNode",
+                "ExecutionAttempt",
                 "CommitPlan",
                 "GitBranch",
                 "GitCommit",
@@ -168,6 +169,9 @@ impl MvpOntology {
                 "HAS_ACTION_GRAPH",
                 "HAS_ACTION_GROUP",
                 "HAS_ACTION",
+                "HAS_EXECUTION_ATTEMPT",
+                "DEPENDS_ON",
+                "REPLANNED_BY",
                 "HAS_COMMIT_PLAN",
                 "BOUND_TO_BRANCH",
                 "STARTS_FROM_SNAPSHOT",
@@ -739,6 +743,81 @@ const SPEC_STATE_TRANSITIONS: &[OntologyStateTransition] = &[
     },
 ];
 
+const ACTION_STATES: &[&str] = &[
+    "Ready",
+    "InProgress",
+    "Implemented",
+    "Validated",
+    "Completed",
+    "Blocked",
+    "Skipped",
+    "Replanned",
+    "Failed",
+];
+
+const ACTION_STATE_TRANSITIONS: &[OntologyStateTransition] = &[
+    OntologyStateTransition {
+        from: "Ready",
+        to: "InProgress",
+    },
+    OntologyStateTransition {
+        from: "Ready",
+        to: "Skipped",
+    },
+    OntologyStateTransition {
+        from: "Ready",
+        to: "Replanned",
+    },
+    OntologyStateTransition {
+        from: "InProgress",
+        to: "Implemented",
+    },
+    OntologyStateTransition {
+        from: "InProgress",
+        to: "Blocked",
+    },
+    OntologyStateTransition {
+        from: "InProgress",
+        to: "Failed",
+    },
+    OntologyStateTransition {
+        from: "InProgress",
+        to: "Completed",
+    },
+    OntologyStateTransition {
+        from: "InProgress",
+        to: "Replanned",
+    },
+    OntologyStateTransition {
+        from: "Implemented",
+        to: "Validated",
+    },
+    OntologyStateTransition {
+        from: "Implemented",
+        to: "Replanned",
+    },
+    OntologyStateTransition {
+        from: "Validated",
+        to: "Completed",
+    },
+    OntologyStateTransition {
+        from: "Validated",
+        to: "Replanned",
+    },
+    OntologyStateTransition {
+        from: "Blocked",
+        to: "InProgress",
+    },
+    OntologyStateTransition {
+        from: "Failed",
+        to: "InProgress",
+    },
+    OntologyStateTransition {
+        from: "Replanned",
+        to: "Ready",
+    },
+];
+
 const PROPOSAL_STATES: &[&str] = &[
     "Observed",
     "Proposed",
@@ -790,6 +869,13 @@ const STATE_MACHINES: &[OntologyStateMachine] = &[
         states: SPEC_STATES,
         initial_states: &["Draft"],
         transitions: SPEC_STATE_TRANSITIONS,
+    },
+    OntologyStateMachine {
+        node_type: "ActionNode",
+        attribute: "state",
+        states: ACTION_STATES,
+        initial_states: &["Ready"],
+        transitions: ACTION_STATE_TRANSITIONS,
     },
     OntologyStateMachine {
         node_type: "Proposal",
@@ -1053,6 +1139,9 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "HAS_ACTION_GRAPH" => Some((&["Spec"], &["ActionGraph"])),
         "HAS_ACTION_GROUP" => Some((&["ActionGraph"], &["ActionGroup"])),
         "HAS_ACTION" => Some((&["ActionGroup"], &["ActionNode"])),
+        "HAS_EXECUTION_ATTEMPT" => Some((&["ActionNode"], &["ExecutionAttempt"])),
+        "DEPENDS_ON" => Some((&["ActionNode"], &["ActionNode"])),
+        "REPLANNED_BY" => Some((&["ActionNode"], &["ActionNode"])),
         "HAS_COMMIT_PLAN" => Some((&["ActionGroup"], &["CommitPlan"])),
         "BOUND_TO_BRANCH" => Some((&["Spec"], &["GitBranch"])),
         "STARTS_FROM_SNAPSHOT" => Some((&["GitBranch"], &["GraphSnapshot"])),

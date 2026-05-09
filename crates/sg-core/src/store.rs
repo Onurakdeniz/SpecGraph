@@ -179,6 +179,14 @@ pub struct GenerateActionGraphOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct ActionLifecycleOptions {
+    pub action: String,
+    pub actor: String,
+    pub graph_branch: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct RecordCommitOptions {
     pub input: CommitValidationInput,
     pub actor: String,
@@ -370,6 +378,18 @@ impl SpecGraphStore {
 
     pub fn list_action_graph(&self, spec: &str) -> Result<ActionGraphSummary> {
         list_action_graph(self.root(), spec)
+    }
+
+    pub fn start_action(&self, options: ActionLifecycleOptions) -> Result<OperationReceipt> {
+        transition_action(self.root(), options, "Action.Start", "InProgress")
+    }
+
+    pub fn complete_action(&self, options: ActionLifecycleOptions) -> Result<OperationReceipt> {
+        transition_action(self.root(), options, "Action.Complete", "Completed")
+    }
+
+    pub fn replan_action(&self, options: ActionLifecycleOptions) -> Result<OperationReceipt> {
+        transition_action(self.root(), options, "Action.Replan", "Replanned")
     }
 
     pub fn record_git_commit(&self, options: RecordCommitOptions) -> Result<OperationReceipt> {
@@ -973,6 +993,121 @@ pub fn generate_action_graph(
             dry_run: false,
         },
     )
+}
+
+pub fn transition_action(
+    root: &Path,
+    options: ActionLifecycleOptions,
+    operation: &str,
+    target_state: &str,
+) -> Result<OperationReceipt> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let action = replay
+        .graph
+        .nodes
+        .get(&options.action)
+        .or_else(|| {
+            replay.graph.nodes.values().find(|node| {
+                node.node_type == "ActionNode"
+                    && node
+                        .attributes
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| value == options.action)
+            })
+        })
+        .ok_or(StoreError::ActionGraphNotFound(options.action.clone()))?;
+
+    let blockers = action_lifecycle_blockers(&replay.graph, &action.id, target_state);
+    if !blockers.is_empty() {
+        return Err(StoreError::OperationValidationFailed(blockers.len()));
+    }
+
+    let mut updated = action.clone();
+    updated
+        .attributes
+        .insert("state".to_string(), json!(target_state));
+    if let Some(reason) = &options.reason {
+        updated
+            .attributes
+            .insert("reason".to_string(), json!(reason));
+    }
+
+    let attempt_id = node_id(
+        "execution_attempt",
+        &format!("{}/{}", action.id, Uuid::new_v4()),
+    );
+    let attempt = Node {
+        id: attempt_id.clone(),
+        stable_key: format!("execution-attempt:{}/{}", action.id, target_state),
+        node_type: "ExecutionAttempt".to_string(),
+        attributes: BTreeMap::from([
+            ("action".to_string(), json!(action.id)),
+            ("state".to_string(), json!(target_state)),
+            ("operation".to_string(), json!(operation)),
+            (
+                "reason".to_string(),
+                json!(options.reason.clone().unwrap_or_default()),
+            ),
+        ]),
+    };
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: operation.to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({"action": options.action, "state": target_state}),
+            delta: GraphDelta {
+                create_nodes: vec![attempt],
+                update_nodes: vec![updated],
+                create_edges: vec![edge(&action.id, "HAS_EXECUTION_ATTEMPT", &attempt_id)],
+                ..GraphDelta::default()
+            },
+            dry_run: false,
+        },
+    )
+}
+
+fn action_lifecycle_blockers(graph: &Graph, action_id: &str, target_state: &str) -> Vec<String> {
+    let mut blockers = Vec::new();
+    if target_state == "InProgress" {
+        for dependency in graph
+            .edges
+            .values()
+            .filter(|edge| edge.from == action_id && edge.edge_type == "DEPENDS_ON")
+        {
+            let done = graph
+                .nodes
+                .get(&dependency.to)
+                .and_then(|node| node.attributes.get("state"))
+                .and_then(Value::as_str)
+                .is_some_and(|state| state == "Completed");
+            if !done {
+                blockers.push(format!(
+                    "dependency action `{}` must be Completed before `{}` starts",
+                    dependency.to, action_id
+                ));
+            }
+        }
+    }
+
+    if target_state == "Completed" {
+        let has_passed_validation = graph.nodes.values().any(|node| {
+            node.node_type == "ValidationRun"
+                && node
+                    .attributes
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .is_some_and(|status| status == "Passed")
+        });
+        if !has_passed_validation {
+            blockers
+                .push("action cannot complete without passed ValidationRun evidence".to_string());
+        }
+    }
+    blockers
 }
 
 pub fn list_action_graph(root: &Path, spec: &str) -> Result<ActionGraphSummary> {
@@ -2406,7 +2541,7 @@ fn action_graph_delta(spec: &str, spec_node_id: &str) -> GraphDelta {
             attributes: BTreeMap::from([
                 ("name".to_string(), json!(template.action)),
                 ("allowedPaths".to_string(), json!(template.allowed_paths)),
-                ("state".to_string(), json!("Pending")),
+                ("state".to_string(), json!("Ready")),
             ]),
         });
         create_nodes.push(Node {
@@ -3263,6 +3398,25 @@ acceptanceCriteria:
             .findings
             .iter()
             .any(|finding| finding.code == "spec.has_acceptance_criterion"));
+    }
+
+    #[test]
+    fn action_lifecycle_blocks_completion_without_validation_evidence() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "node_action_auth".to_string(),
+            Node {
+                id: "node_action_auth".to_string(),
+                stable_key: "action-node:AUTH-001/implementation".to_string(),
+                node_type: "ActionNode".to_string(),
+                attributes: BTreeMap::from([("state".to_string(), json!("InProgress"))]),
+            },
+        );
+
+        let blockers = action_lifecycle_blockers(&graph, "node_action_auth", "Completed");
+        assert!(blockers
+            .iter()
+            .any(|blocker| blocker.contains("ValidationRun")));
     }
 
     #[test]
