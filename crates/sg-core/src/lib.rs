@@ -20,6 +20,7 @@ pub mod graph_merge;
 pub mod hashing;
 pub mod identity;
 pub mod impact;
+pub mod issue_graph;
 pub mod migration_runtime;
 pub mod model;
 pub mod module_graph;
@@ -126,6 +127,9 @@ pub use impact::{
     replan_delta_from_queue, revalidation_queue_delta, ImpactAnalysis, ImpactInvalidationReason,
     RevalidationQueue, RevalidationQueueEntry, RevalidationTargetKind,
 };
+pub use issue_graph::{
+    issue_lifecycle_delta, validate_issue_lifecycle, IssueKind, IssueLifecycleReport, IssueState,
+};
 pub use ontology_pack::{
     load_pack, plan_pack_migration, validate_pack, OntologyMigration, OntologyMigrationAction,
     OntologyMigrationPlan, OntologyPackManifest, OntologyPackSignature, OntologyPackSource,
@@ -157,7 +161,7 @@ pub use validation::{
     ValidatorExecutionStatus, CORE_VALIDATOR_VERSION, VALIDATOR_ADAPTER_TRUST,
     VALIDATOR_ARCHITECTURE_PACK, VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE,
     VALIDATOR_CROSS_DOMAIN_TRACE, VALIDATOR_DRIFT, VALIDATOR_GIT_BINDING, VALIDATOR_GRAPH_MERGE,
-    VALIDATOR_MIGRATION_RUNTIME, VALIDATOR_ONTOLOGY, VALIDATOR_ONTOLOGY_PACK,
-    VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT, VALIDATOR_TEST_RUNNER,
-    VALIDATOR_TRACE_LINKS,
+    VALIDATOR_ISSUE_GRAPH, VALIDATOR_MIGRATION_RUNTIME, VALIDATOR_ONTOLOGY,
+    VALIDATOR_ONTOLOGY_PACK, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT,
+    VALIDATOR_TEST_RUNNER, VALIDATOR_TRACE_LINKS,
 };

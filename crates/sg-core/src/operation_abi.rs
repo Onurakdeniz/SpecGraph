@@ -505,6 +505,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "IssueGraph.Record",
+            category: "issue",
+            description: "Record IssueGraph lifecycle facts for bugs, reproduction, root cause, fix spec, regression, and closure evidence.",
+            required_input_fields: &["issue"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["Issue", "ReproductionStep", "FailingTest", "RootCause", "FixSpec", "RegressionTest", "ClosureEvidence"],
+            allowed_create_edge_types: &["HAS_ISSUE_EVIDENCE", "HAS_REPRODUCTION", "HAS_FAILING_TEST", "HAS_ROOT_CAUSE", "HAS_FIX_SPEC", "HAS_REGRESSION_TEST", "HAS_CLOSURE_EVIDENCE"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Impact.Revalidate",
             category: "impact",
             description: "Record impact-driven revalidation queue facts and replan invalidated actions.",

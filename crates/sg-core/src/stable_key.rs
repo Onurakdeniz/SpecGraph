@@ -205,6 +205,41 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "layer:application",
     },
     StableKeyFamily {
+        prefix: "issue",
+        description: "IssueGraph issue fact",
+        example: "issue:BUG-001",
+    },
+    StableKeyFamily {
+        prefix: "reproduction-step",
+        description: "IssueGraph reproduction step",
+        example: "reproduction-step:BUG-001/1",
+    },
+    StableKeyFamily {
+        prefix: "failing-test",
+        description: "IssueGraph failing test evidence",
+        example: "failing-test:BUG-001/auth-reset",
+    },
+    StableKeyFamily {
+        prefix: "root-cause",
+        description: "IssueGraph root cause classification",
+        example: "root-cause:BUG-001/token-expiry",
+    },
+    StableKeyFamily {
+        prefix: "fix-spec",
+        description: "IssueGraph fix specification",
+        example: "fix-spec:BUG-001",
+    },
+    StableKeyFamily {
+        prefix: "regression-test",
+        description: "IssueGraph regression test evidence",
+        example: "regression-test:BUG-001/auth-reset",
+    },
+    StableKeyFamily {
+        prefix: "closure-evidence",
+        description: "IssueGraph closure evidence",
+        example: "closure-evidence:BUG-001",
+    },
+    StableKeyFamily {
         prefix: "language",
         description: "Project implementation language profile fact",
         example: "language:typescript",

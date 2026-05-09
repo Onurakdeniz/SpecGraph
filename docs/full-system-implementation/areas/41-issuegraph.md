@@ -1,8 +1,8 @@
 # 41. IssueGraph
 
-**System area:** IssueGraph  
-**Implementation status:** ⬜ Not implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**System area:** IssueGraph
+**Implementation status:** 🟡 Partly implemented
+**Status basis:** code audit plus Phase 5.5 IssueGraph lifecycle implementation slice.
 
 ## Purpose
 
@@ -16,14 +16,15 @@ Represent bugs, reproductions, failing tests, root causes, fix specs, regression
 
 ### Partly Implemented
 
-- No implementation is described beyond concept
+- `Issue`, `ReproductionStep`, `FailingTest`, `RootCause`, `FixSpec`, `RegressionTest`, and `ClosureEvidence` graph facts exist in the core ontology
+- `IssueGraph.Record` is registered in the Operation ABI
+- Bug lifecycle validation requires repro, failing test, root cause, fix spec, regression evidence, and closure evidence
 
 ### Not Implemented / Remaining
 
-- Issue ontology/operations
-- Failing/regression test workflow
-- Root cause classification
 - Issue tracker sync
+- CLI commands beyond core lifecycle model
+- Hosting-provider issue import/export
 
 ## Implementation Parts
 
@@ -41,10 +42,9 @@ Repro bugs require failing tests where policy requires; fixes go through FixSpec
 
 ### 4. Implementation Work Items
 
-- Implement or finish: Issue ontology/operations.
-- Implement or finish: Failing/regression test workflow.
-- Implement or finish: Root cause classification.
+- Implement or finish: CLI commands beyond core lifecycle model.
 - Implement or finish: Issue tracker sync.
+- Implement or finish: Hosting-provider issue import/export.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 
@@ -66,3 +66,10 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
 
+
+### Phase 5.5 IssueGraph Lifecycle
+
+- `validate_issue_lifecycle` checks Bug issues for reproduction, failing test, root cause, fix spec, regression evidence, and closure evidence.
+- Missing evidence emits remediation-rich `validator.issue_graph` findings.
+- Closed bugs cannot pass lifecycle validation unless all required evidence is linked.
+- IssueGraph stable-key families and ontology edge types are registered for graph-native evidence.
