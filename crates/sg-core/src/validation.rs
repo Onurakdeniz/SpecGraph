@@ -17,6 +17,7 @@ pub const VALIDATOR_ADAPTER_TRUST: &str = "validator.adapter_trust";
 pub const VALIDATOR_ARCHITECTURE_PACK: &str = "validator.architecture_pack";
 pub const VALIDATOR_MIGRATION_RUNTIME: &str = "validator.migration_runtime";
 pub const VALIDATOR_DRIFT: &str = "validator.drift";
+pub const VALIDATOR_GRAPH_MERGE: &str = "validator.graph_merge";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -131,6 +132,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Drift Detection",
             description: "Detects spec-code-test-data-architecture drift and emits blocking actionable findings.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_GRAPH_MERGE,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Graph Diff and Conflicts",
+            description: "Reports semantic graph conflicts across type, cardinality, policy, migration, traceability, and ontology dimensions.",
         },
         ValidatorDefinition {
             id: VALIDATOR_SNAPSHOT,
