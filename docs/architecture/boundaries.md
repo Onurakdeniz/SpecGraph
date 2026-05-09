@@ -118,6 +118,8 @@ The current repository is still a compact workspace. Some modules live in transi
 | `docs/full-system-implementation/areas/*.md` | Derived area detail docs | Must match plan/checklist and record area-level status. |
 | `docs/full-system-implementation/index.md` | Derived status/navigation summary | Update counts only when area statuses change. |
 | `docs/architecture/boundaries.md` | Architecture boundary doc | This Phase 0 guardrail. Later slices should automate these rules. |
+| `scripts/check_architecture_boundaries.py` | Architecture boundary check | CI/local check that trusted core does not import outward layers, network/provider/UI/LLM dependencies, or promote adapter observations directly to trusted facts. |
+| `.github/workflows/ci.yml` | CI enforcement | Runs formatting, architecture boundary, clippy, test, proof, and smoke checks on development pushes and pull requests. |
 | `docs/ontology-packs/*.yaml` | Ontology packs | Pack data and validation fixtures. Packs cannot execute code or bypass runtime acceptance. |
 | `docs/policies/*.yaml` | Policy manifests | Declarative policy inputs. Policies are evaluated by trusted runtime logic. |
 | `README.md`, `SpecGraph_OS_Project_Documentation.md`, `SpecGraph_OS_Review_and_Gap_Analysis.md`, `SpecGraph_OS_MVP_Backlog.md`, `docs/full-system-foundation.md` | Historical/reference docs | Useful context only; they do not override the canonical plan. |
@@ -125,9 +127,25 @@ The current repository is still a compact workspace. Some modules live in transi
 | `.specgraph/**` when present in a user repo | Runtime state directory | Event logs are trusted only when produced by runtime operations; snapshots and indexes are derived unless explicitly accepted as facts. |
 | `target/**`, `.git/**`, `.DS_Store` | Build/VCS/local artifacts | Not SpecGraph OS source boundaries. They must not influence trusted replay except through explicit adapter observations accepted by operation. |
 
+## Automated Dependency and Trust Checks
+
+Phase 0 Slice 0.2 introduces `scripts/check_architecture_boundaries.py` as the first executable guardrail for these rules. The check runs in CI and can be run locally with:
+
+```bash
+python3 scripts/check_architecture_boundaries.py
+```
+
+The check currently fails when:
+
+- `sg-core` declares dependencies on CLI, server, SDK, Studio, adapter, provider, network, LLM, UI, or ambient async/runtime crates;
+- trusted-core Rust source imports known outer-layer, provider, network, LLM, UI, subprocess, or network APIs directly;
+- transitional adapter-facing modules such as code indexing, adoption, or Git helpers mark observations as `Accepted` or `Trusted` directly instead of leaving acceptance to the Operation Runtime.
+
+These checks are intentionally conservative and should expand as future crates are introduced. They do not replace runtime policy/ontology validation; they prevent obvious dependency-direction and trust-promotion regressions before code review.
+
 ## Dependency Direction Rules
 
-Until automated architecture checks exist, contributors must apply these rules manually:
+Contributors must continue to apply these rules when the current automated check does not yet cover a new language, package, or future crate:
 
 1. `sg-core` may expose pure runtime APIs and deterministic domain models. It must not depend on `sg-cli`, future server crates, future SDK packages, future Studio packages, or provider-specific adapter SDKs.
 2. CLI/server/SDK/Studio may depend inward on public core/runtime APIs, but core must never depend outward on them.
@@ -135,5 +153,3 @@ Until automated architecture checks exist, contributors must apply these rules m
 4. Ontology packs and policy manifests are data consumed by trusted runtime code; they must not import executable host/provider/UI code.
 5. Examples may depend on released public surfaces only.
 6. Release tooling may package and verify artifacts, but it must not become an authority for trusted facts.
-
-Phase 0 Slice 0.2 will turn these documented rules into automated dependency/trust checks.

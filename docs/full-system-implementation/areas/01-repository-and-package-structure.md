@@ -17,6 +17,8 @@ Expand the repository from an MVP Rust workspace into the full SpecGraph OS runt
 - Full target structure is specified in the project documentation
 - Phase 0 boundary map now defines trusted core, CLI, adapters, ontology packs, policies, examples, future server/SDK/Studio, and release/distribution boundaries in `docs/architecture/boundaries.md`
 - Current repository files are assigned to architecture boundaries in `docs/architecture/boundaries.md`
+- `scripts/check_architecture_boundaries.py` now enforces the first automated dependency-direction guardrails for the trusted core
+- CI runs the architecture boundary check before clippy/tests
 
 ### Partly Implemented
 
@@ -27,7 +29,7 @@ Expand the repository from an MVP Rust workspace into the full SpecGraph OS runt
 ### Not Implemented / Remaining
 
 - Dedicated crates for graph store, operation runtime, policy, validation, action graph, git, code index, impact, runtime, server
-- Automated architecture boundary checks from the documented dependency rules
+- Expanded architecture boundary checks as future crates/packages are introduced
 - TypeScript SDK and Studio package
 - Complete packs and example catalog
 
@@ -39,16 +41,17 @@ Runtime boundaries: Graph Kernel, OntologyGraph, Operation Runtime, Policy Engin
 
 ### 2. Commands / APIs
 
-Repo-level CI, cargo workspace commands, future package test commands, docs validation
+Repo-level CI, cargo workspace commands, `python3 scripts/check_architecture_boundaries.py`, future package test commands, docs validation
 
 ### 3. Validation and Policy Gates
 
-CI must ensure core crates do not depend on adapters and every crate/package/example builds
+CI must ensure core crates do not depend on adapters, outer layers, network/provider/UI/LLM crates, and every crate/package/example builds
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep `docs/architecture/boundaries.md` aligned with any crate/package split.
+- Keep `scripts/check_architecture_boundaries.py` aligned with new crates, packages, and boundary assignments.
 - Implement or finish: Dedicated crates for graph store, operation runtime, policy, validation, action graph, git, code index, impact, runtime, server.
 - Implement or finish: TypeScript SDK and Studio package.
 - Implement or finish: Complete packs and example catalog.
@@ -73,4 +76,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

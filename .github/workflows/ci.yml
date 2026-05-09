@@ -17,6 +17,8 @@ jobs:
           components: rustfmt, clippy
       - name: Format check
         run: cargo fmt --all -- --check
+      - name: Architecture boundary check
+        run: python3 scripts/check_architecture_boundaries.py
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Cargo test
