@@ -2,11 +2,12 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_core::{
-    analyze_impact, built_in_operations, diff_graphs, evaluate_policies, load_pack,
-    scan_repository, validate_commit_binding, validate_pack, validate_trace_links, AdoptionMode,
-    AppendOperationOptions, BindBranchOptions, CommitValidationInput, Edge, Finding,
-    FindingSeverity, GenerateActionGraphOptions, Graph, GraphDelta, InitOptions, LinksManifest,
-    Node, PolicyCheckInput, Proposal, RecordCommitOptions, ReplayOptions, Snapshot, SpecGraphStore,
+    analyze_impact, built_in_operations, diff_graphs, evaluate_policies, index_source_file,
+    load_pack, observations_to_delta, scan_repository, validate_commit_binding, validate_pack,
+    validate_trace_links, AdoptionMode, AppendOperationOptions, BindBranchOptions,
+    CodeIndexObservation, CommitValidationInput, Edge, Finding, FindingSeverity,
+    GenerateActionGraphOptions, Graph, GraphDelta, InitOptions, LinksManifest, Node,
+    PolicyCheckInput, Proposal, RecordCommitOptions, ReplayOptions, Snapshot, SpecGraphStore,
     SpecProjection, TestLink, TextItem, TrustState,
 };
 use std::collections::BTreeMap;
@@ -767,15 +768,24 @@ fn handle_code(store: &SpecGraphStore, root: &Path, args: CodeArgs) -> anyhow::R
             } else {
                 args.changed_files
             };
-            let delta = code_files_delta(&files);
+            let observations = code_index_observations(root, &files)?;
+            let symbol_count = observations
+                .iter()
+                .map(|observation| observation.symbols.len())
+                .sum::<usize>();
+            let delta = observations_to_delta(&observations);
             let receipt = store.append_operation(AppendOperationOptions {
                 operation: "Code.Index".to_string(),
                 actor: args.actor,
                 graph_branch: args.graph_branch,
-                input: json!({"changedFiles": files}),
+                input: json!({
+                    "changedFiles": files,
+                    "observedSymbols": symbol_count,
+                }),
                 delta,
             })?;
             println!("codeFilesIndexed: {}", files.len());
+            println!("codeSymbolsIndexed: {symbol_count}");
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
         }
@@ -921,6 +931,35 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         graph_branch: "main".to_string(),
     })?;
     println!("proof:branch-action ok");
+
+    let proof_source = root.join("crates/proof/src/lib.rs");
+    if let Some(parent) = proof_source.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        &proof_source,
+        "pub struct PasswordResetService;\npub fn request_password_reset() {}\n",
+    )?;
+    let code_files = vec!["crates/proof/src/lib.rs".to_string()];
+    let code_observations = code_index_observations(&root, &code_files)?;
+    let code_symbol_count = code_observations
+        .iter()
+        .map(|observation| observation.symbols.len())
+        .sum::<usize>();
+    if code_symbol_count < 2 {
+        bail!("proof expected source indexer to observe code symbols");
+    }
+    store.append_operation(AppendOperationOptions {
+        operation: "Code.Index".to_string(),
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+        input: json!({
+            "changedFiles": code_files,
+            "observedSymbols": code_symbol_count,
+        }),
+        delta: observations_to_delta(&code_observations),
+    })?;
+    println!("proof:code-index ok");
 
     let replay = store.replay(ReplayOptions { check_hashes: true })?;
     let missing_trace = validate_trace_links(&replay.graph, &LinksManifest::default());
@@ -1164,19 +1203,24 @@ fn trace_links_delta(graph: &sg_core::Graph, links: &[TestLink]) -> anyhow::Resu
     })
 }
 
-fn code_files_delta(files: &[String]) -> GraphDelta {
-    GraphDelta {
-        create_nodes: files
-            .iter()
-            .map(|file| Node {
-                id: node_id("code_file", file),
-                stable_key: format!("code-file:{file}"),
-                node_type: "CodeFile".to_string(),
-                attributes: BTreeMap::from([("path".to_string(), json!(file))]),
-            })
-            .collect(),
-        ..GraphDelta::default()
-    }
+fn code_index_observations(
+    root: &Path,
+    files: &[String],
+) -> anyhow::Result<Vec<CodeIndexObservation>> {
+    files
+        .iter()
+        .map(|file| {
+            let path = resolve_path(root, PathBuf::from(file));
+            if path.exists() && path.is_file() {
+                let bytes = fs::read(&path)
+                    .with_context(|| format!("failed to read {}", path.display()))?;
+                let source = String::from_utf8_lossy(&bytes);
+                Ok(index_source_file(file, &source))
+            } else {
+                Ok(index_source_file(file, ""))
+            }
+        })
+        .collect()
 }
 
 fn has_acceptance_criteria(report: &sg_core::ReplayReport) -> bool {

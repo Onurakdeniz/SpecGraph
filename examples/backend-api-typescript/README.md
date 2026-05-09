@@ -21,6 +21,8 @@ cargo run -p sg-cli -- --root examples/backend-api-typescript code index \
 cargo run -p sg-cli -- --root examples/backend-api-typescript ci validate --skip-git --links-file links.yaml
 ```
 
+The `code index` step records both `CodeFile` and lightweight `CodeSymbol` observations for source files.
+
 Commit messages for implementation work must include trailers:
 
 ```text

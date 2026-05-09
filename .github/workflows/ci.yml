@@ -14,10 +14,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
       - name: Format check
         run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Cargo test
         run: cargo test --workspace --all-targets
+      - name: Proof scenario
+        run: cargo run -p sg-cli -- proof run
       - name: CLI smoke test
         run: cargo run -p sg-cli -- --version

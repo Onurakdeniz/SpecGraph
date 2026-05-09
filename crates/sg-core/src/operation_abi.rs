@@ -85,9 +85,9 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         OperationDefinition {
             name: "Code.Index",
             category: "code",
-            description: "Record changed files as CodeFile facts.",
+            description: "Record changed files and observed source symbols as code facts.",
             required_input_fields: &["changedFiles"],
-            allowed_create_node_types: &["CodeFile"],
+            allowed_create_node_types: &["CodeFile", "CodeSymbol"],
             allowed_create_edge_types: &[],
         },
         OperationDefinition {

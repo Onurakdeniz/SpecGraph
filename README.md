@@ -168,6 +168,8 @@ Index changed files as `CodeFile` facts:
 cargo run -p sg-cli -- code index --changed-file crates/sg-core/src/lib.rs
 ```
 
+The local indexer also emits observed `CodeSymbol` facts for Rust, TypeScript/JavaScript, Python, Go, Java/Kotlin, and Swift source files.
+
 Run aggregate MVP validation in CI mode:
 
 ```bash
@@ -201,7 +203,7 @@ Run the local proof scenario to verify the core idea end to end:
 cargo run -p sg-cli -- proof run
 ```
 
-The proof creates a temporary SpecGraph store, creates a spec, rejects an invalid operation delta through the operation ABI gate, binds the spec to a branch, generates an ActionGraph, checks traceability failure before links exist, imports a test link, validates commit binding, rejects a secret-file policy violation, and replays the graph with hash checks.
+The proof creates a temporary SpecGraph store, creates a spec, rejects an invalid operation delta through the operation ABI gate, binds the spec to a branch, generates an ActionGraph, indexes source symbols, checks traceability failure before links exist, imports a test link, validates commit binding, rejects a secret-file policy violation, and replays the graph with hash checks.
 
 ## Validation
 

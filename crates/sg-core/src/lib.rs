@@ -42,7 +42,8 @@ pub use store::{
 
 pub use adoption::{scan_repository, AdoptionMode};
 pub use code_indexer::{
-    observations_to_delta, CodeIndexObservation, CodeIndexer, CodeSymbolObservation,
+    index_source_file, language_for_path, observations_to_delta, CodeIndexObservation, CodeIndexer,
+    CodeSymbolObservation, LightweightCodeIndexer,
 };
 pub use graph_merge::{detect_merge_conflicts, diff_graphs, GraphDiff, MergeConflict};
 pub use impact::{analyze_impact, ImpactAnalysis};

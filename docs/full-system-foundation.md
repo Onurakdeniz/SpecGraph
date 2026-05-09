@@ -55,6 +55,16 @@ sg adopt scan --mode enforce-new-work
 sg adopt scan --mode strict
 ```
 
+## Source Code Indexing
+
+Index changed files as observed code facts:
+
+```bash
+sg code index --changed-file src/identity/password-reset.ts
+```
+
+The built-in lightweight indexer recognizes common source declarations in Rust, TypeScript/JavaScript, Python, Go, Java/Kotlin, and Swift. It emits trusted graph deltas with `CodeFile` and observed `CodeSymbol` nodes; semantic ownership remains policy/validator-controlled instead of being accepted blindly from the parser.
+
 ## Impact Analysis
 
 Traverse the graph from one or more root nodes:
@@ -94,11 +104,11 @@ Run a deterministic local scenario that exercises positive and negative enforcem
 sg proof run
 ```
 
-The scenario verifies init, spec creation, operation ABI rejection, branch binding, ActionGraph generation, traceability failure/success, commit binding, policy denial, and graph replay hash checks.
+The scenario verifies init, spec creation, operation ABI rejection, branch binding, ActionGraph generation, source symbol indexing, traceability failure/success, commit binding, policy denial, and graph replay hash checks.
 
 ## Current Boundary
 
-The implementation now includes deterministic foundations for the full system: ontology pack validation/install/locking, operation ABI validation, policy decisions, waivers, impact analysis, proposal trust states, graph diff primitives, merge conflict detection primitives, adoption modes, deterministic query helpers, a proof-of-idea runner, and multi-language code indexer contracts. Advanced production integrations such as a hosted GitHub App, Studio UI, and real LLM patch sandbox are represented by trusted data models and CLI foundations, not external services.
+The implementation now includes deterministic foundations for the full system: ontology pack validation/install/locking, operation ABI validation, policy decisions, waivers, impact analysis, proposal trust states, graph diff primitives, merge conflict detection primitives, adoption modes, deterministic query helpers, a proof-of-idea runner, lightweight multi-language source indexing, and code indexer contracts. Advanced production integrations such as a hosted GitHub App, Studio UI, and real LLM patch sandbox are represented by trusted data models and CLI foundations, not external services.
 
 
 ## Internal Query and Code Indexer Contracts
@@ -106,5 +116,5 @@ The implementation now includes deterministic foundations for the full system: o
 The trusted core exposes:
 
 - `GraphQuery` for deterministic node/edge traversal used by validators and policies.
-- `CodeIndexer` for language-specific indexer adapters.
+- `LightweightCodeIndexer` plus the `CodeIndexer` trait for language-specific indexer adapters.
 - `CodeIndexObservation` and `CodeSymbolObservation` so indexers produce observed facts instead of trusted facts directly.
