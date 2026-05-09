@@ -29,7 +29,10 @@ pub use git::{
 };
 pub use hashing::state_hash;
 pub use model::*;
-pub use ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
+pub use ontology::{
+    MvpOntology, OntologyStateMachine, OntologyStateTransition, OntologyValidatorRule,
+    CORE_ONTOLOGY_VERSION,
+};
 pub use operation_abi::{
     built_in_operations, find_operation, validate_operation_postconditions,
     validate_operation_preconditions, validate_operation_request, OperationDefinition,

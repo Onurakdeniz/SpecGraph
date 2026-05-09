@@ -2,7 +2,7 @@
 
 **System area:** Ontology System  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** code audit plus Phase 2.2 ontology state-validation implementation slice.
 
 ## Purpose
 
@@ -14,17 +14,19 @@ Implement the ontology language for node types, edge types, attributes, invarian
 
 - MVP node and edge types are documented
 - Pack validate/install/list commands are described as existing
+- Built-in ontology validator rules expose stable ids for stable-key, type, endpoint, state-machine, and cardinality checks
+- Spec and Proposal state machines validate allowed states, initial states, and transitions before event append
+- Existing cardinality checks enforce one branch binding and one ActionGraph per Spec plus ActionGraph child requirements
 
 ### Partly Implemented
 
 - Pack manifests and locking exist as foundation
-- Full migrations, state machines, and validator DSL are incomplete
+- Pack migrations and the complete external ontology DSL are incomplete
 
 ### Not Implemented / Remaining
 
 - Complete ontology interpreter
 - Pack migrations and upgrade runs
-- State-machine enforcement
 - Sandboxed validator execution
 
 ## Implementation Parts
@@ -41,12 +43,19 @@ sg ontology validate-pack, install-pack, list-packs, future validate/diff/migrat
 
 Type legality, endpoint checks, cardinality, required/forbidden relations, state transitions, pack compatibility
 
+
+### State and Validator Rules
+
+- `MvpOntology::validator_rules()` lists the current built-in validator rule set and whether each rule runs at integrity, pre-append, or validation stage.
+- `MvpOntology::state_machines()` exposes the built-in Spec lifecycle (`Draft -> Validated -> Planned -> BranchBound -> Implementing -> Review -> Released`) and Proposal trust lifecycle (`Observed/Proposed -> Validated -> Accepted -> Trusted`, with allowed rejection transitions).
+- `append_operation` validates delta state transitions against the pre-operation graph before applying a delta or appending an event, so invalid transitions leave no partial trusted events.
+- Integrity validation rejects unknown or non-string state attributes on stateful node types.
+
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: Complete ontology interpreter.
 - Implement or finish: Pack migrations and upgrade runs.
-- Implement or finish: State-machine enforcement.
 - Implement or finish: Sandboxed validator execution.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
