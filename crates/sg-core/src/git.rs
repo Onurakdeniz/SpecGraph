@@ -10,6 +10,7 @@ pub struct CommitTrailers {
     pub spec: Option<String>,
     pub action_group: Option<String>,
     pub commit_plan: Option<String>,
+    pub graph_delta: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +39,7 @@ pub fn parse_commit_trailers(message: &str) -> CommitTrailers {
             "spec" => trailers.spec = Some(value),
             "actiongroup" | "action-group" => trailers.action_group = Some(value),
             "commitplan" | "commit-plan" => trailers.commit_plan = Some(value),
+            "graphdelta" | "graph-delta" => trailers.graph_delta = Some(value),
             _ => {}
         }
     }
@@ -118,14 +120,14 @@ pub fn validate_commit_binding(graph: &Graph, input: &CommitValidationInput) -> 
         return findings;
     };
 
-    let commit_plan_found = graph
+    let commit_plan_node = graph
         .edges
         .values()
         .filter(|edge| edge.from == group_node.id && edge.edge_type == "HAS_COMMIT_PLAN")
         .filter_map(|edge| graph.nodes.get(&edge.to))
-        .any(|node| node_matches_ref(node_attrs(node), &node.id, commit_plan));
+        .find(|node| node_matches_ref(node_attrs(node), &node.id, commit_plan));
 
-    if !commit_plan_found {
+    let Some(commit_plan_node) = commit_plan_node else {
         findings.push(finding(
             "commit.unknown_commit_plan",
             format!(
@@ -133,12 +135,19 @@ pub fn validate_commit_binding(graph: &Graph, input: &CommitValidationInput) -> 
                 input.commit
             ),
         ));
-    }
+        return findings;
+    };
 
     findings.extend(validate_changed_files_against_action_group(
         graph,
         &group_node.id,
         &input.changed_files,
+    ));
+    findings.extend(validate_commit_plan_requirements(
+        graph,
+        commit_plan_node,
+        input,
+        &trailers,
     ));
 
     findings
@@ -206,6 +215,115 @@ pub fn validate_changed_files_against_action_group(
                 format!("Changed file `{file}` is outside ActionGroup allowed paths"),
             )
         })
+        .collect()
+}
+
+pub fn validate_commit_plan_requirements(
+    graph: &Graph,
+    commit_plan: &crate::model::Node,
+    input: &CommitValidationInput,
+    trailers: &CommitTrailers,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    if let Some(allowed_files) = string_array_attr(commit_plan, "allowedFiles") {
+        findings.extend(validate_files_against_patterns(
+            &allowed_files,
+            &input.changed_files,
+            "commit_plan.out_of_scope_file",
+            "CommitPlan allowedFiles",
+        ));
+    }
+
+    for required in string_array_attr(commit_plan, "requiredValidation").unwrap_or_default() {
+        let satisfied = graph.nodes.values().any(|node| {
+            node.node_type == "ValidationRun"
+                && node
+                    .attributes
+                    .get("status")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|status| status == "Passed")
+                && node
+                    .attributes
+                    .get("checks")
+                    .and_then(|value| value.as_array())
+                    .into_iter()
+                    .flatten()
+                    .any(|value| value.as_str().is_some_and(|check| check == required))
+        });
+        if !satisfied {
+            findings.push(finding(
+                "commit_plan.required_validation_missing",
+                format!(
+                    "Commit `{}` requires passed validation `{}` before using CommitPlan `{}`",
+                    input.commit, required, commit_plan.id
+                ),
+            ));
+        }
+    }
+
+    if commit_plan
+        .attributes
+        .get("expectedGraphDelta")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+        && trailers
+            .graph_delta
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        findings.push(finding(
+            "commit_plan.graph_delta_trailer_missing",
+            format!(
+                "Commit `{}` requires a `GraphDelta:` trailer for CommitPlan `{}`",
+                input.commit, commit_plan.id
+            ),
+        ));
+    }
+
+    findings
+}
+
+fn string_array_attr(node: &crate::model::Node, attr: &str) -> Option<Vec<String>> {
+    node.attributes
+        .get(attr)
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+}
+
+fn validate_files_against_patterns(
+    allowed_patterns: &[String],
+    changed_files: &[String],
+    code: &str,
+    label: &str,
+) -> Vec<Finding> {
+    if changed_files.is_empty() || allowed_patterns.is_empty() {
+        return Vec::new();
+    }
+
+    let mut builder = GlobSetBuilder::new();
+    for pattern in allowed_patterns {
+        let pattern = normalize_glob(pattern);
+        if let Ok(glob) = Glob::new(&pattern) {
+            builder.add(glob);
+        }
+    }
+    let Ok(globs) = builder.build() else {
+        return vec![finding(
+            "commit_plan.invalid_allowed_files",
+            format!("{label} patterns could not be compiled"),
+        )];
+    };
+
+    changed_files
+        .iter()
+        .filter(|file| !globs.is_match(file))
+        .map(|file| finding(code, format!("Changed file `{file}` is outside {label}")))
         .collect()
 }
 
@@ -288,5 +406,32 @@ mod tests {
         assert_eq!(trailers.spec.as_deref(), Some("AUTH-001"));
         assert_eq!(trailers.action_group.as_deref(), Some("implementation"));
         assert_eq!(trailers.commit_plan.as_deref(), Some("implementation"));
+    }
+
+    #[test]
+    fn commit_plan_requires_graph_delta_trailer_when_expected() {
+        let plan = crate::model::Node {
+            id: "node_commit_plan".to_string(),
+            stable_key: "commit-plan:AUTH-001/implementation".to_string(),
+            node_type: "CommitPlan".to_string(),
+            attributes: BTreeMap::from([(
+                "expectedGraphDelta".to_string(),
+                serde_json::json!(true),
+            )]),
+        };
+        let input = CommitValidationInput {
+            commit: "abc123".to_string(),
+            message: "feat: test".to_string(),
+            changed_files: vec![],
+        };
+        let findings = validate_commit_plan_requirements(
+            &Graph::default(),
+            &plan,
+            &input,
+            &CommitTrailers::default(),
+        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "commit_plan.graph_delta_trailer_missing"));
     }
 }

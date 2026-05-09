@@ -17,6 +17,9 @@ Make commits planned semantic units tied to action groups, allowed files, requir
 
 ### Partly Implemented
 
+- CommitPlan now carries `allowedFiles`, `requiredValidation`, and `expectedGraphDelta` enforcement metadata.
+- Commit validation enforces CommitPlan allowed files, required passed validation checks, and `GraphDelta:` trailer requirements where expected.
+
 - Trailer validation exists
 - ExpectedGraphDelta and category-specific validation are not complete
 

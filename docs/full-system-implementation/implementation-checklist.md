@@ -217,8 +217,8 @@ Related areas:
 - [x] Add `sg action complete`.
 - [x] Add `sg action replan`.
 - [x] Add action dependencies and ordering.
-- [~] Expand CommitPlan schema with category, required validation, allowed files, and expected delta.
-- [ ] Add GraphDelta trailer support where practical.
+- [x] Expand CommitPlan schema with category, required validation, allowed files, and expected delta.
+- [x] Add GraphDelta trailer support where practical.
 - [~] Expand GitGraph with repository and PR placeholder facts.
 - [~] Ensure CI repeats every hook validation.
 - [ ] Add machine-readable CI output.
