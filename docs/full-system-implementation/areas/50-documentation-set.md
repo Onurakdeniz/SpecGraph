@@ -17,38 +17,41 @@ Split concept/backlog/review documents into implementation references by concept
 - Canonical full-system implementation plan is established as the single implementation source of truth
 - Historical/reference documents are marked so they do not override the canonical plan
 - Phase 0 architecture boundary doc exists at `docs/architecture/boundaries.md`
+- Phase 0 CLI UX contract exists at `docs/cli/ux-contract.md`
 
 ### Partly Implemented
 
 - High-level docs still need formal extraction into generated/reference docs
 - Formal references still need extraction
-- Architecture boundary rules are documented but still need automated validation and generated reference integration
+- Architecture boundary rules are documented and have a first automated validation check, but still need generated reference integration
+- CLI command behavior is documented as a contract, but the implementation still needs generated/synced reference docs in later slices
 
 ### Not Implemented / Remaining
 
 - Numbered reference docs
 - Generated schema/API docs
-- CLI docs synced with real commands
+- Generated CLI docs synced with real commands
 - Automated docs/reference checks for architecture boundary drift
 
 ## Implementation Parts
 
 ### 1. Graph Model / Runtime Objects
 
-Docs map graph domains, operations, policies, validators, commands, tests, and architecture boundaries. `docs/architecture/boundaries.md` is the Phase 0 guardrail for trusted core, CLI, adapters, packs, policies, examples, future server/SDK/Studio, and release/distribution.
+Docs map graph domains, operations, policies, validators, commands, tests, and architecture boundaries. `docs/architecture/boundaries.md` is the Phase 0 guardrail for trusted core, CLI, adapters, packs, policies, examples, future server/SDK/Studio, and release/distribution. `docs/cli/ux-contract.md` is the Phase 0 guardrail for CLI command inventory, output modes, and exit codes.
 
 ### 2. Commands / APIs
 
-Docs link checks, command example checks, schema-generated references
+Docs link checks, command example checks, schema-generated references, generated CLI references
 
 ### 3. Validation and Policy Gates
 
-Docs should stay consistent with CLI and schemas; stale docs caught in CI where feasible
+Docs should stay consistent with CLI and schemas; stale docs caught in CI where feasible. Later slices should compare generated CLI references against `docs/cli/ux-contract.md`.
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep `docs/architecture/boundaries.md` consistent with the canonical phase-gated plan and future automated architecture checks.
+- Keep `docs/cli/ux-contract.md` consistent with command implementation and future generated CLI references.
 - Implement or finish: Numbered reference docs.
 - Implement or finish: Generated schema/API docs.
 - Implement or finish: CLI docs synced with real commands.
@@ -73,4 +76,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

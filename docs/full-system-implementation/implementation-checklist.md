@@ -72,6 +72,7 @@ python3 scripts/check_architecture_boundaries.py
 Related areas:
 
 - [01. Repository and Package Structure](areas/01-repository-and-package-structure.md)
+- [02. CLI UX](areas/02-cli-ux.md)
 - [45. Security Boundaries](areas/45-security-boundaries.md)
 - [46. Adapter Layer](areas/46-adapter-layer.md)
 - [50. Documentation Set](areas/50-documentation-set.md)
@@ -84,6 +85,7 @@ Related areas:
 - [x] Mark which current files belong to trusted core, adapters, CLI, packs, examples, and future UI/server.
 - [x] Add dependency rules: core cannot depend on filesystem, Git, network, LLM, or UI directly.
 - [x] Add architecture check or documentation test for dependency rules.
+- [x] Define CLI UX contract with planned command inventory, output modes, and exit codes in [`docs/cli/ux-contract.md`](../cli/ux-contract.md).
 - [ ] Add benchmark placeholders for replay, validation, indexing, and query performance.
 - [~] Keep `docs/full-system-implementation/index.md` updated when areas change status.
 
