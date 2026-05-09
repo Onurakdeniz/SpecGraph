@@ -15,18 +15,18 @@ Let repeated failures improve packs, validators, policies, and migrations withou
 - Evolution flow and example are documented
 - Pack upgrade migration planning exists for installed ontology packs
 - Pack upgrades emit compatibility findings for removed node/edge types and require explicit migration entries
+- Ontology change proposals validate tests, migration plans, compatibility checks, and release evidence
 
 ### Partly Implemented
 
 - Pack install foundation exists and can record `OntologyMigration` facts for accepted upgrades
 - Project upgrade planning foundation exists, but full migration execution workflow is not implemented
+- Core ontology includes `OntologyChange`, `OntologyTest`, `CompatibilityCheck`, `PackReleaseEvidence`, and `UpgradeRun` evidence facts
 
 ### Not Implemented / Remaining
 
-- OntologyChange model
-- Pack release workflow
-- Ontology tests
-- Full project upgrade execution and release workflow
+- Full project upgrade execution and release workflow beyond current evidence model
+- CLI commands for proposal and release orchestration
 
 ## Implementation Parts
 
@@ -51,10 +51,8 @@ Changes need tests, migration plans, compatibility checks, approvals, and root c
 
 ### 4. Implementation Work Items
 
-- Implement or finish: OntologyChange model.
-- Implement or finish: Pack release workflow.
-- Implement or finish: Ontology tests.
-- Implement or finish: Full project upgrade execution and release workflow.
+- Implement or finish: CLI commands for proposal and release orchestration.
+- Implement or finish: Full project upgrade execution and release workflow beyond current evidence model.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 
@@ -76,3 +74,10 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
 
+
+### Phase 5.6 Ontology Change Proposals
+
+- `validate_ontology_change_proposal` enforces ontology tests, migration plans, compatibility checks, and release evidence.
+- Released ontology changes are not releasable unless all required evidence is linked.
+- `OntologyChange.Propose` is registered in the Operation ABI for graph-native proposal evidence.
+- Stable-key families and ontology types are registered for change proposals, tests, compatibility checks, release evidence, and upgrade runs.

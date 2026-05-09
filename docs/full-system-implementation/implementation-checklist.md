@@ -323,8 +323,8 @@ Related areas:
 - [x] Add IssueGraph lifecycle.
 - [x] Add failing-test-before-fix policy.
 - [x] Add root cause classification.
-- [ ] Add OntologyChange proposal workflow.
-- [ ] Add ontology tests and pack release workflow.
+- [x] Add OntologyChange proposal workflow.
+- [x] Add ontology tests and pack release workflow.
 
 ### Gate Checks
 
@@ -335,7 +335,7 @@ Related areas:
 - [x] Existing repo observe mode never blocks legacy code.
 - [x] enforce-new-work mode blocks only new governed work.
 - [x] Reproducible bug fix cannot close without required regression evidence.
-- [ ] Ontology change cannot release without tests and migration plan.
+- [x] Ontology change cannot release without tests and migration plan.
 
 ---
 
