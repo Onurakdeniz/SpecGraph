@@ -257,7 +257,9 @@ Related areas:
 
 - [~] Formalize adapter trait/capability model.
 - [~] Mark all adapter output as observations unless accepted by operation.
-- [~] Stabilize `CodeIndexObservation` schema.
+- [x] Stabilize `CodeIndexObservation` schema with framework, import, route, generated-file, trust-label, and location fields.
+- [x] Add framework-aware code indexer foundation for Express, Axum, FastAPI, and Flask route observations.
+- [x] Add deterministic import extraction for JS/TS, Rust, and Python observations.
 - [x] Add CodeGraph semantic model for files, symbols, imports, routes, ownership, behavior links, and risk links.
 - [x] Add source locations for CodeGraph symbols/routes/imports.
 - [ ] Expand link manifest for code-symbol-to-use-case links.

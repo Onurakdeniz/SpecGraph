@@ -14,24 +14,25 @@ Provide deterministic language-specific indexers that emit observations rather t
 
 - Lightweight indexer recognizes Rust, TS/JS, Python, Go, Java/Kotlin, Swift declarations
 - Review docs require observation producer model
+- Framework-aware indexer foundation detects Express, Axum, FastAPI, and Flask route observations with source locations
 
 ### Partly Implemented
 
 - Lightweight detection exists
-- Framework-aware semantic indexing is future
+- Framework-aware semantic indexing now covers route/import foundations; sandboxed pack indexers and incremental indexing remain partial
 
 ### Not Implemented / Remaining
 
 - Sandboxed pack indexers
-- Dependency extraction
-- Generated-code handling
+- Sandboxed dependency execution for pack indexers
+- Generated-code handling beyond deterministic marking
 - Incremental indexing
 
 ## Implementation Parts
 
 ### 1. Graph Model / Runtime Objects
 
-CodeIndexObservation, CodeSymbolObservation, route/import/test/migration observations
+CodeIndexObservation, CodeSymbolObservation, CodeImportObservation, CodeRouteObservation, source locations, trust labels, generated-file markers
 
 ### 2. Commands / APIs
 
@@ -45,8 +46,9 @@ Output must be stable, bounded, observed, and subject to policy before satisfyin
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: Sandboxed pack indexers.
-- Implement or finish: Dependency extraction.
-- Implement or finish: Generated-code handling.
+- Implemented foundation: Dependency/import extraction for JS/TS, Rust, and Python.
+- Implemented foundation: Generated-code markers on observations.
+- Implement or finish: Generated-code reconciliation policy.
 - Implement or finish: Incremental indexing.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.

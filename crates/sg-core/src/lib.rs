@@ -93,8 +93,9 @@ pub use code_graph::{
     CodeOwnershipFact, CodeRiskLink, CodeRouteFact, CodeSymbolFact, SourceLocation,
 };
 pub use code_indexer::{
-    index_source_file, language_for_path, observations_to_delta, CodeIndexObservation, CodeIndexer,
-    CodeSymbolObservation, LightweightCodeIndexer,
+    framework_for_source, index_source_file, language_for_path, observations_to_delta,
+    validate_code_index_observations, CodeImportObservation, CodeIndexObservation, CodeIndexer,
+    CodeRouteObservation, CodeSymbolObservation, FrameworkAwareCodeIndexer, LightweightCodeIndexer,
 };
 pub use data_graph::{
     column_node_id, data_contract_node_id, table_node_id, validate_data_graph, ColumnDefinition,
