@@ -35,7 +35,10 @@ pub use operation_abi::{
     validate_operation_preconditions, validate_operation_request, OperationDefinition,
 };
 pub use spec::{SpecProjection, TextItem};
-pub use stable_key::{validate_stable_key, StableKeyError};
+pub use stable_key::{
+    built_in_stable_key_registry, format_stable_key, parse_stable_key, validate_stable_key,
+    StableKeyError, StableKeyFamily, StableKeyParts, StableKeyRegistry,
+};
 pub use store::{
     bind_spec_branch, create_waiver, generate_action_graph, import_spec_file, init_project,
     install_ontology_pack, list_action_graph, list_installed_ontology_packs, rebuild_projections,

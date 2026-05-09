@@ -56,6 +56,7 @@ Duplicate or invalid stable keys and links to missing stable keys must fail vali
 - The documented commands/APIs work for the happy path and at least one intentional failure path.
 - Validation findings identify the graph object, file or command involved, and remediation.
 - The area can be exercised from CLI/CI without relying on untrusted direct mutation.
+- Built-in core stable-key families parse, format, validate, and emit remediation-rich errors.
 
 ## Source Notes
 
