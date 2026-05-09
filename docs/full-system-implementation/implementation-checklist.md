@@ -157,8 +157,8 @@ Related areas:
 - [~] Route every mutating CLI command through operation runtime.
 - [x] Add precondition checks.
 - [x] Add postcondition checks.
-- [~] Add ontology cardinality checks.
-- [ ] Add ontology state-machine support.
+- [x] Add ontology cardinality checks.
+- [x] Add ontology state-machine support.
 - [~] Add pack migration planning model.
 - [~] Add policy result model persistence or receipt inclusion.
 - [~] Add actor identity resolution.

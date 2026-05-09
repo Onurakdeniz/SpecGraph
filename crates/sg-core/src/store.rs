@@ -1250,6 +1250,19 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         ));
     }
 
+    let ontology = active_ontology(root)?;
+    let state_transition_findings =
+        ontology.validate_delta_state_transitions(&graph, &options.delta);
+    let state_transition_error_count = state_transition_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if state_transition_error_count > 0 {
+        return Err(StoreError::OntologyValidationFailed(
+            state_transition_error_count,
+        ));
+    }
+
     graph.apply_delta(&options.delta);
 
     let postcondition_findings = validate_operation_postconditions(&graph, &options.delta);
@@ -1263,7 +1276,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         ));
     }
 
-    let integrity_findings = active_ontology(root)?.validate_integrity(&graph);
+    let integrity_findings = ontology.validate_integrity(&graph);
     let error_count = integrity_findings
         .iter()
         .filter(|finding| finding.severity == FindingSeverity::Error)
@@ -2987,6 +3000,87 @@ acceptanceCriteria:
             .nodes
             .values()
             .any(|node| node.node_type == "Spec"));
+    }
+
+    #[test]
+    fn append_operation_rejects_invalid_state_transition_before_event_append() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let projection = SpecProjection {
+            spec: "AUTH-001".to_string(),
+            title: "Password reset".to_string(),
+            module: None,
+            priority: None,
+            summary: None,
+            requirements: vec![crate::spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "User can request reset".to_string(),
+            }],
+            acceptance_criteria: vec![crate::spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Generic response".to_string(),
+            }],
+        };
+        let mut create_delta = projection.to_delta();
+        for node in &mut create_delta.create_nodes {
+            if node.node_type == "Spec" {
+                node.attributes.insert("state".to_string(), json!("Draft"));
+            }
+        }
+
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
+                delta: create_delta,
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let mut updated = replay
+            .graph
+            .nodes
+            .values()
+            .find(|node| node.node_type == "Spec")
+            .unwrap()
+            .clone();
+        updated
+            .attributes
+            .insert("state".to_string(), json!("Released"));
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    update_nodes: vec![updated],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::OntologyValidationFailed(1)));
+        let after = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert_eq!(after.events_replayed, replay.events_replayed);
     }
 
     #[test]

@@ -1,9 +1,31 @@
-use crate::model::{Edge, Finding, FindingSeverity, Graph, Node};
+use crate::model::{Edge, Finding, FindingSeverity, Graph, GraphDelta, Node};
 use crate::stable_key::validate_stable_key;
 use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_ONTOLOGY};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const CORE_ONTOLOGY_VERSION: &str = "core@0.1.0";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OntologyValidatorRule {
+    pub id: &'static str,
+    pub stage: &'static str,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OntologyStateMachine {
+    pub node_type: &'static str,
+    pub attribute: &'static str,
+    pub states: &'static [&'static str],
+    pub initial_states: &'static [&'static str],
+    pub transitions: &'static [OntologyStateTransition],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OntologyStateTransition {
+    pub from: &'static str,
+    pub to: &'static str,
+}
 
 #[derive(Debug, Clone)]
 pub struct MvpOntology {
@@ -119,6 +141,40 @@ impl MvpOntology {
         self.edge_types.iter().map(String::as_str)
     }
 
+    pub fn validator_rules(&self) -> Vec<OntologyValidatorRule> {
+        vec![
+            OntologyValidatorRule {
+                id: "ontology.stable_keys",
+                stage: "integrity",
+                description: "All graph facts must use valid, unique stable keys.",
+            },
+            OntologyValidatorRule {
+                id: "ontology.types",
+                stage: "integrity",
+                description: "Nodes and edges must use registered ontology types.",
+            },
+            OntologyValidatorRule {
+                id: "ontology.edge_endpoints",
+                stage: "integrity",
+                description: "Typed edges must connect allowed source and target node types.",
+            },
+            OntologyValidatorRule {
+                id: "ontology.state_machines",
+                stage: "pre-append",
+                description: "Stateful graph facts must use allowed states and transitions.",
+            },
+            OntologyValidatorRule {
+                id: "ontology.cardinality",
+                stage: "validation",
+                description: "Graph completeness checks enforce built-in relationship cardinality.",
+            },
+        ]
+    }
+
+    pub fn state_machines(&self) -> Vec<OntologyStateMachine> {
+        state_machines().to_vec()
+    }
+
     pub fn is_node_type(&self, value: &str) -> bool {
         self.node_types.contains(value)
     }
@@ -146,6 +202,85 @@ impl MvpOntology {
         findings
     }
 
+    /// Validate state machine transitions against the pre-operation graph before
+    /// a delta is accepted. Integrity validation still validates the resulting
+    /// node state values after the delta is applied in memory.
+    pub fn validate_delta_state_transitions(
+        &self,
+        graph: &Graph,
+        delta: &GraphDelta,
+    ) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        for node in &delta.create_nodes {
+            if let Some(machine) = state_machine_for(&node.node_type) {
+                if let Some(state) = read_state(node, machine, &mut findings) {
+                    if !machine.initial_states.contains(&state) {
+                        findings.push(
+                            finding(
+                                "ontology.state_initial_invalid",
+                                format!(
+                                    "{} `{}` cannot start in `{}`. Remediation: start with one of: {}.",
+                                    machine.node_type,
+                                    node.id,
+                                    state,
+                                    machine.initial_states.join(", ")
+                                ),
+                            )
+                            .with_related_nodes([node.id.clone()]),
+                        );
+                    }
+                }
+            }
+        }
+
+        for node in &delta.update_nodes {
+            let Some(machine) = state_machine_for(&node.node_type) else {
+                continue;
+            };
+            let Some(previous) = graph.nodes.get(&node.id) else {
+                continue;
+            };
+
+            let before = read_state(previous, machine, &mut findings);
+            let after = read_state(node, machine, &mut findings);
+
+            match (before, after) {
+                (Some(before), Some(after))
+                    if before != after && !state_transition_allowed(machine, before, after) =>
+                {
+                    findings.push(
+                        finding(
+                            "ontology.state_transition_invalid",
+                            format!(
+                                "{} `{}` cannot transition {} `{}` -> `{}`. Remediation: use one of the declared ontology transitions.",
+                                machine.node_type,
+                                node.id,
+                                machine.attribute,
+                                before,
+                                after
+                            ),
+                        )
+                        .with_related_nodes([node.id.clone()]),
+                    );
+                }
+                (Some(_), None) => findings.push(
+                    finding(
+                        "ontology.state_removed",
+                        format!(
+                            "{} `{}` cannot remove state attribute `{}`. Remediation: keep the current state or transition to an allowed state.",
+                            machine.node_type, node.id, machine.attribute
+                        ),
+                    )
+                    .with_related_nodes([node.id.clone()]),
+                ),
+                _ => {}
+            }
+        }
+
+        findings
+    }
+
     /// Validate all MVP rules, including spec completeness.
     pub fn validate_graph(&self, graph: &Graph) -> Vec<Finding> {
         let mut findings = self.validate_integrity(graph);
@@ -162,6 +297,10 @@ impl MvpOntology {
                 )
                 .with_related_nodes([node.id.clone()]),
             );
+        }
+
+        if let Some(machine) = state_machine_for(&node.node_type) {
+            let _ = read_state(node, machine, findings);
         }
     }
 
@@ -298,6 +437,165 @@ impl MvpOntology {
             }
         }
     }
+}
+
+const SPEC_STATES: &[&str] = &[
+    "Draft",
+    "Validated",
+    "Planned",
+    "BranchBound",
+    "Implementing",
+    "Review",
+    "Released",
+];
+
+const SPEC_STATE_TRANSITIONS: &[OntologyStateTransition] = &[
+    OntologyStateTransition {
+        from: "Draft",
+        to: "Validated",
+    },
+    OntologyStateTransition {
+        from: "Validated",
+        to: "Planned",
+    },
+    OntologyStateTransition {
+        from: "Planned",
+        to: "BranchBound",
+    },
+    OntologyStateTransition {
+        from: "BranchBound",
+        to: "Implementing",
+    },
+    OntologyStateTransition {
+        from: "Implementing",
+        to: "Review",
+    },
+    OntologyStateTransition {
+        from: "Review",
+        to: "Released",
+    },
+];
+
+const PROPOSAL_STATES: &[&str] = &[
+    "Observed",
+    "Proposed",
+    "Validated",
+    "Accepted",
+    "Trusted",
+    "Rejected",
+];
+
+const PROPOSAL_STATE_TRANSITIONS: &[OntologyStateTransition] = &[
+    OntologyStateTransition {
+        from: "Observed",
+        to: "Proposed",
+    },
+    OntologyStateTransition {
+        from: "Observed",
+        to: "Rejected",
+    },
+    OntologyStateTransition {
+        from: "Proposed",
+        to: "Validated",
+    },
+    OntologyStateTransition {
+        from: "Proposed",
+        to: "Rejected",
+    },
+    OntologyStateTransition {
+        from: "Validated",
+        to: "Accepted",
+    },
+    OntologyStateTransition {
+        from: "Validated",
+        to: "Rejected",
+    },
+    OntologyStateTransition {
+        from: "Accepted",
+        to: "Trusted",
+    },
+    OntologyStateTransition {
+        from: "Accepted",
+        to: "Rejected",
+    },
+];
+
+const STATE_MACHINES: &[OntologyStateMachine] = &[
+    OntologyStateMachine {
+        node_type: "Spec",
+        attribute: "state",
+        states: SPEC_STATES,
+        initial_states: &["Draft"],
+        transitions: SPEC_STATE_TRANSITIONS,
+    },
+    OntologyStateMachine {
+        node_type: "Proposal",
+        attribute: "trustState",
+        states: PROPOSAL_STATES,
+        initial_states: &["Observed", "Proposed"],
+        transitions: PROPOSAL_STATE_TRANSITIONS,
+    },
+];
+
+fn state_machines() -> &'static [OntologyStateMachine] {
+    STATE_MACHINES
+}
+
+fn state_machine_for(node_type: &str) -> Option<&'static OntologyStateMachine> {
+    STATE_MACHINES
+        .iter()
+        .find(|machine| machine.node_type == node_type)
+}
+
+fn state_transition_allowed(machine: &OntologyStateMachine, from: &str, to: &str) -> bool {
+    machine
+        .transitions
+        .iter()
+        .any(|transition| transition.from == from && transition.to == to)
+}
+
+fn read_state<'a>(
+    node: &'a Node,
+    machine: &OntologyStateMachine,
+    findings: &mut Vec<Finding>,
+) -> Option<&'a str> {
+    let value = node.attributes.get(machine.attribute)?;
+
+    let Some(state) = value.as_str() else {
+        findings.push(
+            finding(
+                "ontology.state_type_invalid",
+                format!(
+                    "{} `{}` state attribute `{}` must be a string. Remediation: use one of: {}.",
+                    machine.node_type,
+                    node.id,
+                    machine.attribute,
+                    machine.states.join(", ")
+                ),
+            )
+            .with_related_nodes([node.id.clone()]),
+        );
+        return None;
+    };
+
+    if !machine.states.contains(&state) {
+        findings.push(
+            finding(
+                "ontology.state_invalid",
+                format!(
+                    "{} `{}` has invalid {} `{}`. Remediation: use one of: {}.",
+                    machine.node_type,
+                    node.id,
+                    machine.attribute,
+                    state,
+                    machine.states.join(", ")
+                ),
+            )
+            .with_related_nodes([node.id.clone()]),
+        );
+    }
+
+    Some(state)
 }
 
 fn validate_graph_stable_keys(graph: &Graph, findings: &mut Vec<Finding>) {
@@ -467,7 +765,8 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Edge, Graph, Node};
+    use crate::model::{Edge, Graph, GraphDelta, Node};
+    use serde_json::json;
     use std::collections::BTreeMap;
 
     #[test]
@@ -556,5 +855,73 @@ mod tests {
             finding.code == "stable_key.duplicate"
                 && finding.related_nodes == vec!["first".to_string(), "second".to_string()]
         }));
+    }
+
+    #[test]
+    fn validator_rules_expose_state_and_cardinality_rules() {
+        let ontology = MvpOntology::new();
+        let rules = ontology.validator_rules();
+
+        assert!(rules
+            .iter()
+            .any(|rule| rule.id == "ontology.state_machines" && rule.stage == "pre-append"));
+        assert!(rules
+            .iter()
+            .any(|rule| rule.id == "ontology.cardinality" && rule.stage == "validation"));
+        assert!(ontology
+            .state_machines()
+            .iter()
+            .any(|machine| machine.node_type == "Spec" && machine.attribute == "state"));
+    }
+
+    #[test]
+    fn invalid_state_value_fails_integrity_validation() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "spec".to_string(),
+            Node {
+                id: "spec".to_string(),
+                stable_key: "spec:AUTH-001".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::from([("state".to_string(), json!("ReleasedSoon"))]),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_integrity(&graph);
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "ontology.state_invalid"));
+    }
+
+    #[test]
+    fn invalid_state_transition_fails_delta_validation() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "spec".to_string(),
+            Node {
+                id: "spec".to_string(),
+                stable_key: "spec:AUTH-001".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::from([("state".to_string(), json!("Draft"))]),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_delta_state_transitions(
+            &graph,
+            &GraphDelta {
+                update_nodes: vec![Node {
+                    id: "spec".to_string(),
+                    stable_key: "spec:AUTH-001".to_string(),
+                    node_type: "Spec".to_string(),
+                    attributes: BTreeMap::from([("state".to_string(), json!("Released"))]),
+                }],
+                ..GraphDelta::default()
+            },
+        );
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "ontology.state_transition_invalid"));
     }
 }
