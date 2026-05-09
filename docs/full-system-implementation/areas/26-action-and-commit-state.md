@@ -16,6 +16,9 @@ Track action execution and commit binding states so progress, blockers, replan e
 
 ### Partly Implemented
 
+- CommitPlan now carries `allowedFiles`, `requiredValidation`, and `expectedGraphDelta` enforcement metadata.
+- Commit validation enforces CommitPlan allowed files, required passed validation checks, and `GraphDelta:` trailer requirements where expected.
+
 - ActionNode lifecycle state machine now covers Ready, InProgress, Completed, Blocked, Failed, Skipped, and Replanned states.
 - `sg action start`, `sg action complete`, and `sg action replan` route through Operation Runtime and record `ExecutionAttempt` evidence.
 - Action dependencies are represented with `DEPENDS_ON`; start is blocked until dependencies are completed.

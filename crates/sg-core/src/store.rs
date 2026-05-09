@@ -2552,6 +2552,15 @@ fn action_graph_delta(spec: &str, spec_node_id: &str) -> GraphDelta {
                 ("name".to_string(), json!(template.commit_plan)),
                 ("category".to_string(), json!(template.name)),
                 ("state".to_string(), json!("Planned")),
+                ("allowedFiles".to_string(), json!(template.allowed_paths)),
+                (
+                    "requiredValidation".to_string(),
+                    json!(template.required_validation),
+                ),
+                (
+                    "expectedGraphDelta".to_string(),
+                    json!(template.name == "graph"),
+                ),
             ]),
         });
 
@@ -2573,6 +2582,7 @@ struct ActionGroupTemplate {
     action: &'static str,
     commit_plan: &'static str,
     allowed_paths: &'static [&'static str],
+    required_validation: &'static [&'static str],
 }
 
 const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
@@ -2582,6 +2592,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         action: "Update graph facts and spec projections",
         commit_plan: "Commit graph metadata changes",
         allowed_paths: &[".specgraph/**", "specs/**", "docs/**"],
+        required_validation: &["replay", "spec"],
     },
     ActionGroupTemplate {
         name: "tests",
@@ -2589,6 +2600,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         action: "Add acceptance-criterion tests",
         commit_plan: "Commit tests for acceptance criteria",
         allowed_paths: &["tests/**", "**/*test*", "**/*spec*"],
+        required_validation: &["trace"],
     },
     ActionGroupTemplate {
         name: "implementation",
@@ -2596,6 +2608,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         action: "Implement required behavior",
         commit_plan: "Commit implementation changes",
         allowed_paths: &["src/**", "crates/**", "packages/**", "apps/**"],
+        required_validation: &[],
     },
     ActionGroupTemplate {
         name: "interface",
@@ -2609,6 +2622,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
             "proto/**",
             "docs/**",
         ],
+        required_validation: &[],
     },
     ActionGroupTemplate {
         name: "validation",
@@ -2616,6 +2630,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         action: "Run validation commands",
         commit_plan: "Commit validation evidence",
         allowed_paths: &[".github/**", ".specgraph/validation/**", "docs/**"],
+        required_validation: &["replay", "spec", "trace", "commit"],
     },
 ];
 

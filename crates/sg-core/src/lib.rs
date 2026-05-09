@@ -35,7 +35,7 @@ pub mod trace;
 pub mod validation;
 pub use git::{
     parse_commit_trailers, validate_changed_files_against_action_group, validate_commit_binding,
-    CommitTrailers, CommitValidationInput,
+    validate_commit_plan_requirements, CommitTrailers, CommitValidationInput,
 };
 pub use hashing::state_hash;
 pub use identity::{infer_actor_kind, resolve_actor_identity, ActorIdentity, ActorKind};
