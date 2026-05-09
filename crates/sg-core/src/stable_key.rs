@@ -185,6 +185,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "pull-request:github/123",
     },
     StableKeyFamily {
+        prefix: "graph-merge",
+        description: "Graph merge or rebase dry-run/acceptance record",
+        example: "graph-merge:merge:feature->development",
+    },
+    StableKeyFamily {
         prefix: "graph-snapshot",
         description: "Graph snapshot fact",
         example: "graph-snapshot:sha256:abc123",

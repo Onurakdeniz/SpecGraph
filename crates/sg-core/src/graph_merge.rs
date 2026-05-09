@@ -1,7 +1,7 @@
-use crate::model::{Finding, FindingSeverity, Graph};
+use crate::model::{Finding, FindingSeverity, Graph, GraphDelta, Node};
 use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_GRAPH_MERGE};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +76,230 @@ pub struct SemanticConflictReport {
     pub dimensions: Vec<SemanticConflictDimension>,
     pub blocking: bool,
     pub findings: Vec<Finding>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GraphIntegrationMode {
+    Merge,
+    Rebase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GraphIntegrationStatus {
+    Ready,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphIntegrationDryRun {
+    pub mode: GraphIntegrationMode,
+    pub status: GraphIntegrationStatus,
+    pub source_branch: String,
+    pub target_branch: String,
+    pub conflict_report: SemanticConflictReport,
+    pub planned_delta: GraphDelta,
+    pub post_merge_validation: Vec<Finding>,
+    pub blockers: Vec<Finding>,
+}
+
+pub fn dry_run_graph_merge(
+    base: &Graph,
+    target: &Graph,
+    source: &Graph,
+    source_branch: impl Into<String>,
+    target_branch: impl Into<String>,
+) -> GraphIntegrationDryRun {
+    dry_run_graph_integration(
+        GraphIntegrationMode::Merge,
+        base,
+        target,
+        source,
+        source_branch,
+        target_branch,
+    )
+}
+
+pub fn dry_run_graph_rebase(
+    base: &Graph,
+    branch: &Graph,
+    new_base: &Graph,
+    branch_name: impl Into<String>,
+    new_base_branch: impl Into<String>,
+) -> GraphIntegrationDryRun {
+    dry_run_graph_integration(
+        GraphIntegrationMode::Rebase,
+        base,
+        new_base,
+        branch,
+        branch_name,
+        new_base_branch,
+    )
+}
+
+fn dry_run_graph_integration(
+    mode: GraphIntegrationMode,
+    base: &Graph,
+    target: &Graph,
+    source: &Graph,
+    source_branch: impl Into<String>,
+    target_branch: impl Into<String>,
+) -> GraphIntegrationDryRun {
+    let source_branch = source_branch.into();
+    let target_branch = target_branch.into();
+    let conflict_report = detect_semantic_conflicts(base, target, source);
+    let mut blockers = conflict_report.findings.clone();
+    let status = if conflict_report.blocking {
+        GraphIntegrationStatus::Blocked
+    } else {
+        GraphIntegrationStatus::Ready
+    };
+    let planned_delta = if status == GraphIntegrationStatus::Ready {
+        let mut delta = delta_from_source_changes(base, source);
+        delta
+            .create_nodes
+            .push(integration_node(mode, &source_branch, &target_branch));
+        delta
+    } else {
+        GraphDelta::default()
+    };
+    let post_merge_validation = validate_dry_run_post_state(target, &planned_delta);
+    blockers.extend(
+        post_merge_validation
+            .iter()
+            .filter(|finding| finding.severity == FindingSeverity::Error)
+            .cloned(),
+    );
+
+    GraphIntegrationDryRun {
+        mode,
+        status: if blockers.is_empty() {
+            status
+        } else {
+            GraphIntegrationStatus::Blocked
+        },
+        source_branch,
+        target_branch,
+        conflict_report,
+        planned_delta,
+        post_merge_validation,
+        blockers,
+    }
+}
+
+fn delta_from_source_changes(base: &Graph, source: &Graph) -> GraphDelta {
+    GraphDelta {
+        create_nodes: source
+            .nodes
+            .values()
+            .filter(|node| !base.nodes.contains_key(&node.id))
+            .cloned()
+            .collect(),
+        update_nodes: source
+            .nodes
+            .values()
+            .filter(|node| {
+                base.nodes
+                    .get(&node.id)
+                    .is_some_and(|base_node| base_node != *node)
+            })
+            .cloned()
+            .collect(),
+        delete_nodes: base
+            .nodes
+            .keys()
+            .filter(|id| !source.nodes.contains_key(*id))
+            .cloned()
+            .collect(),
+        create_edges: source
+            .edges
+            .values()
+            .filter(|edge| !base.edges.contains_key(&edge.id))
+            .cloned()
+            .collect(),
+        update_edges: source
+            .edges
+            .values()
+            .filter(|edge| {
+                base.edges
+                    .get(&edge.id)
+                    .is_some_and(|base_edge| base_edge != *edge)
+            })
+            .cloned()
+            .collect(),
+        delete_edges: base
+            .edges
+            .keys()
+            .filter(|id| !source.edges.contains_key(*id))
+            .cloned()
+            .collect(),
+    }
+}
+
+fn integration_node(mode: GraphIntegrationMode, source_branch: &str, target_branch: &str) -> Node {
+    let mode_name = match mode {
+        GraphIntegrationMode::Merge => "merge",
+        GraphIntegrationMode::Rebase => "rebase",
+    };
+    let id = format!(
+        "node_graph_{}_{}_into_{}",
+        mode_name,
+        stable_fragment(source_branch),
+        stable_fragment(target_branch)
+    );
+    Node {
+        id,
+        stable_key: format!("graph-merge:{mode_name}:{source_branch}->{target_branch}"),
+        node_type: "GraphMerge".to_string(),
+        attributes: BTreeMap::from([
+            ("mode".to_string(), json!(mode_name)),
+            ("sourceBranch".to_string(), json!(source_branch)),
+            ("targetBranch".to_string(), json!(target_branch)),
+            ("dryRun".to_string(), json!(true)),
+            ("postMergeValidation".to_string(), json!("planned")),
+        ]),
+    }
+}
+
+fn validate_dry_run_post_state(target: &Graph, delta: &GraphDelta) -> Vec<Finding> {
+    let mut merged = target.clone();
+    merged.apply_delta(delta);
+    let mut findings = Vec::new();
+    let mut stable_keys: BTreeMap<String, String> = BTreeMap::new();
+    for node in merged.nodes.values() {
+        if let Some(existing) = stable_keys.insert(node.stable_key.clone(), node.id.clone()) {
+            findings.push(
+                Finding::new(
+                    "graph_merge.post_validation.duplicate_stable_key",
+                    FindingSeverity::Error,
+                    format!(
+                        "Post-merge state would contain duplicate stable key `{}` on nodes `{}` and `{}`. Remediation: resolve identity before accepting merge.",
+                        node.stable_key, existing, node.id
+                    ),
+                )
+                .with_validator(VALIDATOR_GRAPH_MERGE, CORE_VALIDATOR_VERSION)
+                .with_related_nodes(vec![existing, node.id.clone()]),
+            );
+        }
+    }
+    findings
+}
+
+fn stable_fragment(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_separator = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_was_separator = false;
+        } else if !last_was_separator {
+            out.push('_');
+            last_was_separator = true;
+        }
+    }
+    out.trim_matches('_').to_string()
 }
 
 pub fn diff_graphs(left: &Graph, right: &Graph) -> GraphDiff {
@@ -590,6 +814,54 @@ mod tests {
         }
         assert!(report.blocking);
         assert_eq!(report.findings.len(), report.conflicts.len());
+    }
+
+    #[test]
+    fn graph_merge_dry_run_blocks_unresolved_conflicts() {
+        let base = graph_with_spec_title("Base");
+        let ours = graph_with_spec_title("Ours");
+        let theirs = graph_with_spec_title("Theirs");
+
+        let dry_run = dry_run_graph_merge(&base, &ours, &theirs, "feature", "development");
+
+        assert_eq!(dry_run.status, GraphIntegrationStatus::Blocked);
+        assert!(dry_run.planned_delta.create_nodes.is_empty());
+        assert!(!dry_run.blockers.is_empty());
+    }
+
+    #[test]
+    fn graph_merge_dry_run_plans_merge_event_and_post_validation() {
+        let base = graph_with_spec_title("Base");
+        let ours = base.clone();
+        let mut theirs = base.clone();
+        theirs.nodes.insert(
+            "node_requirement".to_string(),
+            node(
+                "node_requirement",
+                "requirement:AUTH-001/REQ-001",
+                "Requirement",
+                json!({"text":"new requirement"}),
+            ),
+        );
+
+        let dry_run = dry_run_graph_merge(&base, &ours, &theirs, "feature", "development");
+
+        assert_eq!(dry_run.status, GraphIntegrationStatus::Ready);
+        assert!(dry_run.blockers.is_empty());
+        assert!(dry_run
+            .planned_delta
+            .create_nodes
+            .iter()
+            .any(|node| node.node_type == "GraphMerge"));
+        assert!(dry_run.post_merge_validation.is_empty());
+    }
+
+    #[test]
+    fn graph_rebase_dry_run_uses_rebase_mode() {
+        let base = graph_with_spec_title("Base");
+        let dry_run = dry_run_graph_rebase(&base, &base, &base, "feature", "development");
+        assert_eq!(dry_run.mode, GraphIntegrationMode::Rebase);
+        assert_eq!(dry_run.status, GraphIntegrationStatus::Ready);
     }
 
     fn graph_with_spec_title(title: &str) -> Graph {

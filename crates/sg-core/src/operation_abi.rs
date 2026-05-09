@@ -505,6 +505,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "GraphMerge.DryRun",
+            category: "graph",
+            description: "Record graph merge or rebase dry-run evidence, conflicts, blockers, and post-merge validation intent.",
+            required_input_fields: &["mode", "sourceBranch", "targetBranch"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["GraphMerge", "MergeConflict"],
+            allowed_create_edge_types: &["HAS_CONFLICT"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "ExistingRepo.Adopt",
             category: "adoption",
             description: "Record observed CodeFile baseline facts for an existing repo.",

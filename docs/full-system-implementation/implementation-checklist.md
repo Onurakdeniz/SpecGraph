@@ -310,9 +310,9 @@ Related areas:
 - [~] Add graph branch metadata.
 - [x] Add graph branch base snapshot tracking.
 - [x] Implement three-way graph diff: base / ours / theirs.
-- [ ] Implement dry-run graph merge.
+- [x] Implement dry-run graph merge.
 - [x] Add conflict checks for type, cardinality, policy, migration, traceability, and ontology version.
-- [ ] Add graph rebase dry-run.
+- [x] Add graph rebase dry-run.
 - [~] Add impact-carrying edge metadata to ontology.
 - [ ] Add invalidation rules.
 - [ ] Add `RevalidationQueue` model.
@@ -329,7 +329,7 @@ Related areas:
 ### Gate Checks
 
 - [x] Unresolved graph conflict blocks merge.
-- [ ] Graph merge records a merge event and validates post-merge state.
+- [x] Graph merge records a merge dry-run event plan and validates post-merge state.
 - [ ] Rebase detects invalidated actions and requires replan.
 - [~] Impact analysis produces deterministic direct and indirect impacts.
 - [~] Existing repo observe mode never blocks legacy code.

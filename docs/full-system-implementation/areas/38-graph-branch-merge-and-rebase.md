@@ -17,13 +17,14 @@ Align Git branches with graph branches and base snapshots for safe semantic merg
 ### Partly Implemented
 
 - Snapshot binding and diff/conflict primitives exist
+- Merge/rebase dry-run lifecycle now plans graph integration, blocks unresolved conflicts, and post-validates deterministic candidate state
 - Branch binding now stores base snapshot id, base state hash, base event sequence, and base event id in graph facts and `.specgraph/branches/*.json` metadata
 - `sg graph replay --check` validates branch base metadata against replay
 
 ### Not Implemented / Remaining
 
 - Full graph branch event layout beyond current base metadata
-- GraphMerge/Rebase operations
+- Merge/rebase acceptance operations beyond current dry-run evidence
 - Affected action replan
 - Hosting integration
 
@@ -46,7 +47,7 @@ Apply source delta only after conflict, ontology, branch base, and policy valida
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Preserve branch base metadata validation against canonical replay.
 - Implement or finish: Graph branch event layout.
-- Implement or finish: GraphMerge/Rebase operations.
+- Implement or finish: GraphMerge/Rebase acceptance operations beyond current dry-run evidence.
 - Implement or finish: Affected action replan.
 - Implement or finish: Hosting integration.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
@@ -71,3 +72,10 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
 
+
+### Phase 5.2 Merge/Rebase Dry Run
+
+- `dry_run_graph_merge` and `dry_run_graph_rebase` produce `GraphIntegrationDryRun` reports for source/target graph states.
+- Dry-runs reuse semantic conflict reports; any blocking conflict prevents planned graph mutation.
+- Ready dry-runs include a planned `GraphMerge` fact, source delta, and post-merge duplicate stable-key validation findings.
+- `GraphMerge.DryRun` is registered in the Operation ABI for future CLI/API recording through the runtime.
