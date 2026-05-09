@@ -170,10 +170,11 @@ Related areas:
 - [x] Add non-waivable policy list.
 - [x] Add common `Finding` schema across validators.
 - [x] Add validator registry, versioning, and ValidatorExecution graph facts.
+- [x] Add adapter capability descriptors and observation trust validation.
 
 ### Gate Checks
 
-- [~] No graph mutation can happen without a receipt.
+- [x] No graph mutation can happen without a receipt for Phase 2 runtime slices.
 - [~] Failed operations leave no partial graph events.
 - [x] Invalid ontology delta fails before event append.
 - [x] Denied policy blocks the operation.

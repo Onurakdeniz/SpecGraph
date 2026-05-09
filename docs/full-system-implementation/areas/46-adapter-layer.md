@@ -2,7 +2,7 @@
 
 **System area:** Adapter Layer  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** code audit plus architecture boundary checks and Phase 2.9 adapter capability/trust implementation slice.
 
 ## Purpose
 
@@ -15,19 +15,21 @@ Connect Git, filesystem, code indexers, test runners, CI, LLMs, package managers
 - Adapter types and trust boundary are documented
 - CodeIndexer trait and observations are documented
 - Phase 0 architecture boundary doc states that adapters emit observations/proposals/operation inputs only and cannot promote their own output to trusted facts
+- Unified adapter descriptor foundation declares adapter ids, kinds, and capabilities
+- Adapter delta validation enforces observed trust state, source trust, and observedBy provenance
 - `scripts/check_architecture_boundaries.py` now checks transitional adapter-facing core modules for direct `Accepted`/`Trusted` promotion
 
 ### Partly Implemented
 
 - Git/filesystem/code/CI foundations exist
-- Capability and provenance rules are now documented in `docs/architecture/boundaries.md` but not yet enforced by a unified adapter runtime
-- The automated boundary check prevents obvious trust-promotion regressions, but a unified adapter capability runtime remains future work
+- Capability and provenance rules are now enforced for current code-index and adoption observation deltas
+- The automated boundary check prevents obvious trust-promotion regressions; provider-specific adapter runtimes remain future work
 - Package/test/DB/LLM adapters incomplete
 
 ### Not Implemented / Remaining
 
-- Unified adapter trait
-- Capability declarations enforced in code
+- Provider-specific adapter runtimes beyond the core descriptor foundation
+- Capability enforcement across future adapter crates/providers
 - Comprehensive prevention of direct adapter-to-trusted-fact promotion across future adapter crates/providers
 - Package/test/migration adapters
 - Adapter provenance
@@ -46,15 +48,22 @@ Git, code index, trace, adopt, CI, proposal, `python3 scripts/check_architecture
 
 Adapter output is bounded, provenance-tagged, observed, and validated before promotion. The Phase 0 architecture check fails if current adapter-facing observation modules directly mark outputs as `Accepted` or `Trusted`.
 
+
+### Capability and Provenance Runtime Foundation
+
+- `AdapterDescriptor` names adapters and capabilities in code, starting with lightweight code indexing and filesystem adoption.
+- Adapter observations must stay `Observed`, carry `sourceTrust: Observation`, and include `observedBy` provenance.
+- Direct trust promotion from adapter output is rejected before those observations can be treated as trusted facts.
+
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep adapter implementations aligned with `docs/architecture/boundaries.md`.
 - Keep architecture-boundary trust-promotion checks aligned with new adapter-facing modules.
-- Implement or finish: Unified adapter trait.
-- Implement or finish: Capability declarations.
+- Implement or finish: Provider-specific adapter runtimes beyond the core descriptor foundation.
+- Implement or finish: Capability enforcement across future adapter crates/providers.
 - Implement or finish: Package/test/migration adapters.
-- Implement or finish: Adapter provenance.
+- Implement or finish: Adapter provenance beyond current observedBy/sourceTrust foundation.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 

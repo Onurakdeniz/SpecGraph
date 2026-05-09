@@ -4,6 +4,7 @@
 //! the canonical history, snapshots are derived state, and all graph mutations
 //! are represented as operation receipts plus graph deltas.
 
+pub mod adapter;
 pub mod adoption;
 pub mod canonical;
 pub mod code_indexer;
@@ -56,6 +57,10 @@ pub use store::{
     UpsertActorOptions,
 };
 
+pub use adapter::{
+    validate_adapter_delta, AdapterCapability, AdapterDescriptor, ADOPTION_ADAPTER_ID,
+    CODE_INDEXER_ADAPTER_ID, SOURCE_TRUST_OBSERVATION, TRUST_STATE_OBSERVED,
+};
 pub use adoption::{scan_repository, AdoptionMode};
 pub use code_indexer::{
     index_source_file, language_for_path, observations_to_delta, CodeIndexObservation, CodeIndexer,
@@ -83,7 +88,8 @@ pub use query::{
 pub use trace::{validate_trace_links, LinksManifest, TestLink};
 pub use validation::{
     built_in_validators, find_validator, ValidatorDefinition, ValidatorExecution,
-    ValidatorExecutionStatus, CORE_VALIDATOR_VERSION, VALIDATOR_BRANCH_METADATA,
-    VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING, VALIDATOR_ONTOLOGY, VALIDATOR_ONTOLOGY_PACK,
-    VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT, VALIDATOR_TRACE_LINKS,
+    ValidatorExecutionStatus, CORE_VALIDATOR_VERSION, VALIDATOR_ADAPTER_TRUST,
+    VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING, VALIDATOR_ONTOLOGY,
+    VALIDATOR_ONTOLOGY_PACK, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT,
+    VALIDATOR_TRACE_LINKS,
 };

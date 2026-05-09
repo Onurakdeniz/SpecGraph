@@ -1,3 +1,4 @@
+use crate::adapter::{CODE_INDEXER_ADAPTER_ID, SOURCE_TRUST_OBSERVATION, TRUST_STATE_OBSERVED};
 use crate::model::{GraphDelta, Node};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -83,7 +84,9 @@ pub fn observations_to_delta(observations: &[CodeIndexObservation]) -> GraphDelt
                     ("path".to_string(), json!(observation.file)),
                     ("language".to_string(), json!(observation.language)),
                     ("symbolCount".to_string(), json!(observation.symbols.len())),
-                    ("trustState".to_string(), json!("Observed")),
+                    ("trustState".to_string(), json!(TRUST_STATE_OBSERVED)),
+                    ("sourceTrust".to_string(), json!(SOURCE_TRUST_OBSERVATION)),
+                    ("observedBy".to_string(), json!(CODE_INDEXER_ADAPTER_ID)),
                 ]),
             });
         }
@@ -105,7 +108,9 @@ pub fn observations_to_delta(observations: &[CodeIndexObservation]) -> GraphDelt
                         ("name".to_string(), json!(symbol.name)),
                         ("kind".to_string(), json!(symbol.kind)),
                         ("line".to_string(), json!(symbol.line)),
-                        ("trustState".to_string(), json!("Observed")),
+                        ("trustState".to_string(), json!(TRUST_STATE_OBSERVED)),
+                        ("sourceTrust".to_string(), json!(SOURCE_TRUST_OBSERVATION)),
+                        ("observedBy".to_string(), json!(CODE_INDEXER_ADAPTER_ID)),
                     ]),
                 });
             }
@@ -428,6 +433,11 @@ impl Store {}
             .create_nodes
             .iter()
             .any(|node| node.node_type == "CodeFile"));
+        assert!(crate::adapter::validate_adapter_delta(
+            &crate::adapter::AdapterDescriptor::lightweight_code_indexer(),
+            &delta
+        )
+        .is_empty());
         assert_eq!(
             delta
                 .create_nodes

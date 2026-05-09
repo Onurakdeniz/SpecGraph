@@ -1,3 +1,4 @@
+use crate::adapter::{ADOPTION_ADAPTER_ID, SOURCE_TRUST_OBSERVATION, TRUST_STATE_OBSERVED};
 use crate::model::{GraphDelta, Node};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -27,6 +28,9 @@ pub fn scan_repository(root: &Path, mode: AdoptionMode) -> std::io::Result<Graph
                 attributes: BTreeMap::from([
                     ("path".to_string(), json!(file)),
                     ("adoptionMode".to_string(), json!(mode)),
+                    ("trustState".to_string(), json!(TRUST_STATE_OBSERVED)),
+                    ("sourceTrust".to_string(), json!(SOURCE_TRUST_OBSERVATION)),
+                    ("observedBy".to_string(), json!(ADOPTION_ADAPTER_ID)),
                 ]),
             })
             .collect(),
