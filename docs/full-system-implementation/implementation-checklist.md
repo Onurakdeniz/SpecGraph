@@ -269,7 +269,7 @@ Related areas:
 - [ ] Add route/API drift detector.
 - [ ] Add migration/DataGraph drift detector.
 - [x] Add first complete architecture pack validator.
-- [ ] Add table ownership model.
+- [x] Add table ownership model.
 - [ ] Add migration rollback strategy model.
 - [ ] Add migration approval/test evidence validator.
 

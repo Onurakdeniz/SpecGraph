@@ -70,6 +70,16 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "ci-provider:github-actions",
     },
     StableKeyFamily {
+        prefix: "column",
+        description: "DataGraph table column fact",
+        example: "column:users/id",
+    },
+    StableKeyFamily {
+        prefix: "data-contract",
+        description: "DataGraph data contract fact",
+        example: "data-contract:identity.users",
+    },
+    StableKeyFamily {
         prefix: "code-file",
         description: "Observed or accepted code file",
         example: "code-file:src/identity/password-reset.js",
@@ -203,6 +213,21 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "spec",
         description: "SpecGraph spec",
         example: "spec:AUTH-001",
+    },
+    StableKeyFamily {
+        prefix: "table",
+        description: "DataGraph persistence table fact",
+        example: "table:users",
+    },
+    StableKeyFamily {
+        prefix: "query",
+        description: "DataGraph query or read access fact",
+        example: "query:user-list",
+    },
+    StableKeyFamily {
+        prefix: "read-model",
+        description: "DataGraph read model fact",
+        example: "read-model:user-summary",
     },
     StableKeyFamily {
         prefix: "test-runner",

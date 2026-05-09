@@ -10,6 +10,7 @@ pub mod architecture_graph;
 pub mod architecture_pack;
 pub mod canonical;
 pub mod code_indexer;
+pub mod data_graph;
 pub mod git;
 pub mod graph_merge;
 pub mod hashing;
@@ -82,6 +83,10 @@ pub use architecture_pack::{
 pub use code_indexer::{
     index_source_file, language_for_path, observations_to_delta, CodeIndexObservation, CodeIndexer,
     CodeSymbolObservation, LightweightCodeIndexer,
+};
+pub use data_graph::{
+    column_node_id, data_contract_node_id, table_node_id, validate_data_graph, ColumnDefinition,
+    DataContractDefinition, DataGraphProjection, TableDefinition,
 };
 pub use graph_merge::{detect_merge_conflicts, diff_graphs, GraphDiff, MergeConflict};
 pub use impact::{analyze_impact, ImpactAnalysis};
