@@ -155,6 +155,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "validation-run:ci-001",
     },
     StableKeyFamily {
+        prefix: "validator-execution",
+        description: "Validator execution evidence within a validation run",
+        example: "validator-execution:ci-001/validator.ontology",
+    },
+    StableKeyFamily {
         prefix: "waiver",
         description: "Policy waiver evidence",
         example: "waiver:WAIVER-001",
@@ -352,6 +357,7 @@ mod tests {
             "code-symbol",
             "test-case",
             "validation-run",
+            "validator-execution",
             "finding",
             "proposal",
             "edge",
@@ -392,6 +398,7 @@ mod tests {
             "proposal:PROP-001",
             "test-case:tests/auth.spec.ts::reset",
             "validation-run:ci-001",
+            "validator-execution:ci-001/validator.ontology",
             "finding:run-001/0/trace.missing",
             "code-file:src/identity/password-reset.js",
             "code-symbol:src/lib.rs/function/main",

@@ -1790,6 +1790,32 @@ fn validation_run_delta(
         create_edges.push(edge(&project.id, "VALIDATED_BY", &run_node_id));
     }
 
+    for check in checks {
+        let validator_id = validator_id_for_check(check);
+        let execution_id = node_id("validator_execution", &format!("{run_id}/{validator_id}"));
+        let finding_count = findings
+            .iter()
+            .filter(|finding| finding.validator == validator_id)
+            .count();
+        create_nodes.push(Node {
+            id: execution_id.clone(),
+            stable_key: format!("validator-execution:{run_id}/{validator_id}"),
+            node_type: "ValidatorExecution".to_string(),
+            attributes: BTreeMap::from([
+                ("runId".to_string(), json!(run_id)),
+                ("check".to_string(), json!(check)),
+                ("validator".to_string(), json!(validator_id)),
+                (
+                    "validatorVersion".to_string(),
+                    json!(sg_core::CORE_VALIDATOR_VERSION),
+                ),
+                ("status".to_string(), json!(status)),
+                ("findingCount".to_string(), json!(finding_count)),
+            ]),
+        });
+        create_edges.push(edge(&run_node_id, "HAS_VALIDATOR_EXECUTION", &execution_id));
+    }
+
     for (index, finding) in findings.iter().enumerate() {
         let finding_id = node_id("finding", &format!("{run_id}/{index}/{}", finding.code));
         create_nodes.push(Node {
@@ -1803,6 +1829,13 @@ fn validation_run_delta(
                     json!(format!("{:?}", finding.severity)),
                 ),
                 ("message".to_string(), json!(finding.message)),
+                ("validator".to_string(), json!(finding.validator)),
+                (
+                    "validatorVersion".to_string(),
+                    json!(finding.validator_version),
+                ),
+                ("lifecycleState".to_string(), json!("Open")),
+                ("remediation".to_string(), json!(finding.remediation)),
             ]),
         });
         create_edges.push(edge(&run_node_id, "HAS_FINDING", &finding_id));
@@ -1812,6 +1845,19 @@ fn validation_run_delta(
         create_nodes,
         create_edges,
         ..GraphDelta::default()
+    }
+}
+
+fn validator_id_for_check(check: &str) -> &'static str {
+    match check {
+        "operation-abi" => sg_core::VALIDATOR_OPERATION_ABI,
+        "spec" => sg_core::VALIDATOR_ONTOLOGY,
+        "trace" => sg_core::VALIDATOR_TRACE_LINKS,
+        "commit" | "git" => sg_core::VALIDATOR_GIT_BINDING,
+        "code-index" => sg_core::VALIDATOR_CODE_SCOPE,
+        "policy" => sg_core::VALIDATOR_POLICY,
+        "replay" => sg_core::VALIDATOR_SNAPSHOT,
+        _ => "validator.runtime",
     }
 }
 

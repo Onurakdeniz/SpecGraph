@@ -58,6 +58,7 @@ impl MvpOntology {
                 "CodeSymbol",
                 "TestCase",
                 "ValidationRun",
+                "ValidatorExecution",
                 "Finding",
                 "GraphSnapshot",
                 "OntologyPack",
@@ -99,6 +100,7 @@ impl MvpOntology {
                 "CHANGES_FILE",
                 "VERIFIES",
                 "VALIDATED_BY",
+                "HAS_VALIDATOR_EXECUTION",
                 "HAS_FINDING",
                 "HAS_POLICY_DECISION",
                 "HAS_WAIVER",
@@ -749,6 +751,7 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
             &["Project", "Spec", "GitCommit", "CodeFile", "TestCase"],
             &["ValidationRun"],
         )),
+        "HAS_VALIDATOR_EXECUTION" => Some((&["ValidationRun"], &["ValidatorExecution"])),
         "HAS_FINDING" => Some((&["ValidationRun"], &["Finding"])),
         "HAS_POLICY_DECISION" => Some((
             &["Project", "Actor", "Spec", "GitCommit", "ValidationRun"],
