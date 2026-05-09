@@ -276,6 +276,9 @@ struct PolicyCheckArgs {
     /// Record policy decisions as graph facts.
     #[arg(long)]
     record: bool,
+    /// Write a machine-readable JSON validation report.
+    #[arg(long = "report-file")]
+    report_file: Option<PathBuf>,
     #[arg(long, default_value = "main")]
     graph_branch: String,
 }
@@ -564,6 +567,9 @@ struct CiValidateArgs {
     /// Append a ValidationRun graph fact after successful validation.
     #[arg(long)]
     record: bool,
+    /// Write a machine-readable JSON validation report.
+    #[arg(long = "report-file")]
+    report_file: Option<PathBuf>,
     #[arg(long, default_value = "local:ci")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -1249,6 +1255,20 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
                 validate_git_range(store, root, args.base, "HEAD")?;
                 checks.push("git".to_string());
             }
+            if let Some(report_file) = args.report_file.as_ref() {
+                write_ci_report(
+                    root,
+                    report_file,
+                    "Passed",
+                    &checks,
+                    &[],
+                    &replay.state_hash,
+                )?;
+                println!(
+                    "ciReport: {}",
+                    resolve_path(root, report_file.clone()).display()
+                );
+            }
             if args.record {
                 let run_id = validation_run_id("ci");
                 let receipt = store.append_operation(AppendOperationOptions {
@@ -1278,6 +1298,30 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
             println!("ci: ok");
         }
     }
+    Ok(())
+}
+
+fn write_ci_report(
+    root: &Path,
+    report_file: &Path,
+    status: &str,
+    checks: &[String],
+    findings: &[Finding],
+    state_hash: &str,
+) -> anyhow::Result<()> {
+    let path = resolve_path(root, report_file.to_path_buf());
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let report = json!({
+        "schemaVersion": "specgraph.ci-report/v1",
+        "status": status,
+        "checks": checks,
+        "findingCount": findings.len(),
+        "findings": findings,
+        "stateHash": state_hash,
+    });
+    fs::write(&path, serde_json::to_vec_pretty(&report)?)?;
     Ok(())
 }
 
@@ -1750,9 +1794,9 @@ fi
     let pre_push = r#"#!/bin/sh
 set -e
 if command -v sg >/dev/null 2>&1; then
-  sg ci validate
+  sg ci validate --report-file .specgraph/validation/ci-report.json
 else
-  cargo run -q -p sg-cli -- ci validate
+  cargo run -q -p sg-cli -- ci validate --report-file .specgraph/validation/ci-report.json
 fi
 "#;
     let pre_push_path = hooks_dir.join("pre-push");

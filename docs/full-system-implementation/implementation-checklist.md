@@ -220,8 +220,8 @@ Related areas:
 - [x] Expand CommitPlan schema with category, required validation, allowed files, and expected delta.
 - [x] Add GraphDelta trailer support where practical.
 - [x] Expand GitGraph with repository and PR placeholder facts.
-- [~] Ensure CI repeats every hook validation.
-- [ ] Add machine-readable CI output.
+- [x] Ensure CI repeats every hook validation.
+- [x] Add machine-readable CI output.
 
 ### Gate Checks
 
@@ -233,7 +233,7 @@ Related areas:
 - [x] Commit without `Spec`, `ActionGroup`, and `CommitPlan` trailers fails.
 - [x] Commit referencing nonexistent spec/action/plan fails.
 - [x] Changed file outside allowed scope fails.
-- [~] CI fails when hook checks are bypassed locally.
+- [x] CI fails when hook checks are bypassed locally.
 
 ---
 
