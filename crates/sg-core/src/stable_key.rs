@@ -135,6 +135,16 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "language:typescript",
     },
     StableKeyFamily {
+        prefix: "migration",
+        description: "Migration runtime plan or execution fact",
+        example: "migration:20260509_add_users",
+    },
+    StableKeyFamily {
+        prefix: "migration-test",
+        description: "Migration test evidence fact",
+        example: "migration-test:20260509_add_users/applies",
+    },
+    StableKeyFamily {
         prefix: "module",
         description: "Project module",
         example: "module:Identity",
@@ -203,6 +213,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "requirement",
         description: "Spec requirement",
         example: "requirement:AUTH-001/REQ-001",
+    },
+    StableKeyFamily {
+        prefix: "rollback-plan",
+        description: "Migration rollback strategy fact",
+        example: "rollback-plan:20260509_add_users",
     },
     StableKeyFamily {
         prefix: "role",

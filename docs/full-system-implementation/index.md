@@ -19,8 +19,8 @@ This directory breaks the full SpecGraph OS system into one Markdown file per **
 | Status | Count |
 |---|---:|
 | ✅ Fully implemented | 0 |
-| 🟡 Partly implemented | 44 |
-| ⬜ Not implemented | 8 |
+| 🟡 Partly implemented | 45 |
+| ⬜ Not implemented | 7 |
 | **Total** | **52** |
 
 ## Source Markdown Read
@@ -63,7 +63,7 @@ Use the full-system phase-gated roadmap in [phase-gated-implementation-plan.md](
 | 17 | [ArchitectureGraph](areas/17-architecturegraph.md) | 🟡 Partly implemented |
 | 18 | [Architecture Packs](areas/18-architecture-packs.md) | 🟡 Partly implemented |
 | 19 | [DataGraph](areas/19-datagraph.md) | 🟡 Partly implemented |
-| 20 | [Migration Runtime](areas/20-migration-runtime.md) | ⬜ Not implemented |
+| 20 | [Migration Runtime](areas/20-migration-runtime.md) | 🟡 Partly implemented |
 | 21 | [SpecGraph](areas/21-specgraph.md) | 🟡 Partly implemented |
 | 22 | [Spec Authoring](areas/22-spec-authoring.md) | 🟡 Partly implemented |
 | 23 | [Spec State Machine](areas/23-spec-state-machine.md) | 🟡 Partly implemented |

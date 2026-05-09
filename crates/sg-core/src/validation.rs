@@ -13,6 +13,7 @@ pub const VALIDATOR_SNAPSHOT: &str = "validator.snapshot";
 pub const VALIDATOR_TRACE_LINKS: &str = "validator.trace_links";
 pub const VALIDATOR_ADAPTER_TRUST: &str = "validator.adapter_trust";
 pub const VALIDATOR_ARCHITECTURE_PACK: &str = "validator.architecture_pack";
+pub const VALIDATOR_MIGRATION_RUNTIME: &str = "validator.migration_runtime";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -91,6 +92,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Test Mapping",
             description: "Validates TestCase to AcceptanceCriterion traceability links.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_MIGRATION_RUNTIME,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Migration Runtime",
+            description: "Validates migration owner, rollback, affected table, approval, and test evidence.",
         },
         ValidatorDefinition {
             id: VALIDATOR_ARCHITECTURE_PACK,

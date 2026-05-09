@@ -153,6 +153,24 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
+
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Migration.Record",
+            category: "data",
+            description: "Record migration planning and execution evidence including owner, rollback, tests, approvals, and affected tables.",
+            required_input_fields: &["migration"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["Migration", "RollbackPlan", "MigrationTestEvidence"],
+            allowed_create_edge_types: &[
+                "OWNED_BY_MODULE",
+                "AFFECTS_TABLE",
+                "HAS_ROLLBACK_PLAN",
+                "HAS_MIGRATION_TEST",
+                "HAS_MIGRATION_APPROVAL",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Spec.Create",
