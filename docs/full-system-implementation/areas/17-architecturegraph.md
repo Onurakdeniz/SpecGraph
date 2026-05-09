@@ -1,8 +1,8 @@
 # 17. ArchitectureGraph
 
 **System area:** ArchitectureGraph  
-**Implementation status:** ⬜ Not implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Implementation status:** 🟡 Partly implemented  
+**Status basis:** fresh Phase 3.3 implementation audit after adding graph-native ArchitectureGraph model facts and boundary validation.
 
 ## Purpose
 
@@ -13,17 +13,22 @@ Encode allowed dependency directions, layer rules, ports/adapters, public/privat
 ### Fully Implemented
 
 - ArchitectureGraph examples are documented
+- Built-in ontology now includes `Port`, `Adapter`, `DependencyBoundary`, and `ArchitectureConstraint` facts.
+- `ArchitectureGraph.Upsert` is registered in the Operation ABI for architecture graph deltas.
+- `CALLS`, `USES_PORT`, `IMPLEMENTS`, and `FORBIDS_DEPENDENCY_ON` relationships are registered with typed endpoint validation.
+- Built-in validation reports `CALLS` edges that violate `FORBIDS_DEPENDENCY_ON` layer boundaries.
 
 ### Partly Implemented
 
-- Pack foundations exist, but graph-native architecture validation is not described as implemented
+- Pack foundations exist, and graph-native architecture facts/forbidden dependency validation now exist in `sg-core`.
+- Drift extraction/reporting and complete architecture pack validators remain partial/future work.
 
 ### Not Implemented / Remaining
 
-- Architecture nodes/edges
-- Dependency extraction
-- Pack validators
+- Dependency extraction from CodeGraph/indexers
+- Complete architecture pack validators
 - Architecture drift reporting
+- Richer constraint language beyond forbidden layer dependencies
 
 ## Implementation Parts
 
@@ -41,7 +46,7 @@ Forbid invalid layer dependencies, private interface access, forbidden module co
 
 ### 4. Implementation Work Items
 
-- Implement or finish: Architecture nodes/edges.
+- Implement or finish: richer ArchitectureGraph nodes/edges and CLI/status surfaces.
 - Implement or finish: Dependency extraction.
 - Implement or finish: Pack validators.
 - Implement or finish: Architecture drift reporting.

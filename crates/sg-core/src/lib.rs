@@ -6,6 +6,7 @@
 
 pub mod adapter;
 pub mod adoption;
+pub mod architecture_graph;
 pub mod canonical;
 pub mod code_indexer;
 pub mod git;
@@ -68,6 +69,11 @@ pub use adapter::{
     CODE_INDEXER_ADAPTER_ID, SOURCE_TRUST_OBSERVATION, TRUST_STATE_OBSERVED,
 };
 pub use adoption::{scan_repository, AdoptionMode};
+pub use architecture_graph::{
+    adapter_node_id, dependency_boundary_node_id, port_node_id, AdapterDefinition,
+    ArchitectureGraphProjection, DependencyCall, ForbiddenDependency, PortDefinition,
+    PortDirection,
+};
 pub use code_indexer::{
     index_source_file, language_for_path, observations_to_delta, CodeIndexObservation, CodeIndexer,
     CodeSymbolObservation, LightweightCodeIndexer,
