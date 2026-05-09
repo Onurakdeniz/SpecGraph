@@ -150,9 +150,9 @@ Related areas:
 
 ### Implementation Checklist
 
-- [~] Stabilize `OperationRequest` schema.
-- [~] Stabilize `OperationDefinition` schema.
-- [~] Stabilize `OperationReceipt` schema.
+- [x] Stabilize `OperationRequest` schema.
+- [x] Stabilize `OperationDefinition` schema.
+- [x] Stabilize `OperationReceipt` schema.
 - [~] Add dry-run support for mutating operations.
 - [~] Route every mutating CLI command through operation runtime.
 - [x] Add precondition checks.

@@ -1,12 +1,17 @@
-use crate::model::{Finding, FindingSeverity, Graph, GraphDelta, OperationRequest};
+use crate::model::{
+    Finding, FindingSeverity, Graph, GraphDelta, OperationRequest, OPERATION_REQUEST_SCHEMA_VERSION,
+};
 use crate::stable_key::validate_stable_key;
 use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_OPERATION_ABI};
 use serde::Serialize;
 use serde_json::Value;
 
+pub const OPERATION_DEFINITION_SCHEMA_VERSION: &str = "specgraph.operation-definition/v1";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationDefinition {
+    pub schema_version: &'static str,
     pub name: &'static str,
     pub category: &'static str,
     pub description: &'static str,
@@ -36,6 +41,7 @@ const GENERIC_MUTATION_POSTCONDITIONS: &[&str] = &[
 pub fn built_in_operations() -> Vec<OperationDefinition> {
     vec![
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Project.Init",
             category: "project",
             description: "Initialize a SpecGraph store for a repository.",
@@ -46,6 +52,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Spec.Create",
             category: "spec",
             description: "Create a spec from CLI input.",
@@ -61,6 +68,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Spec.Import",
             category: "spec",
             description: "Import a YAML spec projection.",
@@ -76,6 +84,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Spec.BindBranch",
             category: "git",
             description: "Bind a spec to a Git branch and graph snapshot.",
@@ -86,6 +95,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "ActionGraph.Generate",
             category: "action",
             description: "Generate the deterministic MVP ActionGraph template.",
@@ -101,6 +111,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "GitCommit.Record",
             category: "git",
             description: "Record a validated Git commit and changed files.",
@@ -115,6 +126,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Identity.UpsertActor",
             category: "identity",
             description: "Create or update an actor identity graph fact.",
@@ -125,6 +137,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Identity.GrantRole",
             category: "identity",
             description: "Grant a role and optional permissions to a registered actor.",
@@ -135,6 +148,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Policy.RecordApproval",
             category: "policy",
             description: "Record graph-native approval evidence linked to an approver actor.",
@@ -145,6 +159,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Policy.CreateWaiver",
             category: "policy",
             description: "Record graph-native waiver evidence linked to an approver actor.",
@@ -155,6 +170,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Policy.RecordDecision",
             category: "policy",
             description: "Persist policy decisions from a policy evaluation as graph facts.",
@@ -165,6 +181,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Code.Index",
             category: "code",
             description: "Record changed files and observed source symbols as code facts.",
@@ -175,6 +192,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Trace.Import",
             category: "trace",
             description: "Import TestCase-to-AcceptanceCriterion links.",
@@ -185,6 +203,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Validation.Record",
             category: "validation",
             description: "Record validation run evidence and findings.",
@@ -195,6 +214,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "ExistingRepo.Adopt",
             category: "adoption",
             description: "Record observed CodeFile baseline facts for an existing repo.",
@@ -205,6 +225,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Proposal.Create",
             category: "proposal",
             description: "Store an untrusted proposal node.",
@@ -215,6 +236,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Proposal.Transition",
             category: "proposal",
             description: "Move a proposal through the trust-state lifecycle.",
@@ -225,6 +247,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "OntologyPack.Install",
             category: "ontology",
             description: "Install and lock an ontology pack manifest.",
@@ -252,11 +275,24 @@ pub fn validate_operation_request(request: &OperationRequest, delta: &GraphDelta
     };
 
     let mut findings = Vec::new();
+    validate_request_schema_version(request, &mut findings);
     validate_actor(request, &mut findings);
     validate_required_input(&definition, &request.input, &mut findings);
     validate_delta_node_types(&definition, delta, &mut findings);
     validate_delta_edge_types(&definition, delta, &mut findings);
     findings
+}
+
+fn validate_request_schema_version(request: &OperationRequest, findings: &mut Vec<Finding>) {
+    if request.schema_version != OPERATION_REQUEST_SCHEMA_VERSION {
+        findings.push(finding(
+            "operation.schema_version_unsupported",
+            format!(
+                "Operation `{}` request schemaVersion `{}` is unsupported; expected `{}`. Remediation: regenerate the request using the current Operation ABI schema.",
+                request.operation, request.schema_version, OPERATION_REQUEST_SCHEMA_VERSION
+            ),
+        ));
+    }
 }
 
 fn validate_actor(request: &OperationRequest, findings: &mut Vec<Finding>) {
@@ -492,6 +528,7 @@ mod tests {
     fn rejects_unknown_operation() {
         let findings = validate_operation_request(
             &OperationRequest {
+                schema_version: OPERATION_REQUEST_SCHEMA_VERSION.to_string(),
                 operation_id: "op".to_string(),
                 operation: "Unknown.Do".to_string(),
                 actor: "test".to_string(),
@@ -512,6 +549,7 @@ mod tests {
     fn rejects_missing_operation_actor() {
         let findings = validate_operation_request(
             &OperationRequest {
+                schema_version: OPERATION_REQUEST_SCHEMA_VERSION.to_string(),
                 operation_id: "op".to_string(),
                 operation: "Project.Init".to_string(),
                 actor: " ".to_string(),
@@ -534,6 +572,46 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "operation.actor_required"));
+    }
+
+    #[test]
+    fn operation_definitions_are_versioned() {
+        assert_eq!(
+            OPERATION_DEFINITION_SCHEMA_VERSION,
+            "specgraph.operation-definition/v1"
+        );
+        assert!(built_in_operations()
+            .iter()
+            .all(|definition| definition.schema_version == OPERATION_DEFINITION_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn rejects_unsupported_request_schema_version() {
+        let findings = validate_operation_request(
+            &OperationRequest {
+                schema_version: "specgraph.operation-request/v0".to_string(),
+                operation_id: "op".to_string(),
+                operation: "Project.Init".to_string(),
+                actor: "test".to_string(),
+                timestamp: "now".to_string(),
+                ontology_version: "core@0.1.0".to_string(),
+                graph_branch: "main".to_string(),
+                dry_run: false,
+                input: json!({"projectName": "demo"}),
+            },
+            &GraphDelta {
+                create_nodes: vec![Node {
+                    id: "node_project".to_string(),
+                    stable_key: "project:demo".to_string(),
+                    node_type: "Project".to_string(),
+                    attributes: BTreeMap::new(),
+                }],
+                ..GraphDelta::default()
+            },
+        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "operation.schema_version_unsupported"));
     }
 
     #[test]
