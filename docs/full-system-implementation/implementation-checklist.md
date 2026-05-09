@@ -140,7 +140,7 @@ Related areas:
 
 - [ ] Stabilize `OperationRequest` schema.
 - [ ] Stabilize `OperationDefinition` schema.
-- [ ] Stabilize `OperationReceipt` schema.
+- [~] Stabilize `OperationReceipt` schema.
 - [ ] Add dry-run support for mutating operations.
 - [ ] Route every mutating CLI command through operation runtime.
 - [ ] Add precondition checks.
@@ -149,10 +149,10 @@ Related areas:
 - [ ] Add ontology state-machine support.
 - [ ] Add pack migration planning model.
 - [ ] Add policy result model persistence or receipt inclusion.
-- [ ] Add actor identity resolution.
-- [ ] Add role/permission model foundation.
+- [~] Add actor identity resolution.
+- [~] Add role/permission model foundation.
 - [ ] Add graph-native `Approval` and `Waiver` nodes.
-- [ ] Add waiver expiration and scope validation.
+- [~] Add waiver expiration and scope validation.
 - [ ] Add non-waivable policy list.
 - [ ] Add common `Finding` schema across validators.
 - [ ] Add validator registry and validator versioning.

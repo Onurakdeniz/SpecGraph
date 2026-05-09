@@ -7,9 +7,10 @@ use sg_core::{
     observations_to_delta, scan_repository, validate_commit_binding, validate_pack,
     validate_trace_links, AdoptionMode, AppendOperationOptions, BindBranchOptions,
     CodeIndexObservation, CommitValidationInput, Edge, Finding, FindingSeverity,
-    GenerateActionGraphOptions, Graph, GraphDelta, InitOptions, LinksManifest, Node,
-    PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal, RecordCommitOptions,
-    ReplayOptions, Snapshot, SpecGraphStore, SpecProjection, TestLink, TextItem, TrustState,
+    GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions, LinksManifest,
+    Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal,
+    RecordCommitOptions, ReplayOptions, Snapshot, SpecGraphStore, SpecProjection, TestLink,
+    TextItem, TrustState, UpsertActorOptions,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -38,6 +39,8 @@ enum Commands {
     Ontology(OntologyArgs),
     /// Operation ABI registry commands.
     Operation(OperationArgs),
+    /// Actor identity, role, and permission commands.
+    Identity(IdentityArgs),
     /// Built-in policy engine commands.
     Policy(PolicyArgs),
     /// Existing repository adoption commands.
@@ -164,6 +167,50 @@ enum OperationCommand {
 }
 
 #[derive(Debug, Args)]
+struct IdentityArgs {
+    #[command(subcommand)]
+    command: IdentityCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum IdentityCommand {
+    /// Create or update an actor identity graph fact.
+    UpsertActor(IdentityUpsertActorArgs),
+    /// Grant a role and optional permissions to a registered actor.
+    GrantRole(IdentityGrantRoleArgs),
+}
+
+#[derive(Debug, Args)]
+struct IdentityUpsertActorArgs {
+    #[arg(long = "id")]
+    actor_id: String,
+    #[arg(long)]
+    display_name: Option<String>,
+    #[arg(long)]
+    provider: Option<String>,
+    #[arg(long)]
+    subject: Option<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct IdentityGrantRoleArgs {
+    #[arg(long)]
+    actor_id: String,
+    #[arg(long)]
+    role: String,
+    #[arg(long = "permission")]
+    permissions: Vec<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
 struct PolicyArgs {
     #[command(subcommand)]
     command: PolicyCommand,
@@ -179,6 +226,8 @@ enum PolicyCommand {
 struct PolicyCheckArgs {
     #[arg(long)]
     operation: String,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
     #[arg(long = "changed-file")]
     changed_files: Vec<String>,
     #[arg(long = "role")]
@@ -489,6 +538,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Spec(args) => handle_spec(&store, &root, args)?,
         Commands::Ontology(args) => handle_ontology(&store, &root, args)?,
         Commands::Operation(args) => handle_operation(args),
+        Commands::Identity(args) => handle_identity(&store, args)?,
         Commands::Policy(args) => handle_policy(&store, args)?,
         Commands::Adopt(args) => handle_adopt(&store, &root, args)?,
         Commands::Impact(args) => handle_impact(&store, args)?,
@@ -626,12 +676,45 @@ fn handle_operation(args: OperationArgs) {
     }
 }
 
+fn handle_identity(store: &SpecGraphStore, args: IdentityArgs) -> anyhow::Result<()> {
+    match args.command {
+        IdentityCommand::UpsertActor(args) => {
+            let receipt = store.upsert_actor(UpsertActorOptions {
+                actor_id: args.actor_id.clone(),
+                display_name: args.display_name,
+                provider: args.provider,
+                subject: args.subject,
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            println!("actorUpserted: {}", args.actor_id);
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        IdentityCommand::GrantRole(args) => {
+            let receipt = store.grant_role(GrantRoleOptions {
+                actor_id: args.actor_id.clone(),
+                role: args.role.clone(),
+                permissions: args.permissions,
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            println!("roleGranted: {}", args.role);
+            println!("actor: {}", args.actor_id);
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+    }
+    Ok(())
+}
+
 fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()> {
     match args.command {
         PolicyCommand::Check(args) => {
             let replay = store.replay(ReplayOptions { check_hashes: true })?;
             let input = PolicyCheckInput {
                 operation: args.operation,
+                actor: Some(args.actor),
                 changed_files: args.changed_files,
                 actor_roles: args.roles,
                 approvals: args.approvals,
@@ -1101,6 +1184,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         &replay.graph,
         &PolicyCheckInput {
             operation: "Merge".to_string(),
+            actor: Some("proof".to_string()),
             changed_files: vec![".env".to_string()],
             actor_roles: vec![],
             approvals: vec![],
@@ -1129,6 +1213,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         &replay.graph,
         &PolicyCheckInput {
             operation: "Merge".to_string(),
+            actor: Some("proof".to_string()),
             changed_files: vec![".github/workflows/ci.yml".to_string()],
             actor_roles: vec![],
             approvals: vec![],
@@ -1143,6 +1228,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         &replay.graph,
         &PolicyCheckInput {
             operation: "Merge".to_string(),
+            actor: Some("proof".to_string()),
             changed_files: vec![".github/workflows/ci.yml".to_string()],
             actor_roles: vec![],
             approvals: vec!["platform".to_string()],

@@ -122,6 +122,8 @@ pub struct OperationRequest {
 pub struct OperationReceipt {
     pub operation_id: String,
     pub operation: String,
+    #[serde(default)]
+    pub actor: String,
     pub accepted: bool,
     #[serde(default)]
     pub dry_run: bool,

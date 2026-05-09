@@ -77,6 +77,8 @@ pub enum StoreError {
     OperationValidationFailed(usize),
     #[error("ontology pack validation failed with {0} error finding(s)")]
     OntologyPackValidationFailed(usize),
+    #[error("actor not found in identity registry: {0}")]
+    ActorNotFound(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -134,6 +136,25 @@ pub struct GenerateActionGraphOptions {
 #[derive(Debug, Clone)]
 pub struct RecordCommitOptions {
     pub input: CommitValidationInput,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpsertActorOptions {
+    pub actor_id: String,
+    pub display_name: Option<String>,
+    pub provider: Option<String>,
+    pub subject: Option<String>,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GrantRoleOptions {
+    pub actor_id: String,
+    pub role: String,
+    pub permissions: Vec<String>,
     pub actor: String,
     pub graph_branch: String,
 }
@@ -224,6 +245,14 @@ impl SpecGraphStore {
 
     pub fn record_git_commit(&self, options: RecordCommitOptions) -> Result<OperationReceipt> {
         record_git_commit(self.root(), options)
+    }
+
+    pub fn upsert_actor(&self, options: UpsertActorOptions) -> Result<OperationReceipt> {
+        upsert_actor(self.root(), options)
+    }
+
+    pub fn grant_role(&self, options: GrantRoleOptions) -> Result<OperationReceipt> {
+        grant_role(self.root(), options)
     }
 
     pub fn install_ontology_pack(
@@ -373,6 +402,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
     let receipt = OperationReceipt {
         operation_id,
         operation: request.operation,
+        actor: request.actor,
         accepted: true,
         dry_run: false,
         pre_state_hash,
@@ -726,6 +756,100 @@ pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<Op
     )
 }
 
+pub fn upsert_actor(root: &Path, options: UpsertActorOptions) -> Result<OperationReceipt> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let actor_node = actor_node(&options);
+    let actor_exists = replay.graph.nodes.contains_key(&actor_node.id);
+    let delta = if actor_exists {
+        GraphDelta {
+            update_nodes: vec![actor_node],
+            ..GraphDelta::default()
+        }
+    } else {
+        GraphDelta {
+            create_nodes: vec![actor_node],
+            ..GraphDelta::default()
+        }
+    };
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Identity.UpsertActor".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "actorId": options.actor_id,
+                "displayName": options.display_name,
+                "provider": options.provider,
+                "subject": options.subject,
+            }),
+            dry_run: false,
+            delta,
+        },
+    )
+}
+
+pub fn grant_role(root: &Path, options: GrantRoleOptions) -> Result<OperationReceipt> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let actor_id = node_id("actor", &options.actor_id);
+    if !replay.graph.nodes.contains_key(&actor_id) {
+        return Err(StoreError::ActorNotFound(options.actor_id));
+    }
+
+    let role_id = node_id("role", &options.role);
+    let mut create_nodes = Vec::new();
+    if !replay.graph.nodes.contains_key(&role_id) {
+        create_nodes.push(role_node(&options.role));
+    }
+
+    let mut create_edges = Vec::new();
+    let role_edge = edge(&actor_id, "HAS_ROLE", &role_id);
+    if !replay.graph.edges.contains_key(&role_edge.id) {
+        create_edges.push(role_edge);
+    }
+
+    for permission in &options.permissions {
+        let permission_id = node_id("permission", permission);
+        if !replay.graph.nodes.contains_key(&permission_id)
+            && !create_nodes
+                .iter()
+                .any(|node: &Node| node.id == permission_id)
+        {
+            create_nodes.push(permission_node(permission));
+        }
+
+        let permission_edge = edge(&role_id, "GRANTS_PERMISSION", &permission_id);
+        if !replay.graph.edges.contains_key(&permission_edge.id)
+            && !create_edges
+                .iter()
+                .any(|edge: &Edge| edge.id == permission_edge.id)
+        {
+            create_edges.push(permission_edge);
+        }
+    }
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Identity.GrantRole".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "actorId": options.actor_id,
+                "role": options.role,
+                "permissions": options.permissions,
+            }),
+            dry_run: false,
+            delta: GraphDelta {
+                create_nodes,
+                create_edges,
+                ..GraphDelta::default()
+            },
+        },
+    )
+}
+
 pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<OperationReceipt> {
     validate_spec_branch_name(&options.spec, &options.branch)?;
 
@@ -874,6 +998,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
     let mut receipt = OperationReceipt {
         operation_id: operation_id.clone(),
         operation: request.operation.clone(),
+        actor: request.actor.clone(),
         accepted: true,
         dry_run: request.dry_run,
         pre_state_hash: pre_state_hash.clone(),
@@ -1463,6 +1588,51 @@ fn validate_spec_branch_name(spec: &str, branch: &str) -> Result<()> {
     }
 }
 
+fn actor_node(options: &UpsertActorOptions) -> Node {
+    let display_name = options
+        .display_name
+        .clone()
+        .unwrap_or_else(|| options.actor_id.clone());
+    let provider = options
+        .provider
+        .clone()
+        .unwrap_or_else(|| "local".to_string());
+    let subject = options
+        .subject
+        .clone()
+        .unwrap_or_else(|| options.actor_id.clone());
+
+    Node {
+        id: node_id("actor", &options.actor_id),
+        stable_key: format!("actor:{}", options.actor_id),
+        node_type: "Actor".to_string(),
+        attributes: BTreeMap::from([
+            ("actorId".to_string(), json!(options.actor_id)),
+            ("displayName".to_string(), json!(display_name)),
+            ("provider".to_string(), json!(provider)),
+            ("subject".to_string(), json!(subject)),
+        ]),
+    }
+}
+
+fn role_node(role: &str) -> Node {
+    Node {
+        id: node_id("role", role),
+        stable_key: format!("role:{role}"),
+        node_type: "Role".to_string(),
+        attributes: BTreeMap::from([("name".to_string(), json!(role))]),
+    }
+}
+
+fn permission_node(permission: &str) -> Node {
+    Node {
+        id: node_id("permission", permission),
+        stable_key: format!("permission:{permission}"),
+        node_type: "Permission".to_string(),
+        attributes: BTreeMap::from([("name".to_string(), json!(permission))]),
+    }
+}
+
 fn edge(from: &str, edge_type: &str, to: &str) -> Edge {
     Edge {
         id: edge_id(from, edge_type, to),
@@ -1990,9 +2160,157 @@ acceptanceCriteria:
         .unwrap();
 
         assert_eq!(init_receipt.created_nodes, vec!["node_project"]);
+        assert_eq!(init_receipt.actor, "test");
         assert!(init_receipt.created_edges.is_empty());
         assert!(!init_receipt.dry_run);
         assert_eq!(init_receipt.event_ids.len(), 1);
+    }
+
+    #[test]
+    fn identity_upsert_actor_records_actor_fact_and_receipt_actor() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let receipt = upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:developer".to_string(),
+                display_name: Some("Developer".to_string()),
+                provider: Some("local".to_string()),
+                subject: Some("developer".to_string()),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "Identity.UpsertActor");
+        assert_eq!(receipt.actor, "local:admin");
+        assert!(receipt
+            .created_nodes
+            .iter()
+            .any(|node_id| node_id == "node_actor_local_developer"));
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let actor = replay
+            .graph
+            .nodes
+            .get("node_actor_local_developer")
+            .expect("actor node should replay");
+        assert_eq!(actor.node_type, "Actor");
+        assert_eq!(actor.stable_key, "actor:local:developer");
+        assert_eq!(actor.attributes["displayName"], json!("Developer"));
+    }
+
+    #[test]
+    fn identity_grant_role_links_actor_role_and_permission() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:developer".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let receipt = grant_role(
+            tmp.path(),
+            GrantRoleOptions {
+                actor_id: "local:developer".to_string(),
+                role: "maintainer".to_string(),
+                permissions: vec!["spec:write".to_string()],
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "Identity.GrantRole");
+        assert!(receipt
+            .created_edges
+            .iter()
+            .any(|edge_id| edge_id.contains("has_role")));
+        assert!(receipt
+            .created_edges
+            .iter()
+            .any(|edge_id| edge_id.contains("grants_permission")));
+
+        let validation = validate_specs(tmp.path()).unwrap();
+        assert!(validation.findings.is_empty());
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "Role"
+                && node.attributes.get("name") == Some(&json!("maintainer"))));
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "Permission"
+                && node.attributes.get("name") == Some(&json!("spec:write"))));
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "HAS_ROLE"));
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "GRANTS_PERMISSION"));
+    }
+
+    #[test]
+    fn identity_grant_role_requires_registered_actor() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = grant_role(
+            tmp.path(),
+            GrantRoleOptions {
+                actor_id: "local:missing".to_string(),
+                role: "maintainer".to_string(),
+                permissions: vec![],
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::ActorNotFound(actor) if actor == "local:missing"));
     }
 
     #[test]

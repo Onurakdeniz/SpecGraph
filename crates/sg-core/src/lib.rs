@@ -39,8 +39,9 @@ pub use store::{
     bind_spec_branch, generate_action_graph, import_spec_file, init_project, install_ontology_pack,
     list_action_graph, list_installed_ontology_packs, record_git_commit, replay_events,
     validate_snapshots, ActionGraphSummary, ActionGroupSummary, AppendOperationOptions,
-    BindBranchOptions, GenerateActionGraphOptions, InitOptions, RecordCommitOptions, ReplayOptions,
-    ReplayReport, SnapshotValidationReport, SpecGraphStore, SpecValidationReport,
+    BindBranchOptions, GenerateActionGraphOptions, GrantRoleOptions, InitOptions,
+    RecordCommitOptions, ReplayOptions, ReplayReport, SnapshotValidationReport, SpecGraphStore,
+    SpecValidationReport, UpsertActorOptions,
 };
 
 pub use adoption::{scan_repository, AdoptionMode};

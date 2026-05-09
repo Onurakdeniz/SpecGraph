@@ -2,7 +2,7 @@
 
 **System area:** Operation Runtime ABI  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** code audit plus deterministic core and identity-foundation implementation slices.
 
 ## Purpose
 
@@ -14,10 +14,13 @@ Force every graph mutation through a stable operation ABI with preconditions, po
 
 - Request, definition, receipt, and operation categories are documented
 - README says built-in operation contracts can be listed and checked
+- Operation receipts include actor, state hashes, changed graph objects, event ids, dry-run flag, and findings
+- Missing/invalid operation actors are rejected by ABI validation
 
 ### Partly Implemented
 
 - Required inputs and allowed node/edge types exist as foundation
+- Generic mutation preconditions and postconditions exist for create/update/delete deltas
 - Full precondition/effect/postcondition DSL needs completion
 
 ### Not Implemented / Remaining
@@ -68,4 +71,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

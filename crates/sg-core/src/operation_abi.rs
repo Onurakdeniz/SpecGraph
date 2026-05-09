@@ -1,4 +1,5 @@
 use crate::model::{Finding, FindingSeverity, Graph, GraphDelta, OperationRequest};
+use crate::stable_key::validate_stable_key;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -113,6 +114,26 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            name: "Identity.UpsertActor",
+            category: "identity",
+            description: "Create or update an actor identity graph fact.",
+            required_input_fields: &["actorId"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["Actor"],
+            allowed_create_edge_types: &[],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            name: "Identity.GrantRole",
+            category: "identity",
+            description: "Grant a role and optional permissions to a registered actor.",
+            required_input_fields: &["actorId", "role"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["Role", "Permission"],
+            allowed_create_edge_types: &["HAS_ROLE", "GRANTS_PERMISSION"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
             name: "Code.Index",
             category: "code",
             description: "Record changed files and observed source symbols as code facts.",
@@ -200,10 +221,36 @@ pub fn validate_operation_request(request: &OperationRequest, delta: &GraphDelta
     };
 
     let mut findings = Vec::new();
+    validate_actor(request, &mut findings);
     validate_required_input(&definition, &request.input, &mut findings);
     validate_delta_node_types(&definition, delta, &mut findings);
     validate_delta_edge_types(&definition, delta, &mut findings);
     findings
+}
+
+fn validate_actor(request: &OperationRequest, findings: &mut Vec<Finding>) {
+    let actor = request.actor.trim();
+    if actor.is_empty() {
+        findings.push(finding(
+            "operation.actor_required",
+            format!(
+                "Operation `{}` requires a non-empty actor. Remediation: pass a stable actor id such as `local:user`.",
+                request.operation
+            ),
+        ));
+        return;
+    }
+
+    let actor_stable_key = format!("actor:{actor}");
+    if request.actor != actor || validate_stable_key(&actor_stable_key).is_err() {
+        findings.push(finding(
+            "operation.actor_invalid",
+            format!(
+                "Operation `{}` actor `{}` is invalid. Remediation: use a stable actor id without whitespace or control characters.",
+                request.operation, request.actor
+            ),
+        ));
+    }
 }
 
 pub fn validate_operation_preconditions(graph: &Graph, delta: &GraphDelta) -> Vec<Finding> {
@@ -433,6 +480,34 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "operation.unknown"));
+    }
+
+    #[test]
+    fn rejects_missing_operation_actor() {
+        let findings = validate_operation_request(
+            &OperationRequest {
+                operation_id: "op".to_string(),
+                operation: "Project.Init".to_string(),
+                actor: " ".to_string(),
+                timestamp: "now".to_string(),
+                ontology_version: "core@0.1.0".to_string(),
+                graph_branch: "main".to_string(),
+                dry_run: false,
+                input: json!({"projectName": "demo"}),
+            },
+            &GraphDelta {
+                create_nodes: vec![Node {
+                    id: "node_project".to_string(),
+                    stable_key: "project:demo".to_string(),
+                    node_type: "Project".to_string(),
+                    attributes: BTreeMap::new(),
+                }],
+                ..GraphDelta::default()
+            },
+        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "operation.actor_required"));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 **System area:** Policy Engine  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** code audit plus policy waiver and actor identity implementation slices.
 
 ## Purpose
 
@@ -14,16 +14,18 @@ Implement deterministic policy decisions with built-in rules and declarative man
 
 - Built-in policy examples are documented
 - Foundation docs state manifest DSL supports operations, globs, approvals, roles, warnings, denies, waivers
+- Manifest required-role checks can resolve roles from graph-native Actor/Role facts
 
 ### Partly Implemented
 
 - Built-in and manifest checks exist at foundation level
-- Actor identity and graph-native PolicyDecision nodes remain
+- Waiver validity checks exist for reason, approver, expiration, and non-waivable rules
+- Graph-native PolicyDecision persistence remains
 
 ### Not Implemented / Remaining
 
 - PolicyDecision persistence
-- Role/permission lookup
+- Full permission lookup beyond role membership
 - Hosting-provider approval sync
 - Policy pack test harness
 
@@ -68,4 +70,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-
