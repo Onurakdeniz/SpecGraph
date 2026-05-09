@@ -18,6 +18,7 @@ pub const VALIDATOR_ARCHITECTURE_PACK: &str = "validator.architecture_pack";
 pub const VALIDATOR_MIGRATION_RUNTIME: &str = "validator.migration_runtime";
 pub const VALIDATOR_DRIFT: &str = "validator.drift";
 pub const VALIDATOR_GRAPH_MERGE: &str = "validator.graph_merge";
+pub const VALIDATOR_ISSUE_GRAPH: &str = "validator.issue_graph";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -132,6 +133,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Drift Detection",
             description: "Detects spec-code-test-data-architecture drift and emits blocking actionable findings.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_ISSUE_GRAPH,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "IssueGraph",
+            description: "Validates bug reproduction, failing tests, root cause, fix spec, regression, and closure evidence.",
         },
         ValidatorDefinition {
             id: VALIDATOR_GRAPH_MERGE,

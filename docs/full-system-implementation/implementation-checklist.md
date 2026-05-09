@@ -320,9 +320,9 @@ Related areas:
 - [~] Finish `sg init --adopt` flow with report-backed scan output.
 - [x] Add adoption module inference.
 - [x] Add adoption reports for observe/warn/enforce-new-work/strict.
-- [ ] Add IssueGraph lifecycle.
-- [ ] Add failing-test-before-fix policy.
-- [ ] Add root cause classification.
+- [x] Add IssueGraph lifecycle.
+- [x] Add failing-test-before-fix policy.
+- [x] Add root cause classification.
 - [ ] Add OntologyChange proposal workflow.
 - [ ] Add ontology tests and pack release workflow.
 
@@ -334,7 +334,7 @@ Related areas:
 - [x] Impact analysis produces deterministic direct and indirect impacts.
 - [x] Existing repo observe mode never blocks legacy code.
 - [x] enforce-new-work mode blocks only new governed work.
-- [ ] Reproducible bug fix cannot close without required regression evidence.
+- [x] Reproducible bug fix cannot close without required regression evidence.
 - [ ] Ontology change cannot release without tests and migration plan.
 
 ---
