@@ -1,0 +1,185 @@
+# SpecGraph CLI UX Contract
+
+This document defines the full-system CLI contract for `sg`. It is a Phase 0 guardrail derived from the canonical roadmap: [`docs/full-system-implementation/phase-gated-implementation-plan.md`](../full-system-implementation/phase-gated-implementation-plan.md).
+
+SpecGraph OS is the full system, not the historical MVP. Current commands may still be partial, but future CLI work must converge on this contract instead of inventing command-specific UX rules.
+
+## Contract Principles
+
+1. **One CLI, one runtime.** Every mutating command must call the same Operation Runtime used by future API, SDK, and Studio surfaces.
+2. **Human by default, JSON always available.** Commands default to stable human-readable output and must support stable machine-readable JSON before final CLI closure.
+3. **Findings are first-class.** Validation, policy, traceability, drift, conflict, and security failures must return structured findings with validator id, severity, location, and remediation.
+4. **Exit codes are semantic.** Automation must be able to distinguish success, usage errors, validation failures, policy denials, conflicts, and unexpected internal failures.
+5. **Dry runs preview trusted mutation.** Mutating commands that can change trusted graph state must support dry-run behavior that returns the same receipt/finding shape without appending events.
+6. **No command is a backdoor.** CLI commands may orchestrate local files, Git, test runners, and adapters, but trusted facts are accepted only through operation receipts.
+7. **Names are stable.** Command names, JSON field names, and exit-code meanings are versioned compatibility surfaces.
+
+## Global Invocation Contract
+
+Current global option:
+
+- `--root <DIR>` selects the repository root. Default: current directory.
+
+Full-system global options to standardize across commands:
+
+| Option | Applies to | Contract |
+|---|---|---|
+| `--root <DIR>` | all commands | Locate the repository and `.specgraph` state. Must not change trust semantics. |
+| `--format human\|json` | all commands | Select human or JSON output. Default: `human`. |
+| `--json` | all commands | Alias for `--format json`. |
+| `--actor <ACTOR>` | mutating commands | Actor used in the `OperationRequest`; command-specific defaults are allowed only for local proof/dev paths. |
+| `--graph-branch <BRANCH>` | graph-context commands | Target branch/context for replay, query, mutation, validation, and reports. |
+| `--dry-run` | mutating commands | Validate and produce a dry-run receipt without appending trusted events. |
+| `--quiet` | all commands | Suppress nonessential human output; JSON mode remains complete. |
+| `--no-color` | human output | Disable ANSI color. JSON output must never contain ANSI color. |
+
+## Output Modes
+
+### Human Output
+
+Human output is optimized for terminal use:
+
+- starts with the primary result or decision;
+- includes changed object ids or report/finding counts;
+- prints actionable remediation for failures;
+- does not require parsing by automation;
+- may add extra explanatory lines only when they do not change machine contracts.
+
+### JSON Output
+
+JSON output is the automation contract:
+
+- emits exactly one JSON document to stdout on normal command completion;
+- uses camelCase field names;
+- includes `schemaVersion`, `command`, `status`, and either a `receipt`, `report`, `items`, or `findings` field;
+- writes diagnostics that are not part of the JSON document to stderr;
+- must be deterministic in field meaning and stable ordering of arrays where order is not semantically meaningful.
+
+Recommended envelope:
+
+```json
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg spec validate",
+  "status": "failed",
+  "graphBranch": "main",
+  "findings": []
+}
+```
+
+Mutating commands must include an `OperationReceipt`-compatible object in JSON mode. Dry runs use the same shape with `dryRun: true` and no appended event ids.
+
+## Exit-Code Contract
+
+| Exit code | Meaning | Required behavior |
+|---:|---|---|
+| `0` | Success | Command completed and no blocking finding was emitted. Warning findings may be present. |
+| `1` | Blocking validation/policy/runtime result | Valid command invocation, but SpecGraph rejected the operation/report because of findings, policy denial, traceability failure, conflict, drift, or failed proof. |
+| `2` | Usage error | Invalid CLI syntax, missing required arguments, invalid enum value, or malformed input path/flag. |
+| `3` | Graph state unavailable or inconsistent | Missing `.specgraph`, unreadable event log, replay/hash failure, snapshot mismatch, lock mismatch, or branch context error. |
+| `4` | External adapter/tool failure | Git/test/package/database/hosting/LLM/sandbox provider failed before trusted acceptance. Output remains untrusted. |
+| `5` | Conflict or merge/rebase blocker | Semantic graph conflict, unsafe auto-resolution, or merge/rebase blocker. |
+| `6` | Permission/authority failure | Actor identity, role, approval authority, waiver scope, or non-waivable rule failure. |
+| `70` | Internal software error | Unexpected bug; must include enough diagnostic context for maintainers without leaking secrets. |
+
+Commands must not overload exit codes with command-specific meanings. If a command needs more detail, it must emit structured findings or report fields.
+
+## Planned Command Inventory
+
+Status values:
+
+- **Current**: command exists now in `crates/sg-cli`.
+- **Partial**: command exists but lacks full-system behavior or final output contract.
+- **Planned**: command belongs to the full system but is not yet implemented.
+
+| Command group | Commands | Status | Output contract |
+|---|---|---|---|
+| `sg init` | `sg init` | Partial | Human summary; JSON `receipt` for initialized project facts and created paths. |
+| `sg project` | `profile`, `show`, `validate`, `set-tooling` | Planned | JSON `ProjectGraph` report/items; mutating forms return receipts. |
+| `sg module` | `declare`, `list`, `validate`, `link-capability` | Planned | JSON module/interface items or validation findings; mutations return receipts. |
+| `sg architecture` | `declare-layer`, `declare-port`, `validate`, `drift`, `pack validate` | Planned | Architecture report/findings; mutations return receipts. |
+| `sg data` | `declare-table`, `declare-contract`, `validate`, `owners` | Planned | DataGraph report/items/findings; mutations return receipts. |
+| `sg migration` | `plan`, `record`, `validate`, `rollback-evidence` | Planned | Migration plan/report/findings; accepted evidence returns receipts. |
+| `sg spec` | `create`, `import`, `bind-branch`, `validate`, future `transition`, `release` | Partial | Validation reports for reads; mutating commands return operation receipts. |
+| `sg action` | `generate`, `list`, future `start`, `complete`, `replan`, `attempt` | Partial | Action/CommitPlan items or receipts; lifecycle blockers return findings. |
+| `sg commit` | future `plan`, `validate`, `complete` | Planned | CommitPlan report/findings; mutations return receipts. Existing commit checks currently live under `sg git`. |
+| `sg git` | `install-hooks`, `validate-message`, `validate-bindings`, `record-commit`, future `branch`, `merge`, `rebase` | Partial | Hook install summary, validation report/findings, or receipts for accepted GitGraph facts. |
+| `sg pr` | `sync`, `validate`, `annotate`, `checks` | Planned | Hosting observations/report/findings; provider outputs remain untrusted until accepted. |
+| `sg code` | `index`, future `query`, `validate-scope`, `drift` | Partial | Code observations/report/findings; accepted CodeGraph facts return receipts. |
+| `sg trace` | `import`, `validate` | Partial | Trace validation report/findings; imports return receipts. |
+| `sg test` | `map`, `record-run`, `validate`, `required` | Planned | Test mapping/report/findings; accepted TestRun evidence returns receipts. |
+| `sg ci` | `validate`, future `report`, `annotations` | Partial | Machine-readable aggregate report; `--record` returns ValidationRun receipt. |
+| `sg graph` | `replay`, `status`, `diff`, `conflicts`, future `rebuild`, `branch`, `merge`, `rebase`, `query` | Partial | Replay/status/diff/conflict/query reports. Merge/rebase mutations return receipts. |
+| `sg impact` | `analyze`, future `queue`, `revalidate`, `replan` | Partial | Impact report with direct/indirect impacts, invalidations, and required follow-up actions. |
+| `sg ontology` | `validate-pack`, `install-pack`, `list-packs`, future `registry`, `upgrade`, `migrate`, `propose-change` | Partial | Pack validation report/items; installs/upgrades/migrations return receipts. |
+| `sg operation` | `list`, `validators`, future `schema`, `dry-run`, `submit` | Partial | Stable ABI/validator lists or request/receipt validation report. |
+| `sg policy` | `check`, `non-waivable`, `record-approval`, `create-waiver`, future `decisions`, `explain` | Partial | Policy decision report/findings; approvals/waivers/recorded decisions return receipts. |
+| `sg identity` | `upsert-actor`, `grant-role`, future `whoami`, `roles`, `permissions` | Partial | Identity/role items; mutations return receipts. |
+| `sg adopt` | `scan`, future `report`, `promote`, `mode` | Partial | Adoption observations/report/findings; promotions return receipts. |
+| `sg issue` | `create`, `link-repro`, `root-cause`, `fix-spec`, `close` | Planned | IssueGraph report/items/findings; lifecycle mutations return receipts. |
+| `sg proposal` | `create`, `transition`, future `validate`, `accept`, `reject`, `sandbox` | Partial | Proposal report/findings; accepted proposal deltas must go through Operation Runtime receipts. |
+| `sg adapter` | `list`, `capabilities`, `test`, `sync` | Planned | Adapter capability/provenance report; observations remain untrusted. |
+| `sg proof` | `run`, future named proof scenarios | Partial | Human progress lines; JSON proof report with passed/failed scenario steps. |
+| `sg release` | `check`, `evidence`, `package`, `verify` | Planned | Release evidence/checksum/signature report; release graph mutations return receipts. |
+| `sg docs` | `check`, `generate-cli-reference`, `links` | Planned | Documentation validation/generation report. |
+
+## Command-Specific Output Families
+
+Every command must use one of these output families in JSON mode:
+
+| Family | Commands | Required fields |
+|---|---|---|
+| Operation receipt | trusted mutating commands | `receipt.accepted`, `receipt.dryRun`, `receipt.operationId`, `receipt.preStateHash`, `receipt.postStateHash`, changed node/edge ids, event ids, findings. |
+| Validation report | `validate`, `check`, `drift`, `conflicts`, `proof`, `ci` | `status`, `checks` or `validators`, `findings`, `summary`. |
+| Inventory list | `list`, `status`, `show`, `query`, `non-waivable`, `validators` | `items`, `count`, stable sort key. |
+| Observation report | adapter-backed reads/indexes/scans/syncs | `observations`, `provenance`, `trustState`, findings. Must not claim trusted acceptance. |
+| Diff/impact/conflict report | `graph diff`, `graph conflicts`, `impact analyze` | base/current/target context, affected ids, conflict/impact dimensions, blockers, remediation. |
+
+## Error and Finding Presentation
+
+For failures:
+
+- stdout in human mode should summarize failure and list findings;
+- stdout in JSON mode should contain a valid JSON envelope with findings whenever possible;
+- stderr is reserved for process diagnostics, malformed CLI usage, or unexpected internal errors;
+- findings must include stable `code`, `severity`, `message`, `validator`, `validatorVersion`, `locations`, and `remediation` when known.
+
+Severity handling follows the current finding schema (`Info`, `Warning`, `Error`). Adding a new severity requires schema-versioned documentation and implementation updates.
+
+| Severity | Exit behavior |
+|---|---|
+| `Info` | Never blocks by itself. |
+| `Warning` | Does not block unless a policy explicitly elevates it. |
+| `Error` | Blocks with exit code `1` unless a valid waiver/approval path applies. |
+
+## Mutating Command Rules
+
+A command is mutating if it can create, update, delete, accept, transition, record, install, promote, merge, rebase, release, or otherwise change trusted graph state.
+
+Mutating commands must:
+
+1. accept or infer `actor` and graph context;
+2. construct an `OperationRequest`;
+3. support dry-run behavior by Phase 7 CLI closure;
+4. run Operation Runtime preconditions, ontology checks, policy checks, actor/approval/waiver checks, and validators;
+5. append events only after acceptance;
+6. emit an `OperationReceipt` in JSON mode and a receipt summary in human mode.
+
+Commands that read external systems, such as Git, code indexing, package/test/database/hosting/LLM adapters, must label output as observation/proposal/input until an accepting operation records trusted facts.
+
+## Compatibility Rules
+
+- Adding optional JSON fields is allowed.
+- Removing or renaming JSON fields requires a schema version bump and migration notes.
+- Changing exit-code meaning is not allowed inside the same CLI schema version.
+- Human output may become clearer over time, but examples in docs must remain valid or be updated in the same slice.
+- Deprecated commands must continue to print remediation that points to the replacement command until the next major schema version.
+
+## Relationship to Other Surfaces
+
+The future API server, SDK, and Studio UI must match this CLI contract at the runtime boundary:
+
+- CLI JSON envelopes should align with API/SDK response schemas.
+- Operation receipts must be shared across CLI, API, SDK, and Studio.
+- Query/report shapes may be rendered differently by Studio, but the source data must come from the same query/runtime contracts.
+- No outer surface may accept adapter observations or proposals in a way the CLI could not reproduce through Operation Runtime.
