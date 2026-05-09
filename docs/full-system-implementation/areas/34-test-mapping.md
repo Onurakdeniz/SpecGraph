@@ -18,14 +18,12 @@ Require tests to identify what they prove: ACs, expected behaviors, forbidden be
 ### Partly Implemented
 
 - AC-to-TestCase linking exists
-- Behavior/risk/regression test mapping is future
+- Behavior, risk, regression, and policy-required test mappings are supported in the expanded link manifest.
 
 ### Not Implemented / Remaining
 
-- Expected/forbidden behavior edges
-- Risk coverage validation
 - Regression issue flow
-- Test result recording
+- Full historical test result reporting
 
 ## Implementation Parts
 

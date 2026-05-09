@@ -245,6 +245,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "port:user-repository",
     },
     StableKeyFamily {
+        prefix: "policy-requirement",
+        description: "Policy-required test requirement",
+        example: "policy-requirement:security/no-secret-leak",
+    },
+    StableKeyFamily {
         prefix: "policy-decision",
         description: "Persisted policy decision",
         example: "policy-decision:run-001/policy.secret",
@@ -268,6 +273,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "proposal",
         description: "Untrusted proposal",
         example: "proposal:PROP-001",
+    },
+    StableKeyFamily {
+        prefix: "regression",
+        description: "Regression scenario requiring test coverage",
+        example: "regression:AUTH-001/REG-001",
     },
     StableKeyFamily {
         prefix: "risk",
