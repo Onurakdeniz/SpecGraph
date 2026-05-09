@@ -127,11 +127,21 @@ Run a deterministic local scenario that exercises positive and negative enforcem
 sg proof run
 ```
 
-The scenario verifies init, spec creation, operation ABI rejection, branch binding, ActionGraph generation, source symbol indexing, traceability failure/success, commit binding, built-in policy denial, policy manifest approval rules, and graph replay hash checks.
+The scenario verifies init, spec creation, operation ABI rejection, branch binding, ActionGraph generation, source symbol indexing, traceability failure/success, commit binding, built-in policy denial, policy manifest approval rules, validation evidence recording, and graph replay hash checks.
+
+## Validation Evidence
+
+Record successful CI validation as graph evidence:
+
+```bash
+sg ci validate --skip-git --record
+```
+
+This appends a `Validation.Record` operation and creates a `ValidationRun` node connected to the project with `VALIDATED_BY`.
 
 ## Current Boundary
 
-The implementation now includes deterministic foundations for the full system: ontology pack validation/install/locking, operation ABI validation, built-in and declarative policy decisions, waivers, impact analysis, proposal trust states, graph diff primitives, merge conflict detection primitives, adoption modes, deterministic query helpers, a proof-of-idea runner, lightweight multi-language source indexing, and code indexer contracts. Advanced production integrations such as a hosted GitHub App, Studio UI, and real LLM patch sandbox are represented by trusted data models and CLI foundations, not external services.
+The implementation now includes deterministic foundations for the full system: ontology pack validation/install/locking, operation ABI validation, built-in and declarative policy decisions, waivers, impact analysis, proposal trust states, graph diff primitives, merge conflict detection primitives, adoption modes, deterministic query helpers, validation evidence recording, a proof-of-idea runner, lightweight multi-language source indexing, and code indexer contracts. Advanced production integrations such as a hosted GitHub App, Studio UI, and real LLM patch sandbox are represented by trusted data models and CLI foundations, not external services.
 
 
 ## Internal Query and Code Indexer Contracts

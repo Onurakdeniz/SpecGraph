@@ -99,6 +99,14 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             allowed_create_edge_types: &["VERIFIES"],
         },
         OperationDefinition {
+            name: "Validation.Record",
+            category: "validation",
+            description: "Record validation run evidence and findings.",
+            required_input_fields: &["runId", "status", "checks"],
+            allowed_create_node_types: &["ValidationRun", "Finding"],
+            allowed_create_edge_types: &["VALIDATED_BY", "HAS_FINDING"],
+        },
+        OperationDefinition {
             name: "ExistingRepo.Adopt",
             category: "adoption",
             description: "Record observed CodeFile baseline facts for an existing repo.",

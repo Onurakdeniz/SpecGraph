@@ -18,10 +18,11 @@ cargo run -p sg-cli -- --root examples/backend-api-typescript trace import --lin
 cargo run -p sg-cli -- --root examples/backend-api-typescript code index \
   --changed-file src/identity/password-reset.js \
   --changed-file tests/identity/password-reset.test.js
-cargo run -p sg-cli -- --root examples/backend-api-typescript ci validate --skip-git --links-file links.yaml
+cargo run -p sg-cli -- --root examples/backend-api-typescript ci validate --skip-git --links-file links.yaml --record
 ```
 
 The `code index` step records both `CodeFile` and lightweight `CodeSymbol` observations for source files.
+The `ci validate --record` step records a `ValidationRun` graph fact as validation evidence.
 
 Commit messages for implementation work must include trailers:
 

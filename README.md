@@ -176,9 +176,10 @@ Run aggregate MVP validation in CI mode:
 
 ```bash
 cargo run -p sg-cli -- ci validate --skip-git
+cargo run -p sg-cli -- ci validate --skip-git --record
 ```
 
-Without `--skip-git`, `sg ci validate` also validates commits in `origin/development..HEAD` when a Git repository is available.
+Without `--skip-git`, `sg ci validate` also validates commits in `origin/development..HEAD` when a Git repository is available. With `--record`, a successful run appends a `Validation.Record` operation that creates a `ValidationRun` graph fact.
 
 ## Full-System Foundation Commands
 
@@ -209,7 +210,7 @@ Run the local proof scenario to verify the core idea end to end:
 cargo run -p sg-cli -- proof run
 ```
 
-The proof creates a temporary SpecGraph store, creates a spec, rejects an invalid operation delta through the operation ABI gate, binds the spec to a branch, generates an ActionGraph, indexes source symbols, checks traceability failure before links exist, imports a test link, validates commit binding, rejects a secret-file policy violation, verifies a policy manifest approval rule, and replays the graph with hash checks.
+The proof creates a temporary SpecGraph store, creates a spec, rejects an invalid operation delta through the operation ABI gate, binds the spec to a branch, generates an ActionGraph, indexes source symbols, checks traceability failure before links exist, imports a test link, validates commit binding, rejects a secret-file policy violation, verifies a policy manifest approval rule, records a `ValidationRun`, and replays the graph with hash checks.
 
 ## Validation
 

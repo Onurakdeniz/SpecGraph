@@ -403,6 +403,13 @@ struct CiValidateArgs {
     skip_git: bool,
     #[arg(long)]
     base: Option<String>,
+    /// Append a ValidationRun graph fact after successful validation.
+    #[arg(long)]
+    record: bool,
+    #[arg(long, default_value = "local:ci")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
 }
 
 #[derive(Debug, Args)]
@@ -856,6 +863,7 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
     match args.command {
         CiCommand::Validate(args) => {
             let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let mut checks = vec!["replay".to_string(), "spec".to_string()];
             println!(
                 "replay: ok events={} stateHash={}",
                 replay.events_replayed, replay.state_hash
@@ -869,9 +877,36 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
                 print_findings(&findings);
                 fail_on_errors(&findings, "trace validation")?;
                 println!("trace: ok");
+                checks.push("trace".to_string());
             }
             if !args.skip_git && root.join(".git").exists() {
                 validate_git_range(store, root, args.base, "HEAD")?;
+                checks.push("git".to_string());
+            }
+            if args.record {
+                let run_id = validation_run_id("ci");
+                let receipt = store.append_operation(AppendOperationOptions {
+                    operation: "Validation.Record".to_string(),
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                    input: json!({
+                        "runId": run_id,
+                        "status": "Passed",
+                        "checks": checks.clone(),
+                        "stateHash": replay.state_hash.clone(),
+                    }),
+                    delta: validation_run_delta(
+                        &replay.graph,
+                        &run_id,
+                        "Passed",
+                        &checks,
+                        &[],
+                        &replay.state_hash,
+                    ),
+                })?;
+                println!("validationRunRecorded: {run_id}");
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
             }
             println!("ci: ok");
         }
@@ -1079,6 +1114,37 @@ fn run_proof_scenario() -> anyhow::Result<()> {
 
     let spec_report = store.validate_specs()?;
     fail_on_errors(&spec_report.findings, "proof spec validation")?;
+    let run_id = validation_run_id("proof");
+    let validation_checks = vec![
+        "replay".to_string(),
+        "spec".to_string(),
+        "operation-abi".to_string(),
+        "code-index".to_string(),
+        "trace".to_string(),
+        "commit".to_string(),
+        "policy".to_string(),
+    ];
+    let proof_replay = store.replay(ReplayOptions { check_hashes: true })?;
+    store.append_operation(AppendOperationOptions {
+        operation: "Validation.Record".to_string(),
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+        input: json!({
+            "runId": run_id,
+            "status": "Passed",
+            "checks": validation_checks.clone(),
+            "stateHash": spec_report.state_hash.clone(),
+        }),
+        delta: validation_run_delta(
+            &proof_replay.graph,
+            &run_id,
+            "Passed",
+            &validation_checks,
+            &[],
+            &spec_report.state_hash,
+        ),
+    })?;
+    println!("proof:validation-record ok");
     println!("proof:ok root={}", root.display());
     Ok(())
 }
@@ -1312,6 +1378,69 @@ fn code_index_observations(
             }
         })
         .collect()
+}
+
+fn validation_run_delta(
+    graph: &Graph,
+    run_id: &str,
+    status: &str,
+    checks: &[String],
+    findings: &[Finding],
+    state_hash: &str,
+) -> GraphDelta {
+    let run_node_id = node_id("validation_run", run_id);
+    let mut create_nodes = vec![Node {
+        id: run_node_id.clone(),
+        stable_key: format!("validation-run:{run_id}"),
+        node_type: "ValidationRun".to_string(),
+        attributes: BTreeMap::from([
+            ("runId".to_string(), json!(run_id)),
+            ("status".to_string(), json!(status)),
+            ("checks".to_string(), json!(checks)),
+            ("stateHash".to_string(), json!(state_hash)),
+        ]),
+    }];
+    let mut create_edges = Vec::new();
+
+    if let Some(project) = graph
+        .nodes
+        .values()
+        .find(|node| node.node_type == "Project")
+    {
+        create_edges.push(edge(&project.id, "VALIDATED_BY", &run_node_id));
+    }
+
+    for (index, finding) in findings.iter().enumerate() {
+        let finding_id = node_id("finding", &format!("{run_id}/{index}/{}", finding.code));
+        create_nodes.push(Node {
+            id: finding_id.clone(),
+            stable_key: format!("finding:{run_id}/{index}/{}", finding.code),
+            node_type: "Finding".to_string(),
+            attributes: BTreeMap::from([
+                ("code".to_string(), json!(finding.code)),
+                (
+                    "severity".to_string(),
+                    json!(format!("{:?}", finding.severity)),
+                ),
+                ("message".to_string(), json!(finding.message)),
+            ]),
+        });
+        create_edges.push(edge(&run_node_id, "HAS_FINDING", &finding_id));
+    }
+
+    GraphDelta {
+        create_nodes,
+        create_edges,
+        ..GraphDelta::default()
+    }
+}
+
+fn validation_run_id(prefix: &str) -> String {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{prefix}-{nonce}")
 }
 
 fn has_acceptance_criteria(report: &sg_core::ReplayReport) -> bool {

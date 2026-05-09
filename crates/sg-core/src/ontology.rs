@@ -365,7 +365,7 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "CHANGES_FILE" => Some((&["GitCommit"], &["CodeFile"])),
         "VERIFIES" => Some((&["TestCase"], &["AcceptanceCriterion"])),
         "VALIDATED_BY" => Some((
-            &["Spec", "GitCommit", "CodeFile", "TestCase"],
+            &["Project", "Spec", "GitCommit", "CodeFile", "TestCase"],
             &["ValidationRun"],
         )),
         "HAS_FINDING" => Some((&["ValidationRun"], &["Finding"])),
