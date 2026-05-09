@@ -16,6 +16,10 @@ Implemented commands:
 - `sg spec import`
 - `sg spec validate`
 - `sg spec bind-branch`
+- `sg ontology validate-pack`
+- `sg ontology install-pack`
+- `sg ontology list-packs`
+- `sg operation list`
 - `sg action generate`
 - `sg action list`
 - `sg git install-hooks`
@@ -26,6 +30,7 @@ Implemented commands:
 - `sg trace import`
 - `sg trace validate`
 - `sg ci validate`
+- `sg proof run`
 - `sg graph replay --check`
 - `sg graph status`
 
@@ -62,6 +67,7 @@ cargo run -p sg-cli -- graph replay --check
   config.yaml
   ontology.lock.json
   graph.lock.json
+  ontology/packs/
   operations/receipts/
   events/00000001.jsonl
   snapshots/
@@ -176,6 +182,9 @@ Beyond the MVP loop, the CLI now includes foundations for the broader SpecGraph 
 
 ```bash
 cargo run -p sg-cli -- ontology validate-pack docs/ontology-packs/ddd-backend.yaml
+cargo run -p sg-cli -- ontology install-pack docs/ontology-packs/ddd-backend.yaml
+cargo run -p sg-cli -- ontology list-packs
+cargo run -p sg-cli -- operation list
 cargo run -p sg-cli -- policy check --operation Merge --changed-file src/lib.rs
 cargo run -p sg-cli -- adopt scan --mode observe
 cargo run -p sg-cli -- impact analyze --node node_spec_auth_001 --depth 2
@@ -184,8 +193,21 @@ cargo run -p sg-cli -- proposal create --id PROP-001 --title "Draft graph delta"
 
 See [`docs/full-system-foundation.md`](docs/full-system-foundation.md).
 
+## Proof-of-Idea Runner
+
+Run the local proof scenario to verify the core idea end to end:
+
+```bash
+cargo run -p sg-cli -- proof run
+```
+
+The proof creates a temporary SpecGraph store, creates a spec, rejects an invalid operation delta through the operation ABI gate, binds the spec to a branch, generates an ActionGraph, checks traceability failure before links exist, imports a test link, validates commit binding, rejects a secret-file policy violation, and replays the graph with hash checks.
+
 ## Validation
 
 ```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo run -p sg-cli -- proof run
 ```

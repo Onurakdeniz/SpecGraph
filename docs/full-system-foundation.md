@@ -12,6 +12,25 @@ sg ontology validate-pack docs/ontology-packs/ddd-backend.yaml
 
 A pack contains identity, node/edge extensions, validators, policies, and migration metadata.
 
+Install a validated pack into `.specgraph/ontology/packs`, lock it in `ontology.lock.json`, and record the install as a graph operation:
+
+```bash
+sg ontology install-pack docs/ontology-packs/ddd-backend.yaml
+sg ontology list-packs
+```
+
+Installed packs extend the active replay ontology for node/edge type validation.
+
+## Operation ABI Registry
+
+List built-in operation contracts:
+
+```bash
+sg operation list
+```
+
+Every appended operation is checked against the registry before its graph delta is applied. The current registry validates required inputs and the node/edge types each operation is allowed to create or update.
+
 ## Policy Engine
 
 Run built-in policy checks:
@@ -67,9 +86,19 @@ Compare current replayed graph state with a snapshot JSON file:
 sg graph diff --snapshot .specgraph/snapshots/snap_x.json
 ```
 
+## Proof-of-Idea Runner
+
+Run a deterministic local scenario that exercises positive and negative enforcement paths:
+
+```bash
+sg proof run
+```
+
+The scenario verifies init, spec creation, operation ABI rejection, branch binding, ActionGraph generation, traceability failure/success, commit binding, policy denial, and graph replay hash checks.
+
 ## Current Boundary
 
-The implementation now includes deterministic foundations for the full system: ontology pack validation, policy decisions, waivers, impact analysis, proposal trust states, graph diff primitives, merge conflict detection primitives, adoption modes, deterministic query helpers, and multi-language code indexer contracts. Advanced production integrations such as a hosted GitHub App, Studio UI, and real LLM patch sandbox are represented by trusted data models and CLI foundations, not external services.
+The implementation now includes deterministic foundations for the full system: ontology pack validation/install/locking, operation ABI validation, policy decisions, waivers, impact analysis, proposal trust states, graph diff primitives, merge conflict detection primitives, adoption modes, deterministic query helpers, a proof-of-idea runner, and multi-language code indexer contracts. Advanced production integrations such as a hosted GitHub App, Studio UI, and real LLM patch sandbox are represented by trusted data models and CLI foundations, not external services.
 
 
 ## Internal Query and Code Indexer Contracts

@@ -5,6 +5,8 @@ use crate::model::{
     OperationRequest, Snapshot,
 };
 use crate::ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
+use crate::ontology_pack::{load_pack, validate_pack, OntologyPackManifest};
+use crate::operation_abi::validate_operation_request;
 use crate::spec::SpecProjection;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -69,6 +71,10 @@ pub enum StoreError {
     },
     #[error("ontology validation failed with {0} error finding(s)")]
     OntologyValidationFailed(usize),
+    #[error("operation ABI validation failed with {0} error finding(s)")]
+    OperationValidationFailed(usize),
+    #[error("ontology pack validation failed with {0} error finding(s)")]
+    OntologyPackValidationFailed(usize),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -211,6 +217,19 @@ impl SpecGraphStore {
         record_git_commit(self.root(), options)
     }
 
+    pub fn install_ontology_pack(
+        &self,
+        path: &Path,
+        actor: String,
+        graph_branch: String,
+    ) -> Result<OperationReceipt> {
+        install_ontology_pack(self.root(), path, actor, graph_branch)
+    }
+
+    pub fn list_installed_ontology_packs(&self) -> Result<Vec<OntologyPackManifest>> {
+        list_installed_ontology_packs(self.root())
+    }
+
     pub fn validate_specs(&self) -> Result<SpecValidationReport> {
         validate_specs(self.root())
     }
@@ -289,6 +308,15 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         }),
     };
 
+    let operation_findings = validate_operation_request(&request, &delta);
+    let operation_error_count = operation_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if operation_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(operation_error_count));
+    }
+
     let event = Event {
         event_id: event_id.clone(),
         sequence: 1,
@@ -326,6 +354,128 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
     write_snapshot(&sg_dir, &graph, 1, &post_state_hash, &options.graph_branch)?;
 
     Ok(receipt)
+}
+
+pub fn install_ontology_pack(
+    root: &Path,
+    path: &Path,
+    actor: String,
+    graph_branch: String,
+) -> Result<OperationReceipt> {
+    let pack = load_pack(path).map_err(|source| StoreError::Io {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+    })?;
+    let report = validate_pack(&pack);
+    let error_count = report
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if error_count > 0 {
+        return Err(StoreError::OntologyPackValidationFailed(error_count));
+    }
+
+    let store = SpecGraphStore::new(root);
+    store.ensure_exists()?;
+    let pack_dir = store.specgraph_dir().join("ontology").join("packs");
+    fs::create_dir_all(&pack_dir).map_err(|source| StoreError::Io {
+        path: pack_dir.clone(),
+        source,
+    })?;
+    let installed_path = pack_dir.join(format!(
+        "{}@{}.yaml",
+        stable_fragment(&pack.name),
+        pack.version
+    ));
+    write_yaml(&installed_path, &pack)?;
+    write_ontology_lock(
+        &store.specgraph_dir(),
+        &list_installed_ontology_packs(root)?,
+    )?;
+
+    let pack_node_id = node_id("ontology_pack", &format!("{}@{}", pack.name, pack.version));
+    let version_node_id = node_id(
+        "ontology_version",
+        &format!("{}@{}", pack.name, pack.version),
+    );
+    let delta = GraphDelta {
+        create_nodes: vec![
+            Node {
+                id: pack_node_id,
+                stable_key: format!("ontology-pack:{}", pack.name),
+                node_type: "OntologyPack".to_string(),
+                attributes: BTreeMap::from([
+                    ("name".to_string(), json!(pack.name)),
+                    ("version".to_string(), json!(pack.version)),
+                    (
+                        "path".to_string(),
+                        json!(installed_path.display().to_string()),
+                    ),
+                ]),
+            },
+            Node {
+                id: version_node_id,
+                stable_key: format!("ontology-version:{}@{}", report.pack, report.version),
+                node_type: "OntologyVersion".to_string(),
+                attributes: BTreeMap::from([
+                    ("pack".to_string(), json!(report.pack)),
+                    ("version".to_string(), json!(report.version)),
+                ]),
+            },
+        ],
+        ..GraphDelta::default()
+    };
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "OntologyPack.Install".to_string(),
+            actor,
+            graph_branch,
+            input: json!({
+                "name": report.pack,
+                "version": report.version,
+                "path": installed_path.display().to_string(),
+            }),
+            delta,
+        },
+    )
+}
+
+pub fn list_installed_ontology_packs(root: &Path) -> Result<Vec<OntologyPackManifest>> {
+    let pack_dir = root.join(".specgraph").join("ontology").join("packs");
+    if !pack_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut packs = Vec::new();
+    for entry in fs::read_dir(&pack_dir).map_err(|source| StoreError::Io {
+        path: pack_dir.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StoreError::Io {
+            path: pack_dir.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
+        {
+            let pack = load_pack(&path).map_err(|source| StoreError::Io {
+                path: path.clone(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+            })?;
+            packs.push(pack);
+        }
+    }
+    packs.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then(left.version.cmp(&right.version))
+    });
+    Ok(packs)
 }
 
 pub fn import_spec_file(
@@ -581,7 +731,7 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
 
 pub fn validate_specs(root: &Path) -> Result<SpecValidationReport> {
     let report = replay_events(root, ReplayOptions { check_hashes: true })?;
-    let findings = MvpOntology::new().validate_graph(&report.graph);
+    let findings = active_ontology(root)?.validate_graph(&report.graph);
     Ok(SpecValidationReport {
         state_hash: report.state_hash,
         findings,
@@ -596,23 +746,11 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
     let pre_state_hash = replay.state_hash;
     let mut graph = replay.graph;
 
-    graph.apply_delta(&options.delta);
-
-    let integrity_findings = MvpOntology::new().validate_integrity(&graph);
-    let error_count = integrity_findings
-        .iter()
-        .filter(|finding| finding.severity == FindingSeverity::Error)
-        .count();
-    if error_count > 0 {
-        return Err(StoreError::OntologyValidationFailed(error_count));
-    }
-
     let operation_id = format!("op_{}", Uuid::new_v4().simple());
     let event_id = format!("evt_{}", Uuid::new_v4().simple());
     let timestamp = OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .expect("RFC3339 formatting should succeed");
-    let post_state_hash = state_hash(&graph, CORE_ONTOLOGY_VERSION);
 
     let request = OperationRequest {
         operation_id: operation_id.clone(),
@@ -623,6 +761,28 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         graph_branch: options.graph_branch,
         input: options.input,
     };
+
+    let operation_findings = validate_operation_request(&request, &options.delta);
+    let operation_error_count = operation_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if operation_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(operation_error_count));
+    }
+
+    graph.apply_delta(&options.delta);
+
+    let integrity_findings = active_ontology(root)?.validate_integrity(&graph);
+    let error_count = integrity_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if error_count > 0 {
+        return Err(StoreError::OntologyValidationFailed(error_count));
+    }
+
+    let post_state_hash = state_hash(&graph, CORE_ONTOLOGY_VERSION);
 
     let event = Event {
         event_id: event_id.clone(),
@@ -752,7 +912,7 @@ pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport
         }
     }
 
-    let ontology = MvpOntology::new();
+    let ontology = active_ontology(root)?;
     let findings = ontology.validate_integrity(&graph);
     let error_count = findings
         .iter()
@@ -771,10 +931,33 @@ pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport
     })
 }
 
+fn active_ontology(root: &Path) -> Result<MvpOntology> {
+    let packs = list_installed_ontology_packs(root)?;
+    Ok(MvpOntology::new().with_extensions(
+        packs.iter().flat_map(|pack| pack.node_types.clone()),
+        packs.iter().flat_map(|pack| pack.edge_types.clone()),
+    ))
+}
+
+fn write_ontology_lock(sg_dir: &Path, packs: &[OntologyPackManifest]) -> Result<()> {
+    let mut locks = BTreeMap::from([("core".to_string(), "0.1.0".to_string())]);
+    for pack in packs {
+        locks.insert(pack.name.clone(), pack.version.clone());
+    }
+    write_json(
+        &sg_dir.join("ontology.lock.json"),
+        &json!({
+            "locks": locks,
+            "ontologyVersion": CORE_ONTOLOGY_VERSION
+        }),
+    )
+}
+
 fn create_layout(sg_dir: &Path) -> Result<()> {
     for dir in [
         sg_dir.to_path_buf(),
         sg_dir.join("operations").join("receipts"),
+        sg_dir.join("ontology").join("packs"),
         sg_dir.join("events"),
         sg_dir.join("snapshots"),
         sg_dir.join("branches"),
@@ -1233,6 +1416,95 @@ acceptanceCriteria:
             .findings
             .iter()
             .any(|finding| finding.code == "spec.has_acceptance_criterion"));
+    }
+
+    #[test]
+    fn append_operation_rejects_delta_outside_operation_abi() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: "node_code_file_src_lib_rs".to_string(),
+                        stable_key: "code-file:src/lib.rs".to_string(),
+                        node_type: "CodeFile".to_string(),
+                        attributes: BTreeMap::from([("path".to_string(), json!("src/lib.rs"))]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::OperationValidationFailed(1)));
+    }
+
+    #[test]
+    fn install_ontology_pack_locks_manifest_and_replays() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let pack_path = tmp.path().join("ddd.yaml");
+        fs::write(
+            &pack_path,
+            r#"
+name: ddd-backend
+version: 0.1.0
+extends:
+  - core@0.1.0
+nodeTypes:
+  - Aggregate
+edgeTypes:
+  - OWNS_AGGREGATE
+"#,
+        )
+        .unwrap();
+
+        install_ontology_pack(
+            tmp.path(),
+            &pack_path,
+            "test".to_string(),
+            "main".to_string(),
+        )
+        .unwrap();
+
+        let packs = list_installed_ontology_packs(tmp.path()).unwrap();
+        assert_eq!(packs.len(), 1);
+        assert_eq!(packs[0].name, "ddd-backend");
+
+        let lock = fs::read_to_string(tmp.path().join(".specgraph/ontology.lock.json")).unwrap();
+        assert!(lock.contains("ddd-backend"));
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert_eq!(replay.events_replayed, 2);
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "OntologyPack"));
     }
 
     #[test]

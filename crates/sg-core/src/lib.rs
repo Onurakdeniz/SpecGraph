@@ -14,6 +14,7 @@ pub mod impact;
 pub mod model;
 pub mod ontology;
 pub mod ontology_pack;
+pub mod operation_abi;
 pub mod policy;
 pub mod proposal;
 pub mod query;
@@ -27,12 +28,16 @@ pub use git::{
 pub use hashing::state_hash;
 pub use model::*;
 pub use ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
+pub use operation_abi::{
+    built_in_operations, find_operation, validate_operation_request, OperationDefinition,
+};
 pub use spec::{SpecProjection, TextItem};
 pub use store::{
-    bind_spec_branch, generate_action_graph, import_spec_file, init_project, list_action_graph,
-    record_git_commit, replay_events, ActionGraphSummary, ActionGroupSummary,
-    AppendOperationOptions, BindBranchOptions, GenerateActionGraphOptions, InitOptions,
-    RecordCommitOptions, ReplayOptions, ReplayReport, SpecGraphStore, SpecValidationReport,
+    bind_spec_branch, generate_action_graph, import_spec_file, init_project, install_ontology_pack,
+    list_action_graph, list_installed_ontology_packs, record_git_commit, replay_events,
+    ActionGraphSummary, ActionGroupSummary, AppendOperationOptions, BindBranchOptions,
+    GenerateActionGraphOptions, InitOptions, RecordCommitOptions, ReplayOptions, ReplayReport,
+    SpecGraphStore, SpecValidationReport,
 };
 
 pub use adoption::{scan_repository, AdoptionMode};

@@ -2,8 +2,8 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_core::{
-    analyze_impact, diff_graphs, evaluate_policies, load_pack, scan_repository,
-    validate_commit_binding, validate_pack, validate_trace_links, AdoptionMode,
+    analyze_impact, built_in_operations, diff_graphs, evaluate_policies, load_pack,
+    scan_repository, validate_commit_binding, validate_pack, validate_trace_links, AdoptionMode,
     AppendOperationOptions, BindBranchOptions, CommitValidationInput, Edge, Finding,
     FindingSeverity, GenerateActionGraphOptions, Graph, GraphDelta, InitOptions, LinksManifest,
     Node, PolicyCheckInput, Proposal, RecordCommitOptions, ReplayOptions, Snapshot, SpecGraphStore,
@@ -14,6 +14,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Parser)]
 #[command(name = "sg", version, about = "SpecGraph OS MVP CLI")]
@@ -33,6 +34,8 @@ enum Commands {
     Spec(SpecArgs),
     /// Ontology pack commands.
     Ontology(OntologyArgs),
+    /// Operation ABI registry commands.
+    Operation(OperationArgs),
     /// Built-in policy engine commands.
     Policy(PolicyArgs),
     /// Existing repository adoption commands.
@@ -51,6 +54,8 @@ enum Commands {
     Trace(TraceArgs),
     /// CI aggregate validation command.
     Ci(CiArgs),
+    /// Proof-of-idea scenario runner.
+    Proof(ProofArgs),
     /// Graph inspection and replay commands.
     Graph(GraphArgs),
 }
@@ -132,6 +137,28 @@ struct OntologyArgs {
 enum OntologyCommand {
     /// Validate an ontology pack manifest YAML/JSON file.
     ValidatePack { file: PathBuf },
+    /// Install and lock an ontology pack into .specgraph/ontology/packs.
+    InstallPack {
+        file: PathBuf,
+        #[arg(long, default_value = "local:user")]
+        actor: String,
+        #[arg(long, default_value = "main")]
+        graph_branch: String,
+    },
+    /// List installed ontology packs.
+    ListPacks,
+}
+
+#[derive(Debug, Args)]
+struct OperationArgs {
+    #[command(subcommand)]
+    command: OperationCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum OperationCommand {
+    /// List built-in operation ABI definitions.
+    List,
 }
 
 #[derive(Debug, Args)]
@@ -374,6 +401,18 @@ struct CiValidateArgs {
 }
 
 #[derive(Debug, Args)]
+struct ProofArgs {
+    #[command(subcommand)]
+    command: ProofCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProofCommand {
+    /// Run a local positive/negative proof scenario in a temporary directory.
+    Run,
+}
+
+#[derive(Debug, Args)]
 struct GraphArgs {
     #[command(subcommand)]
     command: GraphCommand,
@@ -407,7 +446,8 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Init(args) => handle_init(&store, &root, args)?,
         Commands::Spec(args) => handle_spec(&store, &root, args)?,
-        Commands::Ontology(args) => handle_ontology(&root, args)?,
+        Commands::Ontology(args) => handle_ontology(&store, &root, args)?,
+        Commands::Operation(args) => handle_operation(args),
         Commands::Policy(args) => handle_policy(&store, args)?,
         Commands::Adopt(args) => handle_adopt(&store, &root, args)?,
         Commands::Impact(args) => handle_impact(&store, args)?,
@@ -417,6 +457,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Code(args) => handle_code(&store, &root, args)?,
         Commands::Trace(args) => handle_trace(&store, &root, args)?,
         Commands::Ci(args) => handle_ci(&store, &root, args)?,
+        Commands::Proof(args) => handle_proof(args)?,
         Commands::Graph(args) => handle_graph(&store, &root, args)?,
     }
 
@@ -492,10 +533,10 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
     Ok(())
 }
 
-fn handle_ontology(root: &Path, args: OntologyArgs) -> anyhow::Result<()> {
+fn handle_ontology(store: &SpecGraphStore, root: &Path, args: OntologyArgs) -> anyhow::Result<()> {
     match args.command {
         OntologyCommand::ValidatePack { file } => {
-            let path = resolve_path(root, file);
+            let path = resolve_existing_input_path(root, file);
             let pack = load_pack(&path).map_err(anyhow::Error::msg)?;
             let report = validate_pack(&pack);
             print_findings(&report.findings);
@@ -503,8 +544,44 @@ fn handle_ontology(root: &Path, args: OntologyArgs) -> anyhow::Result<()> {
             println!("ontologyPack: {}@{}", report.pack, report.version);
             println!("validation: ok");
         }
+        OntologyCommand::InstallPack {
+            file,
+            actor,
+            graph_branch,
+        } => {
+            let path = resolve_existing_input_path(root, file);
+            let receipt = store.install_ontology_pack(&path, actor, graph_branch)?;
+            println!("ontologyPackInstalled: {}", path.display());
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        OntologyCommand::ListPacks => {
+            let packs = store.list_installed_ontology_packs()?;
+            if packs.is_empty() {
+                println!("ontologyPacks: 0");
+            } else {
+                for pack in packs {
+                    println!("{}@{}", pack.name, pack.version);
+                }
+            }
+        }
     }
     Ok(())
+}
+
+fn handle_operation(args: OperationArgs) {
+    match args.command {
+        OperationCommand::List => {
+            for operation in built_in_operations() {
+                println!(
+                    "{} category={} required={}",
+                    operation.name,
+                    operation.category,
+                    operation.required_input_fields.join(",")
+                );
+            }
+        }
+    }
 }
 
 fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()> {
@@ -762,6 +839,140 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
             println!("ci: ok");
         }
     }
+    Ok(())
+}
+
+fn handle_proof(args: ProofArgs) -> anyhow::Result<()> {
+    match args.command {
+        ProofCommand::Run => run_proof_scenario()?,
+    }
+    Ok(())
+}
+
+fn run_proof_scenario() -> anyhow::Result<()> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock before unix epoch")?
+        .as_nanos();
+    let root = env::temp_dir().join(format!("specgraph-proof-{nonce}"));
+    fs::create_dir_all(&root)?;
+    let store = SpecGraphStore::new(&root);
+
+    store.init(InitOptions {
+        project_name: "proof-demo".to_string(),
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+    })?;
+    println!("proof:init ok");
+
+    let projection = SpecProjection {
+        spec: "AUTH-001".to_string(),
+        title: "Password reset".to_string(),
+        module: Some("Identity".to_string()),
+        priority: Some("P1".to_string()),
+        summary: Some("Proof scenario spec".to_string()),
+        requirements: vec![TextItem {
+            id: "REQ-001".to_string(),
+            text: "User can request reset".to_string(),
+        }],
+        acceptance_criteria: vec![TextItem {
+            id: "AC-001".to_string(),
+            text: "Generic response".to_string(),
+        }],
+    };
+    store.append_operation(AppendOperationOptions {
+        operation: "Spec.Create".to_string(),
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+        input: json!({"spec": "AUTH-001"}),
+        delta: projection.to_delta(),
+    })?;
+    println!("proof:spec ok");
+
+    let rejected_operation = store.append_operation(AppendOperationOptions {
+        operation: "Spec.Create".to_string(),
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+        input: json!({"spec": "AUTH-001"}),
+        delta: GraphDelta {
+            create_nodes: vec![Node {
+                id: "node_invalid_code_file".to_string(),
+                stable_key: "code-file:proof.rs".to_string(),
+                node_type: "CodeFile".to_string(),
+                attributes: BTreeMap::from([("path".to_string(), json!("proof.rs"))]),
+            }],
+            ..GraphDelta::default()
+        },
+    });
+    if rejected_operation.is_ok() {
+        bail!("proof expected operation ABI validation to reject disallowed node type");
+    }
+    println!("proof:negative-operation ok");
+
+    store.bind_spec_branch(BindBranchOptions {
+        spec: "AUTH-001".to_string(),
+        branch: "spec/AUTH-001-password-reset".to_string(),
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+    })?;
+    store.generate_action_graph(GenerateActionGraphOptions {
+        spec: "AUTH-001".to_string(),
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+    })?;
+    println!("proof:branch-action ok");
+
+    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let missing_trace = validate_trace_links(&replay.graph, &LinksManifest::default());
+    if missing_trace.is_empty() {
+        bail!("proof expected missing trace validation to fail");
+    }
+    println!("proof:negative-trace ok");
+
+    let manifest = LinksManifest {
+        links: vec![TestLink {
+            test: "test:identity/password-reset/generic-response".to_string(),
+            acceptance_criterion: "AUTH-001/AC-001".to_string(),
+        }],
+    };
+    let trace_delta = trace_links_delta(&replay.graph, &manifest.links)?;
+    store.append_operation(AppendOperationOptions {
+        operation: "Trace.Import".to_string(),
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+        input: json!({"links": manifest.links}),
+        delta: trace_delta,
+    })?;
+    println!("proof:trace ok");
+
+    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let commit_input = CommitValidationInput {
+        commit: "proof".to_string(),
+        message: "feat: proof\n\nSpec: AUTH-001\nActionGroup: implementation\nCommitPlan: implementation\n".to_string(),
+        changed_files: vec!["crates/proof/src/lib.rs".to_string()],
+    };
+    let commit_findings = validate_commit_binding(&replay.graph, &commit_input);
+    fail_on_errors(&commit_findings, "proof commit validation")?;
+    println!("proof:commit ok");
+
+    let policy_report = evaluate_policies(
+        &replay.graph,
+        &PolicyCheckInput {
+            operation: "Merge".to_string(),
+            changed_files: vec![".env".to_string()],
+            actor_roles: vec![],
+            approvals: vec![],
+            waivers: vec![],
+        },
+    );
+    if policy_report.findings.is_empty() {
+        bail!("proof expected secret policy to fail");
+    }
+    println!("proof:negative-policy ok");
+
+    let spec_report = store.validate_specs()?;
+    fail_on_errors(&spec_report.findings, "proof spec validation")?;
+    println!("proof:ok root={}", root.display());
     Ok(())
 }
 
@@ -1045,6 +1256,26 @@ fn resolve_path(root: &Path, path: PathBuf) -> PathBuf {
         path
     } else {
         root.join(path)
+    }
+}
+
+fn resolve_existing_input_path(root: &Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+
+    let root_relative = root.join(&path);
+    if root_relative.exists() {
+        return root_relative;
+    }
+
+    let cwd_relative = env::current_dir()
+        .map(|cwd| cwd.join(&path))
+        .unwrap_or_else(|_| PathBuf::from(".").join(&path));
+    if cwd_relative.exists() {
+        cwd_relative
+    } else {
+        root_relative
     }
 }
 

@@ -5,8 +5,8 @@ pub const CORE_ONTOLOGY_VERSION: &str = "core@0.1.0";
 
 #[derive(Debug, Clone)]
 pub struct MvpOntology {
-    node_types: BTreeSet<&'static str>,
-    edge_types: BTreeSet<&'static str>,
+    node_types: BTreeSet<String>,
+    edge_types: BTreeSet<String>,
 }
 
 impl Default for MvpOntology {
@@ -57,6 +57,7 @@ impl MvpOntology {
                 "RevalidationQueue",
             ]
             .into_iter()
+            .map(str::to_string)
             .collect(),
             edge_types: [
                 "HAS_MODULE",
@@ -89,8 +90,31 @@ impl MvpOntology {
                 "BASELINE_IN",
             ]
             .into_iter()
+            .map(str::to_string)
             .collect(),
         }
+    }
+
+    pub fn with_extensions<I, J>(mut self, node_types: I, edge_types: J) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+        J: IntoIterator,
+        J::Item: Into<String>,
+    {
+        self.node_types
+            .extend(node_types.into_iter().map(Into::into));
+        self.edge_types
+            .extend(edge_types.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn node_types(&self) -> impl Iterator<Item = &str> {
+        self.node_types.iter().map(String::as_str)
+    }
+
+    pub fn edge_types(&self) -> impl Iterator<Item = &str> {
+        self.edge_types.iter().map(String::as_str)
     }
 
     pub fn is_node_type(&self, value: &str) -> bool {
