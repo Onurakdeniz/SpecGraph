@@ -8,6 +8,20 @@ pub type StableKey = String;
 pub type NodeType = String;
 pub type EdgeType = String;
 
+pub const NODE_SCHEMA_VERSION: &str = "specgraph.node/v1";
+pub const EDGE_SCHEMA_VERSION: &str = "specgraph.edge/v1";
+pub const GRAPH_DELTA_SCHEMA_VERSION: &str = "specgraph.graph-delta/v1";
+pub const EVENT_SCHEMA_VERSION: &str = "specgraph.event/v1";
+pub const SNAPSHOT_SCHEMA_VERSION: &str = "specgraph.snapshot/v1";
+
+fn event_schema_version() -> String {
+    EVENT_SCHEMA_VERSION.to_string()
+}
+
+fn snapshot_schema_version() -> String {
+    SNAPSHOT_SCHEMA_VERSION.to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Node {
@@ -87,6 +101,8 @@ impl Graph {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Event {
+    #[serde(default = "event_schema_version")]
+    pub schema_version: String,
     pub event_id: String,
     pub sequence: u64,
     pub operation_id: String,
@@ -150,6 +166,8 @@ pub struct OperationReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Snapshot {
+    #[serde(default = "snapshot_schema_version")]
+    pub schema_version: String,
     pub snapshot_id: String,
     pub graph_branch: String,
     pub event_sequence: u64,
@@ -340,5 +358,76 @@ mod tests {
         assert_eq!(finding.validator_version, "");
         assert!(finding.locations.is_empty());
         assert!(finding.remediation.is_none());
+    }
+
+    #[test]
+    fn graph_event_snapshot_schemas_are_versioned() {
+        assert_eq!(NODE_SCHEMA_VERSION, "specgraph.node/v1");
+        assert_eq!(EDGE_SCHEMA_VERSION, "specgraph.edge/v1");
+        assert_eq!(GRAPH_DELTA_SCHEMA_VERSION, "specgraph.graph-delta/v1");
+        assert_eq!(EVENT_SCHEMA_VERSION, "specgraph.event/v1");
+        assert_eq!(SNAPSHOT_SCHEMA_VERSION, "specgraph.snapshot/v1");
+
+        let event = Event {
+            schema_version: EVENT_SCHEMA_VERSION.to_string(),
+            event_id: "evt_test".to_string(),
+            sequence: 1,
+            operation_id: "op_test".to_string(),
+            operation: "Project.Init".to_string(),
+            actor: "local:test".to_string(),
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            ontology_version: "0.1.0".to_string(),
+            graph_branch: "main".to_string(),
+            pre_state_hash: "sha256:pre".to_string(),
+            post_state_hash: "sha256:post".to_string(),
+            delta: GraphDelta::default(),
+            signatures: vec![],
+        };
+        let event_json = serde_json::to_value(&event).unwrap();
+        assert_eq!(event_json["schemaVersion"], EVENT_SCHEMA_VERSION);
+
+        let snapshot = Snapshot {
+            schema_version: SNAPSHOT_SCHEMA_VERSION.to_string(),
+            snapshot_id: "snap_test".to_string(),
+            graph_branch: "main".to_string(),
+            event_sequence: 1,
+            state_hash: "sha256:state".to_string(),
+            ontology_locks: BTreeMap::new(),
+            nodes: vec![],
+            edges: vec![],
+        };
+        let snapshot_json = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(snapshot_json["schemaVersion"], SNAPSHOT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn legacy_event_and_snapshot_json_deserialize_with_schema_defaults() {
+        let event: Event = serde_json::from_value(json!({
+            "eventId": "evt_legacy",
+            "sequence": 1,
+            "operationId": "op_legacy",
+            "operation": "Project.Init",
+            "actor": "local:test",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "ontologyVersion": "0.1.0",
+            "graphBranch": "main",
+            "preStateHash": "sha256:pre",
+            "postStateHash": "sha256:post",
+            "delta": {}
+        }))
+        .unwrap();
+        assert_eq!(event.schema_version, EVENT_SCHEMA_VERSION);
+
+        let snapshot: Snapshot = serde_json::from_value(json!({
+            "snapshotId": "snap_legacy",
+            "graphBranch": "main",
+            "eventSequence": 1,
+            "stateHash": "sha256:state",
+            "ontologyLocks": {},
+            "nodes": [],
+            "edges": []
+        }))
+        .unwrap();
+        assert_eq!(snapshot.schema_version, SNAPSHOT_SCHEMA_VERSION);
     }
 }

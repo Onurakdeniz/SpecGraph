@@ -2,7 +2,7 @@ use crate::git::{parse_commit_trailers, validate_commit_binding, CommitValidatio
 use crate::hashing::state_hash;
 use crate::model::{
     Edge, Event, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt,
-    OperationRequest, Snapshot,
+    OperationRequest, Snapshot, EVENT_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION,
 };
 use crate::ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
 use crate::ontology_pack::{load_pack, validate_pack, OntologyPackManifest};
@@ -438,6 +438,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
     }
 
     let event = Event {
+        schema_version: EVENT_SCHEMA_VERSION.to_string(),
         event_id: event_id.clone(),
         sequence: 1,
         operation_id: operation_id.clone(),
@@ -1225,6 +1226,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
     }
 
     let event = Event {
+        schema_version: EVENT_SCHEMA_VERSION.to_string(),
         event_id: event_id.clone(),
         sequence: replay.last_sequence + 1,
         operation_id: operation_id.clone(),
@@ -1577,6 +1579,7 @@ fn write_snapshot(
     graph_branch: &str,
 ) -> Result<()> {
     let snapshot = Snapshot {
+        schema_version: SNAPSHOT_SCHEMA_VERSION.to_string(),
         snapshot_id: format!("snap_{}", Uuid::new_v4().simple()),
         graph_branch: graph_branch.to_string(),
         event_sequence: sequence,
