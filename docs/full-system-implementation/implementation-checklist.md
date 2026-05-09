@@ -151,7 +151,7 @@ Related areas:
 - [ ] Add policy result model persistence or receipt inclusion.
 - [~] Add actor identity resolution.
 - [~] Add role/permission model foundation.
-- [ ] Add graph-native `Approval` and `Waiver` nodes.
+- [~] Add graph-native `Approval` and `Waiver` nodes.
 - [~] Add waiver expiration and scope validation.
 - [ ] Add non-waivable policy list.
 - [ ] Add common `Finding` schema across validators.
@@ -163,8 +163,8 @@ Related areas:
 - [ ] Failed operations leave no partial graph events.
 - [ ] Invalid ontology delta fails before event append.
 - [ ] Denied policy blocks the operation.
-- [ ] Approval-required policy cannot pass without valid scoped approval.
-- [ ] Expired waiver cannot satisfy a policy.
+- [~] Approval-required policy cannot pass without valid scoped approval.
+- [x] Expired waiver cannot satisfy a policy.
 - [ ] Secret/production-denied policies cannot be waived unless explicitly designed as waivable.
 
 ---
@@ -400,7 +400,7 @@ The full project is complete when all of these are checked:
 - [ ] Code, tests, data, and architecture observations are linked back to graph facts.
 - [ ] Missing traceability blocks completion/merge.
 - [ ] Event replay is deterministic and protected by hash checks.
-- [ ] Policies, waivers, approvals, and actors are auditable graph facts.
+- [~] Policies, waivers, approvals, and actors are auditable graph facts.
 - [ ] Graph merge/rebase detects semantic conflicts.
 - [ ] Impact analysis drives revalidation and replan.
 - [ ] Issues and ontology evolution close the learning loop.

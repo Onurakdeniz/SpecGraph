@@ -104,8 +104,13 @@ pub fn load_policy_manifest(path: &Path) -> Result<PolicyManifest, String> {
     }
 }
 
-pub fn evaluate_policies(_graph: &Graph, input: &PolicyCheckInput) -> PolicyReport {
+pub fn evaluate_policies(graph: &Graph, input: &PolicyCheckInput) -> PolicyReport {
     let now = OffsetDateTime::now_utc();
+    let input = effective_policy_input(Some(graph), input);
+    evaluate_builtin_policies(&input, now)
+}
+
+fn evaluate_builtin_policies(input: &PolicyCheckInput, now: OffsetDateTime) -> PolicyReport {
     let mut report = PolicyReport {
         decisions: vec![PolicyDecision {
             policy: "policy.operation.traceable".to_string(),
@@ -163,15 +168,12 @@ pub fn evaluate_policies_with_manifests(
     input: &PolicyCheckInput,
     manifests: &[PolicyManifest],
 ) -> PolicyReport {
-    let mut report = evaluate_policies(graph, input);
+    let now = OffsetDateTime::now_utc();
+    let input = effective_policy_input(Some(graph), input);
+    let mut report = evaluate_builtin_policies(&input, now);
     for manifest in manifests {
-        let manifest_report = evaluate_policy_manifest_inner(
-            input,
-            manifest,
-            OffsetDateTime::now_utc(),
-            false,
-            Some(graph),
-        );
+        let manifest_report =
+            evaluate_policy_manifest_inner(&input, manifest, now, false, Some(graph));
         report.decisions.extend(manifest_report.decisions);
         report.findings.extend(manifest_report.findings);
     }
@@ -185,6 +187,17 @@ pub fn evaluate_policies_with_manifests(
             .retain(|decision| decision.policy != "policy.merge.default");
     }
     report
+}
+
+fn effective_policy_input(graph: Option<&Graph>, input: &PolicyCheckInput) -> PolicyCheckInput {
+    let mut effective = input.clone();
+    if let Some(graph) = graph {
+        effective.approvals.extend(graph_approvals(graph));
+        effective.waivers.extend(graph_waivers(graph));
+    }
+    effective.approvals.sort();
+    effective.approvals.dedup();
+    effective
 }
 
 pub fn evaluate_policy_manifest(
@@ -302,6 +315,53 @@ fn role_name(node: &crate::model::Node) -> Option<String> {
         .and_then(|value| value.as_str())
         .map(ToOwned::to_owned)
         .or_else(|| node.stable_key.strip_prefix("role:").map(ToOwned::to_owned))
+}
+
+fn graph_approvals(graph: &Graph) -> Vec<String> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "Approval")
+        .filter(|node| has_actor_evidence_edge(graph, &node.id, "HAS_APPROVAL"))
+        .filter_map(|node| {
+            node.attributes
+                .get("approval")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+fn graph_waivers(graph: &Graph) -> Vec<Waiver> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "Waiver")
+        .filter(|node| has_actor_evidence_edge(graph, &node.id, "HAS_WAIVER"))
+        .filter_map(|node| {
+            Some(Waiver {
+                policy: node.attributes.get("policy")?.as_str()?.to_string(),
+                reason: node.attributes.get("reason")?.as_str()?.to_string(),
+                approved_by: node.attributes.get("approvedBy")?.as_str()?.to_string(),
+                expires_at: node
+                    .attributes
+                    .get("expiresAt")
+                    .and_then(|value| value.as_str())
+                    .map(ToOwned::to_owned),
+            })
+        })
+        .collect()
+}
+
+fn has_actor_evidence_edge(graph: &Graph, evidence_node_id: &str, edge_type: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.edge_type == edge_type
+            && edge.to == evidence_node_id
+            && graph
+                .nodes
+                .get(&edge.from)
+                .is_some_and(|node| node.node_type == "Actor")
+    })
 }
 
 fn validate_waivers(input: &PolicyCheckInput, now: OffsetDateTime) -> Vec<Finding> {

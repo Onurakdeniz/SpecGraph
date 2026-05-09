@@ -436,6 +436,8 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "HAS_FINDING" => Some((&["ValidationRun"], &["Finding"])),
         "HAS_ROLE" => Some((&["Actor"], &["Role"])),
         "GRANTS_PERMISSION" => Some((&["Role"], &["Permission"])),
+        "HAS_APPROVAL" => Some((&["Actor"], &["Approval"])),
+        "HAS_WAIVER" => Some((&["Actor"], &["Waiver"])),
         _ => None,
     }
 }

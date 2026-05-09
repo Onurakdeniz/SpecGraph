@@ -2,7 +2,7 @@
 
 **System area:** Waivers and Approvals  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** code audit plus policy waiver and graph evidence implementation slices.
 
 ## Purpose
 
@@ -14,18 +14,26 @@ Model controlled exceptions with scope, reason, approver, expiration, related po
 
 - Waiver JSON shape and approval fields are documented
 - Policy command supports approval and waiver flags
+- Graph-native `Approval` and `Waiver` nodes can be created through Operation Runtime
+- Approval and waiver evidence is linked to registered `Actor` approvers
+- Policy evaluation can use linked graph-native approvals and waivers
+- Expired graph-native waivers do not satisfy policies
 
 ### Partly Implemented
 
 - CLI-level inputs exist
-- Graph lifecycle, role verification, and signatures are incomplete
+- Waiver expiration validation exists
+- Reviewer/Role/Permission foundation exists through the identity model
+- Scope is recorded but not fully enforced against changed-file/path targets yet
+- Approver authority checks and signatures are incomplete
 
 ### Not Implemented / Remaining
 
 - ApprovalRequest state machine
-- Waiver persistence
-- Reviewer/Role/Permission model
-- Expiry enforcement and audit reports
+- Role/permission authority checks for approvers
+- Waiver/approval revocation and expiry audit reports
+- Signed approvals/waivers
+- Scope matching against specs/modules/files/operations
 
 ## Implementation Parts
 
@@ -35,7 +43,7 @@ Approval, ApprovalRequest, Waiver, Reviewer, Role, PolicyDecision, Signature; li
 
 ### 2. Commands / APIs
 
-Current policy flags; future sg approval request/grant/revoke and sg waiver create/list/expire
+Current policy flags, `sg policy record-approval`, `sg policy create-waiver`; future sg approval request/grant/revoke and sg waiver list/expire
 
 ### 3. Validation and Policy Gates
 
@@ -45,9 +53,10 @@ Waiver scope, expiration, approver authority, policy waivability, reason, non-wa
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: ApprovalRequest state machine.
-- Implement or finish: Waiver persistence.
-- Implement or finish: Reviewer/Role/Permission model.
-- Implement or finish: Expiry enforcement and audit reports.
+- Implement or finish: Role/permission authority checks for approvers.
+- Implement or finish: Revocation and expiry audit reports.
+- Implement or finish: Signed approvals/waivers.
+- Implement or finish: Scope matching against specs/modules/files/operations.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 
@@ -68,4 +77,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

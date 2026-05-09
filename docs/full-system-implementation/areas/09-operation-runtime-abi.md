@@ -16,6 +16,7 @@ Force every graph mutation through a stable operation ABI with preconditions, po
 - README says built-in operation contracts can be listed and checked
 - Operation receipts include actor, state hashes, changed graph objects, event ids, dry-run flag, and findings
 - Missing/invalid operation actors are rejected by ABI validation
+- Identity and policy evidence operations are registered in the built-in operation ABI
 
 ### Partly Implemented
 

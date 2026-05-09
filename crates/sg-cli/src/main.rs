@@ -6,11 +6,11 @@ use sg_core::{
     evaluate_policies_with_manifests, index_source_file, load_pack, load_policy_manifest,
     observations_to_delta, scan_repository, validate_commit_binding, validate_pack,
     validate_trace_links, AdoptionMode, AppendOperationOptions, BindBranchOptions,
-    CodeIndexObservation, CommitValidationInput, Edge, Finding, FindingSeverity,
-    GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions, LinksManifest,
-    Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal,
-    RecordCommitOptions, ReplayOptions, Snapshot, SpecGraphStore, SpecProjection, TestLink,
-    TextItem, TrustState, UpsertActorOptions,
+    CodeIndexObservation, CommitValidationInput, CreateWaiverOptions, Edge, Finding,
+    FindingSeverity, GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions,
+    LinksManifest, Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal,
+    RecordApprovalOptions, RecordCommitOptions, ReplayOptions, Snapshot, SpecGraphStore,
+    SpecProjection, TestLink, TextItem, TrustState, UpsertActorOptions,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -220,6 +220,10 @@ struct PolicyArgs {
 enum PolicyCommand {
     /// Run built-in policy checks for an operation.
     Check(PolicyCheckArgs),
+    /// Record approval evidence as graph facts.
+    RecordApproval(PolicyRecordApprovalArgs),
+    /// Create waiver evidence as graph facts.
+    CreateWaiver(PolicyCreateWaiverArgs),
 }
 
 #[derive(Debug, Args)]
@@ -240,6 +244,46 @@ struct PolicyCheckArgs {
     /// Optional YAML/JSON declarative policy manifest.
     #[arg(long = "policy-file", value_name = "FILE")]
     policy_files: Vec<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct PolicyRecordApprovalArgs {
+    #[arg(long = "id")]
+    approval_id: String,
+    #[arg(long)]
+    approval: String,
+    #[arg(long)]
+    policy: Option<String>,
+    #[arg(long)]
+    scope: Option<String>,
+    #[arg(long)]
+    reason: Option<String>,
+    #[arg(long)]
+    approved_by: String,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct PolicyCreateWaiverArgs {
+    #[arg(long = "id")]
+    waiver_id: String,
+    #[arg(long)]
+    policy: String,
+    #[arg(long)]
+    reason: String,
+    #[arg(long)]
+    approved_by: String,
+    #[arg(long)]
+    expires_at: Option<String>,
+    #[arg(long)]
+    scope: Option<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
 }
 
 #[derive(Debug, Args)]
@@ -742,6 +786,40 @@ fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()>
             print_findings(&report.findings);
             fail_on_errors(&report.findings, "policy check")?;
             println!("policy: ok");
+        }
+        PolicyCommand::RecordApproval(args) => {
+            let receipt = store.record_approval(RecordApprovalOptions {
+                approval_id: args.approval_id.clone(),
+                approval: args.approval.clone(),
+                policy: args.policy,
+                scope: args.scope,
+                reason: args.reason,
+                approved_by: args.approved_by.clone(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            println!("approvalRecorded: {}", args.approval_id);
+            println!("approval: {}", args.approval);
+            println!("approvedBy: {}", args.approved_by);
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        PolicyCommand::CreateWaiver(args) => {
+            let receipt = store.create_waiver(CreateWaiverOptions {
+                waiver_id: args.waiver_id.clone(),
+                policy: args.policy.clone(),
+                reason: args.reason,
+                approved_by: args.approved_by.clone(),
+                expires_at: args.expires_at,
+                scope: args.scope,
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            println!("waiverCreated: {}", args.waiver_id);
+            println!("policy: {}", args.policy);
+            println!("approvedBy: {}", args.approved_by);
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
         }
     }
     Ok(())
