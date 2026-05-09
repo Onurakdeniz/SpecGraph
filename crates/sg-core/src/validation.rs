@@ -19,6 +19,7 @@ pub const VALIDATOR_MIGRATION_RUNTIME: &str = "validator.migration_runtime";
 pub const VALIDATOR_DRIFT: &str = "validator.drift";
 pub const VALIDATOR_GRAPH_MERGE: &str = "validator.graph_merge";
 pub const VALIDATOR_ISSUE_GRAPH: &str = "validator.issue_graph";
+pub const VALIDATOR_ONTOLOGY_EVOLUTION: &str = "validator.ontology_evolution";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -133,6 +134,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Drift Detection",
             description: "Detects spec-code-test-data-architecture drift and emits blocking actionable findings.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_ONTOLOGY_EVOLUTION,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Ontology Evolution Loop",
+            description: "Validates ontology change proposals for tests, migration plans, compatibility checks, and release evidence.",
         },
         ValidatorDefinition {
             id: VALIDATOR_ISSUE_GRAPH,

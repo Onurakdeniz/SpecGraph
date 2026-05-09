@@ -275,6 +275,31 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "ontology-pack:ddd-backend",
     },
     StableKeyFamily {
+        prefix: "ontology-change",
+        description: "Ontology evolution change proposal",
+        example: "ontology-change:ddd-backend/add-aggregate",
+    },
+    StableKeyFamily {
+        prefix: "ontology-test",
+        description: "Ontology evolution test evidence",
+        example: "ontology-test:ddd-backend/add-aggregate",
+    },
+    StableKeyFamily {
+        prefix: "compatibility-check",
+        description: "Ontology compatibility check evidence",
+        example: "compatibility-check:ddd-backend/add-aggregate",
+    },
+    StableKeyFamily {
+        prefix: "pack-release-evidence",
+        description: "Ontology pack release evidence",
+        example: "pack-release-evidence:ddd-backend@0.2.0",
+    },
+    StableKeyFamily {
+        prefix: "upgrade-run",
+        description: "Ontology project upgrade execution evidence",
+        example: "upgrade-run:ddd-backend@0.2.0/project",
+    },
+    StableKeyFamily {
         prefix: "ontology-migration",
         description: "Ontology pack migration plan",
         example: "ontology-migration:ddd-backend:0.1.0->0.2.0",

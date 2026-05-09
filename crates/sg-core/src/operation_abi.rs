@@ -571,6 +571,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "OntologyChange.Propose",
+            category: "ontology",
+            description: "Record ontology change proposal evidence including tests, migrations, compatibility checks, and release evidence.",
+            required_input_fields: &["change"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["OntologyChange", "OntologyTest", "OntologyMigration", "CompatibilityCheck", "PackReleaseEvidence", "UpgradeRun"],
+            allowed_create_edge_types: &["HAS_ONTOLOGY_CHANGE_EVIDENCE", "HAS_ONTOLOGY_TEST", "HAS_COMPATIBILITY_CHECK", "HAS_PACK_RELEASE_EVIDENCE"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "OntologyPack.Install",
             category: "ontology",
             description: "Install and lock an ontology pack manifest.",

@@ -25,6 +25,7 @@ pub mod migration_runtime;
 pub mod model;
 pub mod module_graph;
 pub mod ontology;
+pub mod ontology_evolution;
 pub mod ontology_pack;
 pub mod operation_abi;
 pub mod policy;
@@ -61,6 +62,9 @@ pub use module_graph::{
 pub use ontology::{
     MvpOntology, OntologyStateMachine, OntologyStateTransition, OntologyValidatorRule,
     CORE_ONTOLOGY_VERSION,
+};
+pub use ontology_evolution::{
+    validate_ontology_change_proposal, OntologyChangeProposalReport, OntologyChangeState,
 };
 pub use operation_abi::{
     built_in_operations, find_operation, validate_operation_postconditions,
