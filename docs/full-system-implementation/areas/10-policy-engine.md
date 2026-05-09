@@ -2,7 +2,7 @@
 
 **System area:** Policy Engine  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code audit plus policy waiver and actor identity implementation slices.
+**Status basis:** code audit plus policy waiver, actor identity, and policy-decision persistence implementation slices.
 
 ## Purpose
 
@@ -16,18 +16,19 @@ Implement deterministic policy decisions with built-in rules and declarative man
 - Foundation docs state manifest DSL supports operations, globs, approvals, roles, warnings, denies, waivers
 - Manifest required-role checks can resolve roles from graph-native Actor/Role facts
 - Linked graph-native Approval and Waiver evidence can satisfy policy checks
+- Policy decisions can be persisted as graph-native `PolicyDecision` facts linked from the Project
 
 ### Partly Implemented
 
 - Built-in and manifest checks exist at foundation level
 - Waiver validity checks exist for reason, approver, expiration, and non-waivable rules
 - Approval/waiver scope is recorded but not fully matched against changed paths or operations yet
-- Graph-native PolicyDecision persistence remains
+- Policy decision persistence records decisions and blocking finding counts; full operation receipt policy gating remains
 
 ### Not Implemented / Remaining
 
-- PolicyDecision persistence
 - Full permission lookup beyond role membership
+- Policy checks automatically blocking every mutating operation
 - Hosting-provider approval sync
 - Policy pack test harness
 
@@ -39,7 +40,7 @@ Policy, PolicyDecision, Approval, Waiver, Actor, Role, requiredApproval, severit
 
 ### 2. Commands / APIs
 
-sg policy check with operation, changed-file, policy-file, approval, waiver; operation/CI integration
+sg policy check with operation, changed-file, policy-file, approval, waiver, and optional `--record`; operation/CI integration
 
 ### 3. Validation and Policy Gates
 
@@ -48,7 +49,7 @@ Determinism, non-waivable rules, scoped approvals, expiration, denial of secrets
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: PolicyDecision persistence.
+- Implement or finish: Policy checks automatically blocking every mutating operation.
 - Implement or finish: Role/permission lookup.
 - Implement or finish: Hosting-provider approval sync.
 - Implement or finish: Policy pack test harness.

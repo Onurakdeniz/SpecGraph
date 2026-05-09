@@ -155,6 +155,16 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
+            name: "Policy.RecordDecision",
+            category: "policy",
+            description: "Persist policy decisions from a policy evaluation as graph facts.",
+            required_input_fields: &["policyRunId", "checkedOperation", "decisions"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["PolicyDecision"],
+            allowed_create_edge_types: &["HAS_POLICY_DECISION"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
             name: "Code.Index",
             category: "code",
             description: "Record changed files and observed source symbols as code facts.",

@@ -9,6 +9,7 @@ use crate::ontology_pack::{load_pack, validate_pack, OntologyPackManifest};
 use crate::operation_abi::{
     validate_operation_postconditions, validate_operation_preconditions, validate_operation_request,
 };
+use crate::policy::{PolicyDecision, PolicyReport};
 use crate::spec::SpecProjection;
 use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_SNAPSHOT};
 use serde_json::{json, Value};
@@ -82,6 +83,8 @@ pub enum StoreError {
     ActorNotFound(String),
     #[error("approval or waiver id cannot be empty")]
     EmptyEvidenceId,
+    #[error("project node not found")]
+    ProjectNotFound,
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -187,6 +190,16 @@ pub struct CreateWaiverOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct RecordPolicyReportOptions {
+    pub policy_run_id: String,
+    pub checked_operation: String,
+    pub changed_files: Vec<String>,
+    pub actor: String,
+    pub graph_branch: String,
+    pub report: PolicyReport,
+}
+
+#[derive(Debug, Clone)]
 pub struct ActionGroupSummary {
     pub id: String,
     pub name: String,
@@ -288,6 +301,13 @@ impl SpecGraphStore {
 
     pub fn create_waiver(&self, options: CreateWaiverOptions) -> Result<OperationReceipt> {
         create_waiver(self.root(), options)
+    }
+
+    pub fn record_policy_report(
+        &self,
+        options: RecordPolicyReportOptions,
+    ) -> Result<OperationReceipt> {
+        record_policy_report(self.root(), options)
     }
 
     pub fn install_ontology_pack(
@@ -958,6 +978,58 @@ pub fn create_waiver(root: &Path, options: CreateWaiverOptions) -> Result<Operat
             dry_run: false,
             delta: GraphDelta {
                 create_nodes: vec![waiver_node],
+                create_edges,
+                ..GraphDelta::default()
+            },
+        },
+    )
+}
+
+pub fn record_policy_report(
+    root: &Path,
+    options: RecordPolicyReportOptions,
+) -> Result<OperationReceipt> {
+    if options.policy_run_id.trim().is_empty() {
+        return Err(StoreError::EmptyEvidenceId);
+    }
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let project_node_id = replay
+        .graph
+        .nodes
+        .values()
+        .find(|node| node.node_type == "Project")
+        .map(|node| node.id.clone())
+        .ok_or(StoreError::ProjectNotFound)?;
+
+    let mut create_nodes = Vec::new();
+    let mut create_edges = Vec::new();
+    for (index, decision) in options.report.decisions.iter().enumerate() {
+        let decision_node = policy_decision_node(&options, decision, index);
+        create_edges.push(edge(
+            &project_node_id,
+            "HAS_POLICY_DECISION",
+            &decision_node.id,
+        ));
+        create_nodes.push(decision_node);
+    }
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Policy.RecordDecision".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "policyRunId": options.policy_run_id,
+                "checkedOperation": options.checked_operation,
+                "changedFiles": options.changed_files,
+                "decisions": options.report.decisions,
+                "findingCount": options.report.findings.len(),
+                "blockingFindingCount": policy_error_count(&options.report),
+            }),
+            dry_run: false,
+            delta: GraphDelta {
+                create_nodes,
                 create_edges,
                 ..GraphDelta::default()
             },
@@ -1798,6 +1870,48 @@ fn waiver_node(options: &CreateWaiverOptions) -> Node {
         node_type: "Waiver".to_string(),
         attributes,
     }
+}
+
+fn policy_decision_node(
+    options: &RecordPolicyReportOptions,
+    decision: &PolicyDecision,
+    index: usize,
+) -> Node {
+    let decision_id = format!("{}/{}-{}", options.policy_run_id, index, decision.policy);
+    Node {
+        id: node_id("policy_decision", &decision_id),
+        stable_key: format!("policy-decision:{decision_id}"),
+        node_type: "PolicyDecision".to_string(),
+        attributes: BTreeMap::from([
+            ("policyRunId".to_string(), json!(options.policy_run_id)),
+            ("index".to_string(), json!(index)),
+            ("policy".to_string(), json!(decision.policy)),
+            ("effect".to_string(), json!(decision.effect)),
+            ("message".to_string(), json!(decision.message)),
+            (
+                "checkedOperation".to_string(),
+                json!(options.checked_operation),
+            ),
+            ("changedFiles".to_string(), json!(options.changed_files)),
+            ("actor".to_string(), json!(options.actor)),
+            (
+                "findingCount".to_string(),
+                json!(options.report.findings.len()),
+            ),
+            (
+                "blockingFindingCount".to_string(),
+                json!(policy_error_count(&options.report)),
+            ),
+        ]),
+    }
+}
+
+fn policy_error_count(report: &PolicyReport) -> usize {
+    report
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count()
 }
 
 fn insert_optional_attribute(
@@ -2719,6 +2833,79 @@ acceptanceCriteria:
             .findings
             .iter()
             .any(|finding| finding.code == "policy.data.migration_approval"));
+    }
+
+    #[test]
+    fn policy_record_report_persists_decision_graph_facts() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let report = crate::policy::evaluate_policies(
+            &replay_events(tmp.path(), ReplayOptions { check_hashes: true })
+                .unwrap()
+                .graph,
+            &crate::policy::PolicyCheckInput {
+                operation: "Merge".to_string(),
+                actor: Some("local:developer".to_string()),
+                changed_files: vec![".env".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![],
+            },
+        );
+        assert!(report
+            .decisions
+            .iter()
+            .any(|decision| decision.effect == crate::policy::PolicyEffect::Deny));
+
+        let receipt = record_policy_report(
+            tmp.path(),
+            RecordPolicyReportOptions {
+                policy_run_id: "policy-run-001".to_string(),
+                checked_operation: "Merge".to_string(),
+                changed_files: vec![".env".to_string()],
+                actor: "local:developer".to_string(),
+                graph_branch: "main".to_string(),
+                report,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "Policy.RecordDecision");
+        assert!(receipt
+            .created_nodes
+            .iter()
+            .all(|node_id| node_id.contains("policy_decision")));
+        assert_eq!(receipt.created_nodes.len(), receipt.created_edges.len());
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let decisions = replay
+            .graph
+            .nodes
+            .values()
+            .filter(|node| node.node_type == "PolicyDecision")
+            .collect::<Vec<_>>();
+        assert!(!decisions.is_empty());
+        assert!(decisions.iter().any(|node| {
+            node.attributes.get("effect") == Some(&json!("Deny"))
+                && node.attributes.get("blockingFindingCount") == Some(&json!(1))
+        }));
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "HAS_POLICY_DECISION" && edge.from == "node_project"));
+
+        let validation = validate_specs(tmp.path()).unwrap();
+        assert!(validation.findings.is_empty());
     }
 
     #[test]

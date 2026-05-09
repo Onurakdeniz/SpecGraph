@@ -148,7 +148,7 @@ Related areas:
 - [ ] Add ontology cardinality checks.
 - [ ] Add ontology state-machine support.
 - [ ] Add pack migration planning model.
-- [ ] Add policy result model persistence or receipt inclusion.
+- [~] Add policy result model persistence or receipt inclusion.
 - [~] Add actor identity resolution.
 - [~] Add role/permission model foundation.
 - [~] Add graph-native `Approval` and `Waiver` nodes.

@@ -9,8 +9,8 @@ use sg_core::{
     CodeIndexObservation, CommitValidationInput, CreateWaiverOptions, Edge, Finding,
     FindingSeverity, GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions,
     LinksManifest, Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal,
-    RecordApprovalOptions, RecordCommitOptions, ReplayOptions, Snapshot, SpecGraphStore,
-    SpecProjection, TestLink, TextItem, TrustState, UpsertActorOptions,
+    RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions, Snapshot,
+    SpecGraphStore, SpecProjection, TestLink, TextItem, TrustState, UpsertActorOptions,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -246,6 +246,11 @@ struct PolicyCheckArgs {
     /// Optional YAML/JSON declarative policy manifest.
     #[arg(long = "policy-file", value_name = "FILE")]
     policy_files: Vec<PathBuf>,
+    /// Record policy decisions as graph facts.
+    #[arg(long)]
+    record: bool,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
 }
 
 #[derive(Debug, Args)]
@@ -766,9 +771,10 @@ fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()>
     match args.command {
         PolicyCommand::Check(args) => {
             let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let actor = args.actor;
             let input = PolicyCheckInput {
                 operation: args.operation,
-                actor: Some(args.actor),
+                actor: Some(actor.clone()),
                 changed_files: args.changed_files,
                 actor_roles: args.roles,
                 approvals: args.approvals,
@@ -787,13 +793,27 @@ fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()>
             } else {
                 evaluate_policies_with_manifests(&replay.graph, &input, &manifests)
             };
-            for decision in report.decisions {
+            for decision in &report.decisions {
                 println!(
                     "{:?} {}: {}",
                     decision.effect, decision.policy, decision.message
                 );
             }
             print_findings(&report.findings);
+            if args.record {
+                let run_id = policy_run_id();
+                let receipt = store.record_policy_report(RecordPolicyReportOptions {
+                    policy_run_id: run_id.clone(),
+                    checked_operation: input.operation.clone(),
+                    changed_files: input.changed_files.clone(),
+                    actor,
+                    graph_branch: args.graph_branch,
+                    report: report.clone(),
+                })?;
+                println!("policyRunRecorded: {run_id}");
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
             fail_on_errors(&report.findings, "policy check")?;
             println!("policy: ok");
         }
@@ -1705,6 +1725,10 @@ fn validation_run_id(prefix: &str) -> String {
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     format!("{prefix}-{nonce}")
+}
+
+fn policy_run_id() -> String {
+    validation_run_id("policy")
 }
 
 fn transition_proposal(
