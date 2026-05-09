@@ -57,9 +57,9 @@ pub use ontology_pack::{
     load_pack, validate_pack, OntologyMigration, OntologyPackManifest, OntologyPackValidationReport,
 };
 pub use policy::{
-    evaluate_policies, evaluate_policies_with_manifests, evaluate_policy_manifest,
-    load_policy_manifest, PolicyCheckInput, PolicyDecision, PolicyEffect, PolicyManifest,
-    PolicyReport, PolicyRule, Waiver,
+    built_in_non_waivable_policies, evaluate_policies, evaluate_policies_with_manifests,
+    evaluate_policy_manifest, load_policy_manifest, PolicyCheckInput, PolicyDecision, PolicyEffect,
+    PolicyManifest, PolicyReport, PolicyRule, Waiver,
 };
 pub use proposal::{Proposal, TrustState};
 
