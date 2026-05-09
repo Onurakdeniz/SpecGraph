@@ -6,4 +6,5 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-sg-core = { path = "../sg-core" }
+sg-query.workspace = true
+sg-store.workspace = true

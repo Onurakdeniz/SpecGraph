@@ -1,12 +1,18 @@
-//! Boundary crate for `sg-ontology` in the SpecGraph OS modular workspace.
-//!
-//! This crate is intentionally a narrow public facade during the workspace split.
-//! Implementation still lives behind `sg-core` until the next extraction pass moves
-//! code module-by-module without changing public behavior.
+//! Ontology, ontology pack, and ontology evolution primitives for SpecGraph OS.
 
-pub use sg_core::{
-    load_pack, plan_pack_migration, validate_pack, MvpOntology, OntologyChangeProposalReport,
-    OntologyChangeState, OntologyMigration, OntologyMigrationAction, OntologyMigrationPlan,
-    OntologyPackManifest, OntologyPackSignature, OntologyPackSource, OntologyPackValidationReport,
-    OntologyStateMachine, OntologyStateTransition, OntologyValidatorRule, CORE_ONTOLOGY_VERSION,
+pub mod ontology;
+pub mod ontology_evolution;
+pub mod ontology_pack;
+
+pub use ontology::{
+    MvpOntology, OntologyStateMachine, OntologyStateTransition, OntologyValidatorRule,
+    CORE_ONTOLOGY_VERSION,
+};
+pub use ontology_evolution::{
+    validate_ontology_change_proposal, OntologyChangeProposalReport, OntologyChangeState,
+};
+pub use ontology_pack::{
+    load_pack, plan_pack_migration, validate_pack, OntologyMigration, OntologyMigrationAction,
+    OntologyMigrationPlan, OntologyPackManifest, OntologyPackSignature, OntologyPackSource,
+    OntologyPackValidationReport,
 };

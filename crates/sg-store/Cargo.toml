@@ -6,4 +6,21 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-sg-core = { path = "../sg-core" }
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sg-canonical.workspace = true
+sg-gitgraph.workspace = true
+sg-model.workspace = true
+sg-ontology.workspace = true
+sg-operation.workspace = true
+sg-policy.workspace = true
+sg-query.workspace = true
+sg-spec.workspace = true
+sg-validation.workspace = true
+thiserror.workspace = true
+time.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3.10"

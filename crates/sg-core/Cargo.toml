@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+sg-store.workspace = true
+sg-ontology.workspace = true
+sg-architecture.workspace = true
 sg-testgraph.workspace = true
 sg-module-graph.workspace = true
 sg-gitgraph.workspace = true

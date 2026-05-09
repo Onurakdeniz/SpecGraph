@@ -43,6 +43,12 @@ repository = "https://github.com/Onurakdeniz/SpecGraph"
 version = "0.1.0"
 
 [workspace.dependencies]
+sg-sdk = { path = "crates/sg-sdk" }
+sg-server = { path = "crates/sg-server" }
+sg-store = { path = "crates/sg-store" }
+sg-ontology = { path = "crates/sg-ontology" }
+sg-architecture = { path = "crates/sg-architecture" }
+sg-action = { path = "crates/sg-action" }
 sg-testgraph = { path = "crates/sg-testgraph" }
 sg-module-graph = { path = "crates/sg-module-graph" }
 sg-gitgraph = { path = "crates/sg-gitgraph" }
