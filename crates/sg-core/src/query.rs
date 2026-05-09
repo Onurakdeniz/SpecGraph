@@ -5,11 +5,48 @@ use std::collections::{BTreeSet, VecDeque};
 #[derive(Debug, Clone)]
 pub struct GraphQuery<'a> {
     graph: &'a Graph,
+    context: QueryContext,
 }
 
 impl<'a> GraphQuery<'a> {
     pub fn new(graph: &'a Graph) -> Self {
-        Self { graph }
+        Self {
+            graph,
+            context: QueryContext::default(),
+        }
+    }
+
+    pub fn with_context(graph: &'a Graph, context: QueryContext) -> Self {
+        Self { graph, context }
+    }
+
+    pub fn context(&self) -> &QueryContext {
+        &self.context
+    }
+
+    pub fn cost(&self) -> QueryCost {
+        QueryCost {
+            nodes_scanned: self.graph.nodes.len(),
+            edges_scanned: self.graph.edges.len(),
+            max_nodes: self.context.limits.max_nodes,
+            max_edges: self.context.limits.max_edges,
+            max_depth: self.context.limits.max_depth,
+        }
+    }
+
+    pub fn check_cost(&self) -> Result<QueryCost, QueryLimitExceeded> {
+        let cost = self.cost();
+        if cost.nodes_scanned > self.context.limits.max_nodes {
+            return Err(QueryLimitExceeded::Nodes {
+                max: self.context.limits.max_nodes,
+            });
+        }
+        if cost.edges_scanned > self.context.limits.max_edges {
+            return Err(QueryLimitExceeded::Edges {
+                max: self.context.limits.max_edges,
+            });
+        }
+        Ok(cost)
     }
 
     pub fn get_node(&self, node_id: &str) -> Option<&'a Node> {
@@ -216,6 +253,43 @@ impl<'a> GraphQuery<'a> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryContext {
+    pub target: QueryTarget,
+    pub limits: QueryLimits,
+    pub actor: Option<String>,
+    pub require_permission: bool,
+}
+
+impl Default for QueryContext {
+    fn default() -> Self {
+        Self {
+            target: QueryTarget::Current {
+                graph_branch: "main".to_string(),
+            },
+            limits: QueryLimits::default(),
+            actor: None,
+            require_permission: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryTarget {
+    Current { graph_branch: String },
+    Branch { graph_branch: String },
+    Snapshot { snapshot_id: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueryCost {
+    pub nodes_scanned: usize,
+    pub edges_scanned: usize,
+    pub max_nodes: usize,
+    pub max_edges: usize,
+    pub max_depth: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueryDirection {
     Incoming,
@@ -362,6 +436,51 @@ mod tests {
                 requested: 2,
                 max: 1
             }
+        );
+    }
+
+    #[test]
+    fn query_context_tracks_target_and_cost_limits() {
+        let graph = sample_graph();
+        let context = QueryContext {
+            target: QueryTarget::Branch {
+                graph_branch: "spec/AUTH-001-password-reset".to_string(),
+            },
+            limits: QueryLimits {
+                max_depth: 2,
+                max_nodes: 10,
+                max_edges: 10,
+            },
+            actor: Some("local:developer".to_string()),
+            require_permission: true,
+        };
+        let query = GraphQuery::with_context(&graph, context.clone());
+        assert_eq!(query.context(), &context);
+        assert_eq!(
+            query.cost(),
+            QueryCost {
+                nodes_scanned: 3,
+                edges_scanned: 2,
+                max_nodes: 10,
+                max_edges: 10,
+                max_depth: 2,
+            }
+        );
+        assert!(query.check_cost().is_ok());
+
+        let limited = GraphQuery::with_context(
+            &graph,
+            QueryContext {
+                limits: QueryLimits {
+                    max_nodes: 2,
+                    ..QueryLimits::default()
+                },
+                ..QueryContext::default()
+            },
+        );
+        assert_eq!(
+            limited.check_cost().unwrap_err(),
+            QueryLimitExceeded::Nodes { max: 2 }
         );
     }
 

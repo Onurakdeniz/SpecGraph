@@ -10,6 +10,7 @@ use crate::operation_abi::{
     validate_operation_postconditions, validate_operation_preconditions, validate_operation_request,
 };
 use crate::policy::{PolicyDecision, PolicyReport};
+use crate::query::{QueryContext, QueryCost, QueryTarget};
 use crate::spec::SpecProjection;
 use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_SNAPSHOT};
 use serde_json::{json, Value};
@@ -93,6 +94,8 @@ pub enum StoreError {
     EmptyEvidenceId,
     #[error("project node not found")]
     ProjectNotFound,
+    #[error("query limit exceeded: {0}")]
+    QueryLimitExceeded(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -246,6 +249,14 @@ pub struct RebuildReport {
     pub edges: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct QueryGraphReport {
+    pub graph: Graph,
+    pub state_hash: String,
+    pub context: QueryContext,
+    pub cost: QueryCost,
+}
+
 impl SpecGraphStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -353,6 +364,10 @@ impl SpecGraphStore {
 
     pub fn rebuild_projections(&self) -> Result<RebuildReport> {
         rebuild_projections(self.root())
+    }
+
+    pub fn query_graph(&self, context: QueryContext) -> Result<QueryGraphReport> {
+        query_graph(self.root(), context)
     }
 }
 
@@ -1591,6 +1606,55 @@ pub fn rebuild_projections(root: &Path) -> Result<RebuildReport> {
     })
 }
 
+pub fn query_graph(root: &Path, context: QueryContext) -> Result<QueryGraphReport> {
+    let graph = match &context.target {
+        QueryTarget::Current { graph_branch: _ } | QueryTarget::Branch { graph_branch: _ } => {
+            replay_events(root, ReplayOptions { check_hashes: true })?.graph
+        }
+        QueryTarget::Snapshot { snapshot_id } => read_snapshot_by_id(root, snapshot_id)?,
+    };
+    let state_hash = state_hash(&graph, CORE_ONTOLOGY_VERSION);
+    let query = crate::query::GraphQuery::with_context(&graph, context.clone());
+    let cost = query
+        .check_cost()
+        .map_err(|error| StoreError::QueryLimitExceeded(format!("{error:?}")))?;
+    Ok(QueryGraphReport {
+        graph,
+        state_hash,
+        context,
+        cost,
+    })
+}
+
+fn read_snapshot_by_id(root: &Path, snapshot_id: &str) -> Result<Graph> {
+    let sg_dir = root.join(".specgraph");
+    if !sg_dir.exists() {
+        return Err(StoreError::NotFound(sg_dir));
+    }
+    let path = sg_dir.join("snapshots").join(format!("{snapshot_id}.json"));
+    let snapshot: Snapshot =
+        serde_json::from_slice(&fs::read(&path).map_err(|source| StoreError::Io {
+            path: path.clone(),
+            source,
+        })?)
+        .map_err(|source| StoreError::Json {
+            path: path.clone(),
+            source,
+        })?;
+    Ok(Graph {
+        nodes: snapshot
+            .nodes
+            .into_iter()
+            .map(|node| (node.id.clone(), node))
+            .collect(),
+        edges: snapshot
+            .edges
+            .into_iter()
+            .map(|edge| (edge.id.clone(), edge))
+            .collect(),
+    })
+}
+
 fn snapshot_finding(code: &str, message: String) -> Finding {
     Finding::new(code, FindingSeverity::Error, message)
         .with_validator(VALIDATOR_SNAPSHOT, CORE_VALIDATOR_VERSION)
@@ -2413,6 +2477,51 @@ mod tests {
         assert_eq!(summary["schemaVersion"], "specgraph.derived-index/v1");
         assert_eq!(summary["derivedFrom"], "events/*.jsonl");
         assert_eq!(summary["stateHash"], report.state_hash);
+    }
+
+    #[test]
+    fn query_graph_resolves_current_branch_and_snapshot_contexts() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let current = query_graph(tmp.path(), QueryContext::default()).unwrap();
+        assert_eq!(current.graph.nodes.len(), 1);
+        assert_eq!(current.cost.nodes_scanned, 1);
+
+        let branch = query_graph(
+            tmp.path(),
+            QueryContext {
+                target: QueryTarget::Branch {
+                    graph_branch: "main".to_string(),
+                },
+                ..QueryContext::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(branch.state_hash, current.state_hash);
+
+        let snapshot_path = only_snapshot_path(tmp.path());
+        let snapshot: Snapshot =
+            serde_json::from_slice(&fs::read(&snapshot_path).unwrap()).unwrap();
+        let snapshot_report = query_graph(
+            tmp.path(),
+            QueryContext {
+                target: QueryTarget::Snapshot {
+                    snapshot_id: snapshot.snapshot_id,
+                },
+                ..QueryContext::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(snapshot_report.state_hash, current.state_hash);
     }
 
     #[test]
