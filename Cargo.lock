@@ -653,6 +653,8 @@ dependencies = [
  "serde_yaml",
  "sg-canonical",
  "sg-model",
+ "sg-operation",
+ "sg-query",
  "sha2",
  "tempfile",
  "thiserror",
@@ -721,7 +723,10 @@ dependencies = [
 name = "sg-operation"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-canonical",
+ "sg-model",
 ]
 
 [[package]]
@@ -749,7 +754,8 @@ dependencies = [
 name = "sg-query"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde_json",
+ "sg-model",
 ]
 
 [[package]]

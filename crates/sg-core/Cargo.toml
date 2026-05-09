@@ -8,6 +8,8 @@ repository.workspace = true
 [dependencies]
 sg-canonical.workspace = true
 sg-model.workspace = true
+sg-operation.workspace = true
+sg-query.workspace = true
 globset.workspace = true
 hex.workspace = true
 serde.workspace = true
