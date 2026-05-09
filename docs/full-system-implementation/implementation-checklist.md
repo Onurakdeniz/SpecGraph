@@ -168,8 +168,8 @@ Related areas:
 - [~] Add graph-native `Approval` and `Waiver` nodes.
 - [x] Reject expired waiver creation and non-waivable waiver creation.
 - [x] Add non-waivable policy list.
-- [~] Add common `Finding` schema across validators.
-- [~] Add validator registry and validator versioning.
+- [x] Add common `Finding` schema across validators.
+- [x] Add validator registry, versioning, and ValidatorExecution graph facts.
 
 ### Gate Checks
 

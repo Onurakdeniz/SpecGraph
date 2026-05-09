@@ -209,8 +209,8 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             description: "Record validation run evidence and findings.",
             required_input_fields: &["runId", "status", "checks"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
-            allowed_create_node_types: &["ValidationRun", "Finding"],
-            allowed_create_edge_types: &["VALIDATED_BY", "HAS_FINDING"],
+            allowed_create_node_types: &["ValidationRun", "ValidatorExecution", "Finding"],
+            allowed_create_edge_types: &["VALIDATED_BY", "HAS_VALIDATOR_EXECUTION", "HAS_FINDING"],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {

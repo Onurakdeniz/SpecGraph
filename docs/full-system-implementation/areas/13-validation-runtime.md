@@ -2,7 +2,7 @@
 
 **System area:** Validation Runtime  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code audit plus common finding schema and validator registry implementation slice.
+**Status basis:** code audit plus common finding schema, validator registry, and Phase 2.8 ValidatorExecution implementation slice.
 
 ## Purpose
 
@@ -17,19 +17,20 @@ Run deterministic validators, emit structured findings, record validation runs, 
 - Common `Finding` schema includes validator id, validator version, structured locations, remediation, and related graph objects
 - Built-in validator registry exposes stable validator ids and versions
 - Core validators attach validator ids/versions to produced findings
+- Recorded validation runs create `ValidatorExecution` graph facts linked from `ValidationRun`
+- Finding graph facts include validator id, validator version, remediation, and lifecycle state foundation
 
 ### Partly Implemented
 
 - ValidationRun and Finding shapes are documented
 - Structured locations and remediation foundation exists
-- ValidatorExecution graph facts and full finding lifecycle still need work
+- Full finding lifecycle transitions and waiver interaction still need work
 
 ### Not Implemented / Remaining
 
 - Finding lifecycle
 - Waiver interaction
 - Machine-readable PR/Studio reports
-- ValidatorExecution graph facts
 - Validator pack/plugin registration beyond built-in validators
 
 ## Implementation Parts
@@ -46,10 +47,16 @@ sg spec validate, trace validate, git validate-bindings, ci validate --record, `
 
 Ontology, invariant, policy, traceability, code boundary, Git binding, test mapping, data, security, impact validators
 
+
+### ValidatorExecution and Finding Lifecycle Foundation
+
+- `Validation.Record` operations can now create `ValidatorExecution` facts and `HAS_VALIDATOR_EXECUTION` edges.
+- CLI/CI proof recording emits one ValidatorExecution per recorded check with validator id, validator version, status, and finding count.
+- Finding facts now persist validator metadata, remediation, and an initial `Open` lifecycle state so later waiver/resolution workflows can update them.
+
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: ValidatorExecution graph facts.
 - Implement or finish: Finding lifecycle.
 - Implement or finish: Waiver interaction.
 - Implement or finish: Machine-readable PR/Studio reports.

@@ -13,6 +13,25 @@ pub const VALIDATOR_SNAPSHOT: &str = "validator.snapshot";
 pub const VALIDATOR_TRACE_LINKS: &str = "validator.trace_links";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum ValidatorExecutionStatus {
+    Passed,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidatorExecution {
+    pub run_id: String,
+    pub validator: String,
+    pub validator_version: String,
+    pub status: ValidatorExecutionStatus,
+    #[serde(default)]
+    pub finding_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidatorDefinition {
     pub id: &'static str,
@@ -107,5 +126,19 @@ mod tests {
                 .version,
             CORE_VALIDATOR_VERSION
         );
+    }
+
+    #[test]
+    fn validator_execution_schema_records_lifecycle_input() {
+        let execution = ValidatorExecution {
+            run_id: "run-001".to_string(),
+            validator: VALIDATOR_ONTOLOGY.to_string(),
+            validator_version: CORE_VALIDATOR_VERSION.to_string(),
+            status: ValidatorExecutionStatus::Passed,
+            finding_count: 0,
+        };
+
+        assert_eq!(execution.validator, VALIDATOR_ONTOLOGY);
+        assert_eq!(execution.status, ValidatorExecutionStatus::Passed);
     }
 }
