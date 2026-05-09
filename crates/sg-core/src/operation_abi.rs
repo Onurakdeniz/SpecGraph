@@ -249,6 +249,18 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
+
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Spec.Transition",
+            category: "spec",
+            description: "Move a Spec through the evidence-gated full-system state machine.",
+            required_input_fields: &["spec", "state"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["Spec"],
+            allowed_create_edge_types: &[],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Spec.BindBranch",

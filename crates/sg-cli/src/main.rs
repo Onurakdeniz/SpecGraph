@@ -11,7 +11,8 @@ use sg_core::{
     GrantRoleOptions, Graph, GraphDelta, InitOptions, LinksManifest, Node, PolicyCheckInput,
     PolicyEffect, PolicyManifest, PolicyRule, Proposal, QueryContext, QueryLimits, QueryTarget,
     RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions, Snapshot,
-    SpecGraphStore, SpecProjection, TestLink, TextItem, TrustState, UpsertActorOptions,
+    SpecGraphStore, SpecProjection, TestLink, TextItem, TransitionSpecOptions, TrustState,
+    UpsertActorOptions,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -87,6 +88,8 @@ enum SpecCommand {
     Create(SpecCreateArgs),
     Import(SpecImportArgs),
     BindBranch(SpecBindBranchArgs),
+    Transition(SpecTransitionArgs),
+    Status(SpecStatusArgs),
     Validate,
 }
 
@@ -134,6 +137,24 @@ struct SpecBindBranchArgs {
     actor: String,
     #[arg(long, default_value = "main")]
     graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct SpecTransitionArgs {
+    #[arg(long)]
+    spec: String,
+    #[arg(long)]
+    state: String,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct SpecStatusArgs {
+    #[arg(long)]
+    spec: String,
 }
 
 #[derive(Debug, Args)]
@@ -713,6 +734,35 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
             println!("branch: {branch}");
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
+        }
+        SpecCommand::Transition(args) => {
+            let receipt = store.transition_spec_state(TransitionSpecOptions {
+                spec: args.spec.clone(),
+                state: args.state.clone(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            println!("specTransitioned: {}", args.spec);
+            println!("state: {}", args.state);
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        SpecCommand::Status(args) => {
+            let status = store.spec_status(&args.spec)?;
+            println!("spec: {}", status.spec);
+            println!("state: {}", status.state);
+            if status.next_states.is_empty() {
+                println!("nextStates: none");
+            } else {
+                println!("nextStates: {}", status.next_states.join(","));
+            }
+            if status.blockers.is_empty() {
+                println!("blockers: none");
+            } else {
+                for blocker in status.blockers {
+                    println!("blocker: {blocker}");
+                }
+            }
         }
         SpecCommand::Validate => {
             validate_specs_or_fail(store)?;

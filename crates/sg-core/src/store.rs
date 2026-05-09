@@ -156,6 +156,22 @@ pub struct BindBranchOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct TransitionSpecOptions {
+    pub spec: String,
+    pub state: String,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecStatusSummary {
+    pub spec: String,
+    pub state: String,
+    pub blockers: Vec<String>,
+    pub next_states: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct GenerateActionGraphOptions {
     pub spec: String,
     pub actor: String,
@@ -332,6 +348,17 @@ impl SpecGraphStore {
 
     pub fn bind_spec_branch(&self, options: BindBranchOptions) -> Result<OperationReceipt> {
         bind_spec_branch(self.root(), options)
+    }
+
+    pub fn transition_spec_state(
+        &self,
+        options: TransitionSpecOptions,
+    ) -> Result<OperationReceipt> {
+        transition_spec_state(self.root(), options)
+    }
+
+    pub fn spec_status(&self, spec: &str) -> Result<SpecStatusSummary> {
+        spec_status(self.root(), spec)
     }
 
     pub fn generate_action_graph(
@@ -805,6 +832,125 @@ pub fn import_spec_file(
             dry_run: false,
         },
     )
+}
+
+pub fn transition_spec_state(
+    root: &Path,
+    options: TransitionSpecOptions,
+) -> Result<OperationReceipt> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let spec_node = find_spec_node(&replay.graph, &options.spec)
+        .ok_or_else(|| StoreError::SpecNotFound(options.spec.clone()))?;
+    let blockers = spec_state_blockers(&replay.graph, &spec_node.id, &options.state);
+    if !blockers.is_empty() {
+        return Err(StoreError::OperationValidationFailed(blockers.len()));
+    }
+
+    let mut updated = spec_node.clone();
+    updated
+        .attributes
+        .insert("state".to_string(), json!(options.state.clone()));
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Spec.Transition".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({"spec": options.spec, "state": options.state}),
+            delta: GraphDelta {
+                update_nodes: vec![updated],
+                ..GraphDelta::default()
+            },
+            dry_run: false,
+        },
+    )
+}
+
+pub fn spec_status(root: &Path, spec: &str) -> Result<SpecStatusSummary> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let spec_node = find_spec_node(&replay.graph, spec)
+        .ok_or_else(|| StoreError::SpecNotFound(spec.to_string()))?;
+    let state = spec_node
+        .attributes
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("Draft")
+        .to_string();
+    let next_states = next_spec_states(&state)
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let blockers = next_states
+        .iter()
+        .flat_map(|state| spec_state_blockers(&replay.graph, &spec_node.id, state))
+        .collect();
+    Ok(SpecStatusSummary {
+        spec: spec.to_string(),
+        state,
+        blockers,
+        next_states,
+    })
+}
+
+fn spec_state_blockers(graph: &Graph, spec_node_id: &str, target_state: &str) -> Vec<String> {
+    let mut blockers = Vec::new();
+    if matches!(
+        target_state,
+        "BranchBound" | "Implementing" | "Review" | "Released"
+    ) && !graph
+        .edges
+        .values()
+        .any(|edge| edge.from == spec_node_id && edge.edge_type == "BOUND_TO_BRANCH")
+    {
+        blockers.push("spec must be bound to a Git branch".to_string());
+    }
+    let action_graph_id = graph
+        .edges
+        .values()
+        .find(|edge| edge.from == spec_node_id && edge.edge_type == "HAS_ACTION_GRAPH")
+        .map(|edge| edge.to.clone());
+    if matches!(target_state, "Implementing" | "Review" | "Released") && action_graph_id.is_none() {
+        blockers.push("spec must have an ActionGraph".to_string());
+    }
+    if matches!(target_state, "Review" | "Released") {
+        let has_commit = graph.edges.values().any(|edge| {
+            edge.edge_type == "IMPLEMENTS_ACTION_GROUP"
+                && graph
+                    .nodes
+                    .get(&edge.from)
+                    .is_some_and(|node| node.node_type == "GitCommit")
+        });
+        if !has_commit {
+            blockers.push("spec needs at least one bound GitCommit".to_string());
+        }
+    }
+    if target_state == "Released" {
+        let passed_validation = graph.nodes.values().any(|node| {
+            node.node_type == "ValidationRun"
+                && node
+                    .attributes
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .is_some_and(|status| status == "Passed")
+        });
+        if !passed_validation {
+            blockers.push("spec needs passed ValidationRun evidence".to_string());
+        }
+    }
+    blockers
+}
+
+fn next_spec_states(state: &str) -> Vec<&'static str> {
+    match state {
+        "Draft" => vec!["Validated"],
+        "Validated" => vec!["Planned"],
+        "Planned" => vec!["BranchBound"],
+        "BranchBound" => vec!["Implementing"],
+        "Implementing" => vec!["Review"],
+        "Review" => vec!["Released"],
+        _ => Vec::new(),
+    }
 }
 
 pub fn generate_action_graph(
@@ -3117,6 +3263,31 @@ acceptanceCriteria:
             .findings
             .iter()
             .any(|finding| finding.code == "spec.has_acceptance_criterion"));
+    }
+
+    #[test]
+    fn spec_status_blocks_implementing_without_branch_and_action_graph() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "node_spec_auth_001".to_string(),
+            Node {
+                id: "node_spec_auth_001".to_string(),
+                stable_key: "spec:AUTH-001".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::from([
+                    ("spec".to_string(), json!("AUTH-001")),
+                    ("state".to_string(), json!("BranchBound")),
+                ]),
+            },
+        );
+
+        let blockers = spec_state_blockers(&graph, "node_spec_auth_001", "Implementing");
+        assert!(blockers
+            .iter()
+            .any(|blocker| blocker.contains("Git branch")));
+        assert!(blockers
+            .iter()
+            .any(|blocker| blocker.contains("ActionGraph")));
     }
 
     #[test]
