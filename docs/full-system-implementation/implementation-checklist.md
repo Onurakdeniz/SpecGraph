@@ -203,7 +203,7 @@ Related areas:
 
 ### Implementation Checklist
 
-- [ ] Add project profile facts: project type, architecture, language, package manager, test runner, CI provider.
+- [x] Add project profile facts: project type, architecture, language, package manager, test runner, CI provider.
 - [ ] Add module lifecycle commands.
 - [ ] Expand spec projection schema for risks, mitigations, expected/forbidden behaviors, use cases, endpoints, entities, events, and data changes.
 - [ ] Add spec import dry-run showing intended graph delta.

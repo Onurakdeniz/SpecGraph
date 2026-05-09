@@ -18,6 +18,7 @@ pub mod ontology;
 pub mod ontology_pack;
 pub mod operation_abi;
 pub mod policy;
+pub mod project_graph;
 pub mod proposal;
 pub mod query;
 pub mod spec;
@@ -78,6 +79,7 @@ pub use policy::{
     evaluate_policy_manifest, load_policy_manifest, PolicyCheckInput, PolicyDecision, PolicyEffect,
     PolicyManifest, PolicyReport, PolicyRule, Waiver,
 };
+pub use project_graph::ProjectProfile;
 pub use proposal::{Proposal, TrustState};
 
 pub use query::{

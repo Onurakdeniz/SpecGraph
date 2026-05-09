@@ -44,6 +44,12 @@ impl MvpOntology {
         Self {
             node_types: [
                 "Project",
+                "ProjectType",
+                "Language",
+                "ArchitectureStyle",
+                "PackageManager",
+                "TestRunner",
+                "CIProvider",
                 "Module",
                 "Spec",
                 "Requirement",
@@ -86,6 +92,12 @@ impl MvpOntology {
             .collect(),
             edge_types: [
                 "HAS_MODULE",
+                "HAS_PROJECT_TYPE",
+                "USES_LANGUAGE",
+                "HAS_ARCHITECTURE_STYLE",
+                "USES_PACKAGE_MANAGER",
+                "USES_TEST_RUNNER",
+                "USES_CI_PROVIDER",
                 "TOUCHES_MODULE",
                 "HAS_REQUIREMENT",
                 "HAS_ACCEPTANCE_CRITERION",
@@ -286,8 +298,47 @@ impl MvpOntology {
     /// Validate all MVP rules, including spec completeness.
     pub fn validate_graph(&self, graph: &Graph) -> Vec<Finding> {
         let mut findings = self.validate_integrity(graph);
+        self.validate_project_profile(graph, &mut findings);
         self.validate_spec_completeness(graph, &mut findings);
         findings
+    }
+
+    fn validate_project_profile(&self, graph: &Graph, findings: &mut Vec<Finding>) {
+        for project in graph
+            .nodes
+            .values()
+            .filter(|node| node.node_type == "Project")
+        {
+            for edge_type in [
+                "HAS_PROJECT_TYPE",
+                "HAS_ARCHITECTURE_STYLE",
+                "USES_PACKAGE_MANAGER",
+                "USES_TEST_RUNNER",
+                "USES_CI_PROVIDER",
+            ] {
+                let edges: Vec<_> = graph
+                    .edges
+                    .values()
+                    .filter(|edge| edge.from == project.id && edge.edge_type == edge_type)
+                    .collect();
+                if edges.len() > 1 {
+                    findings.push(
+                        finding(
+                            "project_profile.singleton",
+                            format!(
+                                "Project `{}` can have at most one `{}` fact. Remediation: update the existing project profile fact instead of adding another.",
+                                project.id, edge_type
+                            ),
+                        )
+                        .with_remediation(
+                            "Update the existing project profile fact instead of adding another.",
+                        )
+                        .with_related_nodes([project.id.clone()])
+                        .with_related_edges(edges.iter().map(|edge| edge.id.clone())),
+                    );
+                }
+            }
+        }
     }
 
     fn validate_node(&self, node: &Node, findings: &mut Vec<Finding>) {
@@ -734,6 +785,12 @@ fn finding(code: &str, message: String) -> Finding {
 fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {
     match edge_type {
         "HAS_MODULE" => Some((&["Project"], &["Module"])),
+        "HAS_PROJECT_TYPE" => Some((&["Project"], &["ProjectType"])),
+        "USES_LANGUAGE" => Some((&["Project"], &["Language"])),
+        "HAS_ARCHITECTURE_STYLE" => Some((&["Project"], &["ArchitectureStyle"])),
+        "USES_PACKAGE_MANAGER" => Some((&["Project"], &["PackageManager"])),
+        "USES_TEST_RUNNER" => Some((&["Project"], &["TestRunner"])),
+        "USES_CI_PROVIDER" => Some((&["Project"], &["CIProvider"])),
         "TOUCHES_MODULE" => Some((&["Spec"], &["Module"])),
         "HAS_REQUIREMENT" => Some((&["Spec"], &["Requirement"])),
         "HAS_ACCEPTANCE_CRITERION" => Some((&["Spec"], &["AcceptanceCriterion"])),
@@ -926,5 +983,48 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "ontology.state_transition_invalid"));
+    }
+
+    #[test]
+    fn project_profile_singleton_edges_are_validated() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "project".to_string(),
+            Node {
+                id: "project".to_string(),
+                stable_key: "project:demo".to_string(),
+                node_type: "Project".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+        for name in ["backend-api", "cli"] {
+            let id = format!("project_type_{name}");
+            graph.nodes.insert(
+                id.clone(),
+                Node {
+                    id: id.clone(),
+                    stable_key: format!("project-type:{name}"),
+                    node_type: "ProjectType".to_string(),
+                    attributes: BTreeMap::new(),
+                },
+            );
+            graph.edges.insert(
+                format!("edge_{name}"),
+                Edge {
+                    id: format!("edge_{name}"),
+                    stable_key: format!("edge:project:HAS_PROJECT_TYPE:{id}"),
+                    edge_type: "HAS_PROJECT_TYPE".to_string(),
+                    from: "project".to_string(),
+                    to: id,
+                    attributes: BTreeMap::new(),
+                },
+            );
+        }
+
+        let findings = MvpOntology::new().validate_graph(&graph);
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "project_profile.singleton"));
     }
 }
