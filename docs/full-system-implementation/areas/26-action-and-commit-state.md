@@ -1,7 +1,7 @@
 # 26. Action and Commit State
 
 **System area:** Action and Commit State  
-**Implementation status:** ⬜ Not implemented  
+**Implementation status:** 🟡 Partly implemented
 **Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
 
 ## Purpose
@@ -15,6 +15,11 @@ Track action execution and commit binding states so progress, blockers, replan e
 - ActionNode state machine is documented
 
 ### Partly Implemented
+
+- ActionNode lifecycle state machine now covers Ready, InProgress, Completed, Blocked, Failed, Skipped, and Replanned states.
+- `sg action start`, `sg action complete`, and `sg action replan` route through Operation Runtime and record `ExecutionAttempt` evidence.
+- Action dependencies are represented with `DEPENDS_ON`; start is blocked until dependencies are completed.
+- Completion is blocked without passed validation evidence.
 
 - Action generation/listing and commit recording foundations exist
 

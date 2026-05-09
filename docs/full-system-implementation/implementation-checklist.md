@@ -212,11 +212,11 @@ Related areas:
 - [ ] Add orphan structured concept validation.
 - [x] Enforce full Spec state machine.
 - [x] Add `sg spec status` with blockers and next operations.
-- [ ] Add ActionNode state machine.
-- [ ] Add `sg action start`.
-- [ ] Add `sg action complete`.
-- [ ] Add `sg action replan`.
-- [ ] Add action dependencies and ordering.
+- [x] Add ActionNode state machine.
+- [x] Add `sg action start`.
+- [x] Add `sg action complete`.
+- [x] Add `sg action replan`.
+- [x] Add action dependencies and ordering.
 - [~] Expand CommitPlan schema with category, required validation, allowed files, and expected delta.
 - [ ] Add GraphDelta trailer support where practical.
 - [~] Expand GitGraph with repository and PR placeholder facts.
@@ -229,7 +229,7 @@ Related areas:
 - [x] Spec without acceptance criterion fails.
 - [x] Spec cannot enter Implementing without branch binding.
 - [x] Spec cannot enter Implementing without ActionGraph.
-- [ ] Action cannot complete without required validation evidence.
+- [x] Action cannot complete without required validation evidence.
 - [x] Commit without `Spec`, `ActionGroup`, and `CommitPlan` trailers fails.
 - [x] Commit referencing nonexistent spec/action/plan fails.
 - [x] Changed file outside allowed scope fails.
