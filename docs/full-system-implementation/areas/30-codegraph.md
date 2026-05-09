@@ -14,24 +14,24 @@ Represent repository artifacts and semantic structures linked to specs, actions,
 
 - README says CodeFile and observed CodeSymbol facts are emitted for several languages
 - LightweightCodeIndexer and observation types are documented
+- CodeGraph projection represents files, symbols, imports, routes, module ownership, behavior links, and risk links
 
 ### Partly Implemented
 
 - Lightweight indexing exists
-- Rich semantic structures, imports, routes, and ownership need expansion
+- Observation reconciliation and deeper language-pack integration remain partial
 
 ### Not Implemented / Remaining
 
 - Deep parsers/language packs
-- Import dependency graph
-- Route/schema/test runner integration
+- Schema/test runner integration
 - Observation reconciliation
 
 ## Implementation Parts
 
 ### 1. Graph Model / Runtime Objects
 
-CodeFile, CodeSymbol, Function, Class, Type, Interface, Route, Controller, UseCaseImplementation, RepositoryImplementation, MigrationFile, TestFile, TestCase, ImportDependency
+CodeFile, CodeSymbol, CodeImport, CodeRoute, module ownership edges, behavior implementation edges, risk mitigation edges, future Function/Class/Type/Interface specializations
 
 ### 2. Commands / APIs
 
@@ -45,8 +45,9 @@ Changed files within action scope; observations must link or drift findings appe
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: Deep parsers/language packs.
-- Implement or finish: Import dependency graph.
-- Implement or finish: Route/schema/test runner integration.
+- Implemented foundation: Import dependency graph.
+- Implemented foundation: Route facts linked to handler symbols.
+- Implement or finish: Schema/test runner integration.
 - Implement or finish: Observation reconciliation.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
