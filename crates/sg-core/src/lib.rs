@@ -127,9 +127,10 @@ pub use graph_merge::{
     GraphIntegrationStatus, MergeConflict, SemanticConflictDimension, SemanticConflictReport,
 };
 pub use impact::{
-    analyze_impact, build_revalidation_queue, build_revalidation_queue_with_reason,
+    action_requires_replan_before_continuation, analyze_impact, build_revalidation_queue,
+    build_revalidation_queue_with_reason, continuation_blockers_for_action, policy_impact_replan,
     replan_delta_from_queue, revalidation_queue_delta, ImpactAnalysis, ImpactInvalidationReason,
-    RevalidationQueue, RevalidationQueueEntry, RevalidationTargetKind,
+    PolicyImpactReplan, RevalidationQueue, RevalidationQueueEntry, RevalidationTargetKind,
 };
 pub use issue_graph::{
     issue_lifecycle_delta, validate_issue_lifecycle, IssueKind, IssueLifecycleReport, IssueState,

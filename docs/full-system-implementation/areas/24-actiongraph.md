@@ -21,6 +21,7 @@ Generate executable work graphs from validated specs before implementation start
 - `sg action start`, `sg action complete`, and `sg action replan` route through Operation Runtime and record `ExecutionAttempt` evidence.
 - Action dependencies are represented with `DEPENDS_ON`; start is blocked until dependencies are completed.
 - Completion is blocked without passed validation evidence.
+- Policy/impact invalidation can mark affected actions as needing replan before continuation.
 
 - Template generation exists
 - Pack templates, dependencies, execution attempts, replan, lifecycle are future
@@ -74,3 +75,8 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
 
+
+### Phase 5.7 Policy Impact Replan
+
+- `PolicyImpact.Replan` and the impact queue model identify affected ActionNodes after policy or impact changes.
+- Ready, in-progress, blocked, or failed actions become continuation blockers until replanned; completed actions remain historical evidence.
