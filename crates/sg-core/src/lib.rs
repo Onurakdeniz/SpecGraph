@@ -10,6 +10,7 @@ pub mod code_indexer;
 pub mod git;
 pub mod graph_merge;
 pub mod hashing;
+pub mod identity;
 pub mod impact;
 pub mod model;
 pub mod ontology;
@@ -28,6 +29,7 @@ pub use git::{
     CommitTrailers, CommitValidationInput,
 };
 pub use hashing::state_hash;
+pub use identity::{infer_actor_kind, resolve_actor_identity, ActorIdentity, ActorKind};
 pub use model::*;
 pub use ontology::{
     MvpOntology, OntologyStateMachine, OntologyStateTransition, OntologyValidatorRule,

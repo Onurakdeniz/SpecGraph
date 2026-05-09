@@ -163,7 +163,7 @@ Related areas:
 - [x] Add ontology pack signature metadata validation for local and future remote sources.
 - [x] Add pack migration planning model.
 - [x] Add policy append gate before event append.
-- [x] Add actor identity resolution for approval and waiver authorities.
+- [x] Add actor identity resolution for human, service, CI, and adapter actors.
 - [x] Add role/permission model foundation.
 - [~] Add graph-native `Approval` and `Waiver` nodes.
 - [x] Reject expired waiver creation and non-waivable waiver creation.

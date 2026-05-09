@@ -2,7 +2,7 @@
 
 **System area:** Actor and Identity Model  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code audit plus actor identity foundation and Phase 2.6 approval-authority implementation slice.
+**Status basis:** code audit plus actor identity foundation, Phase 2.6 approval-authority, and Phase 2.7 RBAC-closure implementation slices.
 
 ## Purpose
 
@@ -20,6 +20,8 @@ Represent who acted, who approved, and which roles or permissions applied when t
 - `HAS_ROLE` and `GRANTS_PERMISSION` endpoint validation exists
 - CLI supports actor upsert and role grant operations through the Operation Runtime
 - Approval and waiver creation checks approver roles and permissions from graph-native identity facts
+- Actor identity resolver classifies human, service, CI, adapter, and unknown actors consistently from actor id/provider metadata
+- Actor identity resolution returns graph-native roles and permissions from `HAS_ROLE` and `GRANTS_PERMISSION` links
 
 ### Partly Implemented
 
@@ -28,6 +30,7 @@ Represent who acted, who approved, and which roles or permissions applied when t
 - Policy manifests can satisfy required roles from actor graph facts when `--actor` is supplied
 - Built-in approval authority checks recognize broad and policy-specific permissions
 - Local identity provider metadata can be recorded, but external provider mapping is still minimal
+- Operation policy checks receive resolved actor roles when the actor is registered
 
 ### Not Implemented / Remaining
 
@@ -57,6 +60,13 @@ Protected operations require actors; approval policies verify roles; signatures 
 - Authority is resolved from `Actor -> HAS_ROLE -> Role -> GRANTS_PERMISSION -> Permission` graph facts.
 - Broad roles (`admin`, `maintainer`) can approve or waive; targeted roles and permissions cover approval-only, waiver-only, and data-migration authority.
 - Unauthorized approval/waiver attempts fail before evidence nodes are appended, preserving graph auditability.
+
+
+### Actor Identity Resolver
+
+- `resolve_actor_identity` resolves an actor by stable key or `actorId`, infers kind from explicit metadata, provider, or actor-id prefix, and returns roles plus permissions.
+- `upsert_actor` records a deterministic `kind` attribute (`Human`, `Service`, `Ci`, `Adapter`, or `Unknown`) so receipts and policy checks can reason about actor class.
+- Role and permission closure is shared by policy append gates and approval-authority checks, avoiding one-off identity logic per subsystem.
 
 ### 4. Implementation Work Items
 
