@@ -17,6 +17,9 @@ Use hooks as local guardrails and CI/protected branches as real enforcement for 
 
 ### Partly Implemented
 
+- `sg ci validate --report-file` emits a machine-readable `specgraph.ci-report/v1` JSON report with status, checks, findings, and state hash.
+- Installed pre-push hook runs the same CI validation path and writes `.specgraph/validation/ci-report.json`.
+
 - Local hooks and CI command exist
 - Provider integration and full hook coverage remain
 
