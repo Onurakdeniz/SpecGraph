@@ -59,6 +59,9 @@ impl MvpOntology {
                 "Table",
                 "Column",
                 "DataContract",
+                "Migration",
+                "RollbackPlan",
+                "MigrationTestEvidence",
                 "ReadModel",
                 "Query",
                 "Port",
@@ -127,6 +130,11 @@ impl MvpOntology {
                 "CONSUMES_DATA_CONTRACT",
                 "READS_TABLE",
                 "WRITES_TABLE",
+                "OWNED_BY_MODULE",
+                "AFFECTS_TABLE",
+                "HAS_ROLLBACK_PLAN",
+                "HAS_MIGRATION_TEST",
+                "HAS_MIGRATION_APPROVAL",
                 "HAS_PORT",
                 "HAS_ADAPTER",
                 "USES_PORT",
@@ -339,6 +347,7 @@ impl MvpOntology {
         self.validate_module_graph(graph, &mut findings);
         self.validate_architecture_graph(graph, &mut findings);
         findings.extend(crate::data_graph::validate_data_graph(graph));
+        findings.extend(crate::migration_runtime::validate_migration_runtime(graph));
         self.validate_spec_completeness(graph, &mut findings);
         findings
     }
@@ -976,6 +985,14 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "CONSUMES_DATA_CONTRACT" => Some((&["Module"], &["DataContract"])),
         "READS_TABLE" => Some((&["Module", "Query", "ReadModel"], &["Table"])),
         "WRITES_TABLE" => Some((&["Module"], &["Table"])),
+        "OWNED_BY_MODULE" => Some((&["Migration"], &["Module"])),
+        "AFFECTS_TABLE" => Some((&["Migration"], &["Table"])),
+        "HAS_ROLLBACK_PLAN" => Some((&["Migration"], &["RollbackPlan"])),
+        "HAS_MIGRATION_TEST" => Some((
+            &["Migration"],
+            &["MigrationTestEvidence", "TestCase", "ValidationRun"],
+        )),
+        "HAS_MIGRATION_APPROVAL" => Some((&["Migration"], &["Approval"])),
         "HAS_PORT" => Some((&["Project", "Module"], &["Port"])),
         "HAS_ADAPTER" => Some((&["Project", "Module"], &["Adapter"])),
         "USES_PORT" => Some((&["Module", "Adapter"], &["Port"])),

@@ -270,8 +270,8 @@ Related areas:
 - [ ] Add migration/DataGraph drift detector.
 - [x] Add first complete architecture pack validator.
 - [x] Add table ownership model.
-- [ ] Add migration rollback strategy model.
-- [ ] Add migration approval/test evidence validator.
+- [x] Add migration rollback strategy model.
+- [x] Add migration approval/test evidence validator.
 
 ### Gate Checks
 
@@ -280,7 +280,7 @@ Related areas:
 - [x] Required AC without linked TestCase fails.
 - [ ] Linked required test failing blocks review/merge.
 - [ ] Spec endpoint without observed/accepted route creates drift finding.
-- [ ] Migration without owner/rollback/approval/test evidence fails according to policy.
+- [x] Migration without owner/rollback/approval/test evidence fails according to policy.
 - [x] Architecture pack detects at least one invalid dependency in a fixture.
 
 ---

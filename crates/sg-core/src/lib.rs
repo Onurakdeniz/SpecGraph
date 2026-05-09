@@ -16,6 +16,7 @@ pub mod graph_merge;
 pub mod hashing;
 pub mod identity;
 pub mod impact;
+pub mod migration_runtime;
 pub mod model;
 pub mod module_graph;
 pub mod ontology;
@@ -36,6 +37,10 @@ pub use git::{
 };
 pub use hashing::state_hash;
 pub use identity::{infer_actor_kind, resolve_actor_identity, ActorIdentity, ActorKind};
+pub use migration_runtime::{
+    migration_node_id, migration_test_node_id, rollback_plan_node_id, validate_migration_runtime,
+    MigrationPlan, MigrationTestEvidence, RollbackPlan,
+};
 pub use model::*;
 pub use module_graph::{
     capability_node_id, interface_node_id, layer_node_id, module_node_id, package_node_id,
@@ -113,6 +118,7 @@ pub use validation::{
     built_in_validators, find_validator, ValidatorDefinition, ValidatorExecution,
     ValidatorExecutionStatus, CORE_VALIDATOR_VERSION, VALIDATOR_ADAPTER_TRUST,
     VALIDATOR_ARCHITECTURE_PACK, VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE,
-    VALIDATOR_GIT_BINDING, VALIDATOR_ONTOLOGY, VALIDATOR_ONTOLOGY_PACK, VALIDATOR_OPERATION_ABI,
-    VALIDATOR_POLICY, VALIDATOR_SNAPSHOT, VALIDATOR_TRACE_LINKS,
+    VALIDATOR_GIT_BINDING, VALIDATOR_MIGRATION_RUNTIME, VALIDATOR_ONTOLOGY,
+    VALIDATOR_ONTOLOGY_PACK, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT,
+    VALIDATOR_TRACE_LINKS,
 };

@@ -1,7 +1,7 @@
 # 20. Migration Runtime
 
 **System area:** Migration Runtime  
-**Implementation status:** ⬜ Not implemented  
+**Implementation status:** 🟡 Partly implemented
 **Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
 
 ## Purpose
@@ -16,13 +16,14 @@ Treat migrations as first-class graph facts with risk, rollback, approvals, affe
 
 ### Partly Implemented
 
-- Policy foundation includes migration approval examples
+- Policy foundation includes migration approval examples.
+- Migration runtime model now records `Migration`, `RollbackPlan`, `MigrationTestEvidence`, affected tables, owner module, and approval evidence.
+- Built-in migration validation requires owner, rollback, affected table, approval, and test evidence before execution.
 
 ### Not Implemented / Remaining
 
-- Migration graph model
 - Database parsers
-- Rollback/test validators
+- Database parsers
 - Migration conflict detection
 
 ## Implementation Parts
