@@ -1,5 +1,6 @@
 use crate::model::{Edge, Finding, FindingSeverity, Graph, Node};
-use std::collections::BTreeSet;
+use crate::stable_key::validate_stable_key;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const CORE_ONTOLOGY_VERSION: &str = "core@0.1.0";
 
@@ -130,6 +131,8 @@ impl MvpOntology {
     /// workflow completeness rules like "Spec must have an acceptance criterion".
     pub fn validate_integrity(&self, graph: &Graph) -> Vec<Finding> {
         let mut findings = Vec::new();
+
+        validate_graph_stable_keys(graph, &mut findings);
 
         for node in graph.nodes.values() {
             self.validate_node(node, &mut findings);
@@ -294,6 +297,68 @@ impl MvpOntology {
     }
 }
 
+fn validate_graph_stable_keys(graph: &Graph, findings: &mut Vec<Finding>) {
+    let mut seen: BTreeMap<&str, (Vec<String>, Vec<String>)> = BTreeMap::new();
+
+    for node in graph.nodes.values() {
+        match validate_stable_key(&node.stable_key) {
+            Ok(()) => {
+                seen.entry(&node.stable_key)
+                    .or_default()
+                    .0
+                    .push(node.id.clone());
+            }
+            Err(error) => findings.push(Finding {
+                code: "stable_key.invalid".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "{} Remediation: set node `{}` stableKey to a stable `<family>:<identifier>` value.",
+                    error.message(&node.stable_key),
+                    node.id
+                ),
+                related_nodes: vec![node.id.clone()],
+                related_edges: vec![],
+            }),
+        }
+    }
+
+    for edge in graph.edges.values() {
+        match validate_stable_key(&edge.stable_key) {
+            Ok(()) => {
+                seen.entry(&edge.stable_key)
+                    .or_default()
+                    .1
+                    .push(edge.id.clone());
+            }
+            Err(error) => findings.push(Finding {
+                code: "stable_key.invalid".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "{} Remediation: set edge `{}` stableKey to a stable `<family>:<identifier>` value.",
+                    error.message(&edge.stable_key),
+                    edge.id
+                ),
+                related_nodes: vec![],
+                related_edges: vec![edge.id.clone()],
+            }),
+        }
+    }
+
+    for (stable_key, (node_ids, edge_ids)) in seen {
+        if node_ids.len() + edge_ids.len() > 1 {
+            findings.push(Finding {
+                code: "stable_key.duplicate".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "Stable key `{stable_key}` is used by more than one graph fact. Remediation: assign each node and edge a unique stableKey."
+                ),
+                related_nodes: node_ids,
+                related_edges: edge_ids,
+            });
+        }
+    }
+}
+
 fn validate_action_graph(graph: &Graph, action_graph_id: &str, findings: &mut Vec<Finding>) {
     let group_edges: Vec<_> = graph
         .edges
@@ -416,5 +481,54 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "ontology.invalid_edge_endpoint_type"));
+    }
+
+    #[test]
+    fn malformed_stable_key_fails_validation() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "spec".to_string(),
+            Node {
+                id: "spec".to_string(),
+                stable_key: "bad".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_integrity(&graph);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "stable_key.invalid"
+                && finding.related_nodes == vec!["spec".to_string()]));
+    }
+
+    #[test]
+    fn duplicate_stable_key_fails_validation() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "first".to_string(),
+            Node {
+                id: "first".to_string(),
+                stable_key: "spec:AUTH-001".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+        graph.nodes.insert(
+            "second".to_string(),
+            Node {
+                id: "second".to_string(),
+                stable_key: "spec:AUTH-001".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_integrity(&graph);
+        assert!(findings.iter().any(|finding| {
+            finding.code == "stable_key.duplicate"
+                && finding.related_nodes == vec!["first".to_string(), "second".to_string()]
+        }));
     }
 }

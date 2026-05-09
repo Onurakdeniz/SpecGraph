@@ -1455,6 +1455,45 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn append_operation_rejects_malformed_stable_key() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: "node_spec_auth_001".to_string(),
+                        stable_key: "AUTH-001".to_string(),
+                        node_type: "Spec".to_string(),
+                        attributes: BTreeMap::from([
+                            ("spec".to_string(), json!("AUTH-001")),
+                            ("title".to_string(), json!("Password reset")),
+                        ]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::OntologyValidationFailed(1)));
+    }
+
+    #[test]
     fn install_ontology_pack_locks_manifest_and_replays() {
         let tmp = tempdir().unwrap();
         init_project(

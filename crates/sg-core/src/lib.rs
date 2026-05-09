@@ -19,6 +19,7 @@ pub mod policy;
 pub mod proposal;
 pub mod query;
 pub mod spec;
+pub mod stable_key;
 pub mod store;
 pub mod trace;
 pub use git::{
@@ -32,6 +33,7 @@ pub use operation_abi::{
     built_in_operations, find_operation, validate_operation_request, OperationDefinition,
 };
 pub use spec::{SpecProjection, TextItem};
+pub use stable_key::{validate_stable_key, StableKeyError};
 pub use store::{
     bind_spec_branch, generate_action_graph, import_spec_file, init_project, install_ontology_pack,
     list_action_graph, list_installed_ontology_packs, record_git_commit, replay_events,
