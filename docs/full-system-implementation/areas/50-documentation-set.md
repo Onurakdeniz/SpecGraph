@@ -16,23 +16,26 @@ Split concept/backlog/review documents into implementation references by concept
 - This matrix creates per-system-area implementation docs
 - Canonical full-system implementation plan is established as the single implementation source of truth
 - Historical/reference documents are marked so they do not override the canonical plan
+- Phase 0 architecture boundary doc exists at `docs/architecture/boundaries.md`
 
 ### Partly Implemented
 
 - High-level docs still need formal extraction into generated/reference docs
 - Formal references still need extraction
+- Architecture boundary rules are documented but still need automated validation and generated reference integration
 
 ### Not Implemented / Remaining
 
 - Numbered reference docs
 - Generated schema/API docs
 - CLI docs synced with real commands
+- Automated docs/reference checks for architecture boundary drift
 
 ## Implementation Parts
 
 ### 1. Graph Model / Runtime Objects
 
-Docs map graph domains, operations, policies, validators, commands, and tests
+Docs map graph domains, operations, policies, validators, commands, tests, and architecture boundaries. `docs/architecture/boundaries.md` is the Phase 0 guardrail for trusted core, CLI, adapters, packs, policies, examples, future server/SDK/Studio, and release/distribution.
 
 ### 2. Commands / APIs
 
@@ -45,6 +48,7 @@ Docs should stay consistent with CLI and schemas; stale docs caught in CI where 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
+- Keep `docs/architecture/boundaries.md` consistent with the canonical phase-gated plan and future automated architecture checks.
 - Implement or finish: Numbered reference docs.
 - Implement or finish: Generated schema/API docs.
 - Implement or finish: CLI docs synced with real commands.
@@ -56,6 +60,7 @@ Docs should stay consistent with CLI and schemas; stale docs caught in CI where 
 - The documented commands/APIs work for the happy path and at least one intentional failure path.
 - Validation findings identify the graph object, file or command involved, and remediation.
 - The area can be exercised from CLI/CI without relying on untrusted direct mutation.
+- Architecture docs make clear that full-system scope is controlled by the canonical plan, not MVP/reference docs.
 
 ## Source Notes
 

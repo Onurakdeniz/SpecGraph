@@ -71,15 +71,16 @@ PY
 Related areas:
 
 - [01. Repository and Package Structure](areas/01-repository-and-package-structure.md)
+- [46. Adapter Layer](areas/46-adapter-layer.md)
 - [50. Documentation Set](areas/50-documentation-set.md)
 - [51. Performance and Scalability](areas/51-performance-and-scalability.md)
 
 ### Implementation Checklist
 
 - [x] Establish `phase-gated-implementation-plan.md` as the single implementation source of truth.
-- [ ] Define final crate/package boundary map.
-- [ ] Mark which current files belong to trusted core, adapters, CLI, packs, examples, and future UI/server.
-- [ ] Add dependency rules: core cannot depend on filesystem, Git, network, LLM, or UI directly.
+- [x] Define final crate/package boundary map in [`docs/architecture/boundaries.md`](../architecture/boundaries.md).
+- [x] Mark which current files belong to trusted core, adapters, CLI, packs, examples, and future UI/server.
+- [x] Add dependency rules: core cannot depend on filesystem, Git, network, LLM, or UI directly.
 - [ ] Add architecture check or documentation test for dependency rules.
 - [ ] Add benchmark placeholders for replay, validation, indexing, and query performance.
 - [~] Keep `docs/full-system-implementation/index.md` updated when areas change status.
@@ -88,7 +89,7 @@ Related areas:
 
 - [x] Workspace builds after any refactor.
 - [~] No trusted-core module imports adapter-only code.
-- [~] Docs explain where each new capability belongs.
+- [x] Docs explain where each new capability belongs.
 - [x] Existing proof path still passes.
 
 ---
