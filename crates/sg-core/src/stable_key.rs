@@ -325,6 +325,16 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "read-model:user-summary",
     },
     StableKeyFamily {
+        prefix: "test-run",
+        description: "Recorded test execution run",
+        example: "test-run:ci-001",
+    },
+    StableKeyFamily {
+        prefix: "test-result",
+        description: "Recorded individual test result",
+        example: "test-result:ci-001/tests/auth::reset",
+    },
+    StableKeyFamily {
         prefix: "test-runner",
         description: "Project test runner profile fact",
         example: "test-runner:vitest",

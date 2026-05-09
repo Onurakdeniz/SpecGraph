@@ -1,7 +1,7 @@
 # 35. Test Runner Integration
 
 **System area:** Test Runner Integration  
-**Implementation status:** ⬜ Not implemented  
+**Implementation status:** 🟡 Partly implemented
 **Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
 
 ## Purpose
@@ -16,14 +16,14 @@ Execute or import test results and record them as validation evidence while pres
 
 ### Partly Implemented
 
-- TestCase/link validation exists at MVP level
+- TestCase/link validation exists.
+- `TestRun` and `TestResult` graph evidence is modeled and can be recorded with `sg test run --record`.
+- Test runs are linked to `ValidationRun`; required linked test failures produce blocking findings.
 
 ### Not Implemented / Remaining
 
-- Runner adapters
-- Result normalization
-- Mapping runner IDs to TestCase keys
-- Historical test reports
+- Real runner adapters beyond normalized/manual result input
+- Historical test trend reports
 
 ## Implementation Parts
 
