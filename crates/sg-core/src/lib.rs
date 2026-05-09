@@ -12,6 +12,7 @@ pub mod canonical;
 pub mod code_graph;
 pub mod code_indexer;
 pub mod data_graph;
+pub mod drift;
 pub mod git;
 pub mod graph_merge;
 pub mod hashing;
@@ -101,6 +102,7 @@ pub use data_graph::{
     column_node_id, data_contract_node_id, table_node_id, validate_data_graph, ColumnDefinition,
     DataContractDefinition, DataGraphProjection, TableDefinition,
 };
+pub use drift::{detect_drift, DriftReport};
 pub use graph_merge::{detect_merge_conflicts, diff_graphs, GraphDiff, MergeConflict};
 pub use impact::{analyze_impact, ImpactAnalysis};
 pub use ontology_pack::{
@@ -128,7 +130,7 @@ pub use trace::{
 pub use validation::{
     built_in_validators, find_validator, ValidatorDefinition, ValidatorExecution,
     ValidatorExecutionStatus, CORE_VALIDATOR_VERSION, VALIDATOR_ADAPTER_TRUST,
-    VALIDATOR_ARCHITECTURE_PACK, VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE,
+    VALIDATOR_ARCHITECTURE_PACK, VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE, VALIDATOR_DRIFT,
     VALIDATOR_GIT_BINDING, VALIDATOR_MIGRATION_RUNTIME, VALIDATOR_ONTOLOGY,
     VALIDATOR_ONTOLOGY_PACK, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT,
     VALIDATOR_TRACE_LINKS,
