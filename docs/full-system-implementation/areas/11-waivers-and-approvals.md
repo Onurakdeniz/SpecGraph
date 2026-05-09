@@ -2,7 +2,7 @@
 
 **System area:** Waivers and Approvals  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code audit plus policy waiver and graph evidence implementation slices.
+**Status basis:** code audit plus policy waiver, graph evidence, and Phase 2.6 approval-authority implementation slices.
 
 ## Purpose
 
@@ -19,6 +19,8 @@ Model controlled exceptions with scope, reason, approver, expiration, related po
 - Policy evaluation can use linked graph-native approvals and waivers
 - Expired graph-native waivers do not satisfy policies
 - Non-waivable policies reject waiver attempts with explicit findings
+- Graph-native approval and waiver creation requires the approver to hold an authority role or permission
+- Expired waiver creation and non-waivable waiver creation fail before graph append
 
 ### Partly Implemented
 
@@ -27,12 +29,12 @@ Model controlled exceptions with scope, reason, approver, expiration, related po
 - Built-in and manifest non-waivable enforcement exists
 - Reviewer/Role/Permission foundation exists through the identity model
 - Scope is recorded but not fully enforced against changed-file/path targets yet
-- Approver authority checks and signatures are incomplete
+- Signatures are incomplete
 
 ### Not Implemented / Remaining
 
 - ApprovalRequest state machine
-- Role/permission authority checks for approvers
+- Advanced multi-scope authority rules beyond built-in role/permission checks
 - Waiver/approval revocation and expiry audit reports
 - Signed approvals/waivers
 - Scope matching against specs/modules/files/operations
@@ -51,14 +53,22 @@ Current policy flags, `sg policy record-approval`, `sg policy create-waiver`; fu
 
 Waiver scope, expiration, approver authority, policy waivability, reason, non-waivable enforcement
 
+
+### Approval Authority
+
+- `record_approval` now requires the approving actor to be registered and to hold an authority role or permission such as `admin`, `maintainer`, `approver`, `data-approver`, `policy.approve`, or a policy-specific approval permission.
+- `create_waiver` requires waiver authority such as `admin`, `maintainer`, `waiver-approver`, `data-approver`, `policy.waive`, or a policy-specific waiver permission.
+- Data-migration approvals and waivers recognize `data-approver` plus `policy.approve.data-migration` / `policy.waive.data-migration` style permissions.
+- Expired waiver creation and built-in non-waivable policy waiver creation fail before any trusted waiver node is appended.
+
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: ApprovalRequest state machine.
-- Implement or finish: Role/permission authority checks for approvers.
+- Implement or finish: Advanced multi-scope authority rules beyond built-in role/permission checks.
 - Implement or finish: Revocation and expiry audit reports.
 - Implement or finish: Signed approvals/waivers.
-- Implement or finish: Scope matching against specs/modules/files/operations.
+- Implement or finish: Full scope matching against specs/modules/files/operations.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 

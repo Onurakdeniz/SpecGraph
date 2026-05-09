@@ -163,10 +163,10 @@ Related areas:
 - [x] Add ontology pack signature metadata validation for local and future remote sources.
 - [x] Add pack migration planning model.
 - [x] Add policy append gate before event append.
-- [~] Add actor identity resolution.
-- [~] Add role/permission model foundation.
+- [x] Add actor identity resolution for approval and waiver authorities.
+- [x] Add role/permission model foundation.
 - [~] Add graph-native `Approval` and `Waiver` nodes.
-- [~] Add waiver expiration and scope validation.
+- [x] Reject expired waiver creation and non-waivable waiver creation.
 - [x] Add non-waivable policy list.
 - [~] Add common `Finding` schema across validators.
 - [~] Add validator registry and validator versioning.
@@ -177,7 +177,7 @@ Related areas:
 - [~] Failed operations leave no partial graph events.
 - [x] Invalid ontology delta fails before event append.
 - [x] Denied policy blocks the operation.
-- [~] Approval-required policy cannot pass without valid scoped approval.
+- [x] Approval-required policy cannot pass without valid authorized approval.
 - [x] Expired waiver cannot satisfy a policy.
 - [x] Secret/production-denied policies cannot be waived unless explicitly designed as waivable.
 
