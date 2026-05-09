@@ -1,10 +1,16 @@
-//! Boundary crate for `sg-canonical` in the SpecGraph OS modular workspace.
+//! Deterministic serialization, hashing, and stable-key primitives for SpecGraph OS.
 //!
-//! This crate is intentionally a narrow public facade during the workspace split.
-//! Implementation still lives behind `sg-core` until the next extraction pass moves
-//! code module-by-module without changing public behavior.
+//! This crate owns the canonicalization boundary used by the trusted runtime.
+//! `sg-core` re-exports these APIs for compatibility, but implementation lives here.
 
-pub use sg_core::{
-    built_in_stable_key_registry, format_stable_key, parse_stable_key, state_hash,
-    validate_stable_key, StableKeyError, StableKeyFamily, StableKeyParts, StableKeyRegistry,
+pub mod canonical;
+pub mod hashing;
+pub mod stable_key;
+
+pub use canonical::{canonicalize_value, to_canonical_json};
+pub use hashing::{state_hash, HASH_SCHEMA_VERSION};
+pub use stable_key::{
+    built_in_stable_key_registry, format_stable_key, parse_stable_key, validate_stable_key,
+    StableKeyError, StableKeyFamily, StableKeyParts, StableKeyRegistry,
+    BUILT_IN_STABLE_KEY_FAMILIES,
 };

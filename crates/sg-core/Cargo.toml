@@ -6,6 +6,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+sg-canonical.workspace = true
+sg-model.workspace = true
 globset.workspace = true
 hex.workspace = true
 serde.workspace = true

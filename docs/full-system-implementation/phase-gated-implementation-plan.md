@@ -224,7 +224,7 @@ Every area must be closed by this plan. The phase/slice listed below is the prim
 | 5.5 | IssueGraph | 41 | `feat: add issue graph lifecycle` | Bugs require repro, root cause, fix spec, regression evidence, closure evidence. |
 | 5.6 | Ontology evolution loop | 42 | `feat: add ontology change proposals` | Ontology changes require tests, migration plans, compatibility checks, release evidence. |
 | 5.7 | Team-scale policy replan | 10, 24, 39 | `feat: trigger action replan from impact` | Policy/impact changes invalidate affected work and require replan before continuation. |
-| 5.8 | Workspace modularization | 01, 45, 46, 48 | `refactor: modularize workspace crates` | Trusted core, runtime/domain crates, adapter facades, server/SDK boundaries, and Studio package boundaries exist with dependency checks. |
+| 5.8 | Workspace modularization | 01, 45, 46, 48 | `refactor: modularize workspace crates` | Trusted core, runtime/domain crates, adapter facades, server/SDK boundaries, and Studio package boundaries exist with dependency checks; foundation crates begin physical extraction with `sg-model` and `sg-canonical` owned outside `sg-core`. |
 
 **Phase 5 gate:** graph merges, rebases, adoption, issues, and ontology evolution are auditable and cannot skip validation.
 

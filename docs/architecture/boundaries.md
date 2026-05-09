@@ -101,13 +101,14 @@ The current repository is still a compact workspace. Some modules live in transi
 |---|---|---|
 | `Cargo.toml`, `Cargo.lock` | Workspace/release foundation | Defines the current Rust workspace. Future release slices will expand artifact metadata and distribution checks. |
 | `crates/sg-core/Cargo.toml` | Trusted core crate manifest | Core dependencies must stay deterministic and avoid provider/UI/server dependencies. Transitional filesystem-facing code should be split outward in later slices. |
-| `crates/sg-{model,canonical,store,operation,ontology,policy,validation,query}/**` | Trusted core/runtime boundary crates | Narrow workspace facades that define extraction targets for the base model, deterministic identity, store, operation runtime, ontology, policy, validation, and query layers. |
-| `crates/sg-{project,module-graph,architecture,data,spec,action,gitgraph,codegraph,testgraph,impact,merge,adoption,issue,proposal}/**` | Domain graph boundary crates | Narrow workspace facades for domain-specific graph/runtime ownership. `sg-core` remains a compatibility facade until module extraction is complete. |
+| `crates/sg-{model,canonical}/**` | Extracted trusted foundation crates | Own the base graph/event model, deterministic JSON, hashing, and stable-key registry. They must never depend on `sg-core`; `sg-core` re-exports them for compatibility. |
+| `crates/sg-{store,operation,ontology,policy,validation,query}/**` | Trusted runtime boundary crates | Workspace facades that define extraction targets for store, operation runtime, ontology, policy, validation, and query layers. |
+| `crates/sg-{project,module-graph,architecture,data,spec,action,gitgraph,codegraph,testgraph,impact,merge,adoption,issue,proposal}/**` | Domain graph boundary crates | Workspace facades for domain-specific graph/runtime ownership. `sg-core` remains a compatibility facade until module extraction is complete. |
 | `crates/sg-adapter-*/**` | Adapter boundary crates | Adapter facades expose observation/capability types and must not gain trusted append authority. |
 | `crates/sg-server/**`, `crates/sg-sdk/**` | Future server/SDK Rust boundaries | Compile-time package boundaries for Phase 7 API/SDK work; they depend inward on runtime/query schemas. |
 | `packages/sdk-typescript/**`, `packages/studio/**` | Future TypeScript SDK and Studio boundaries | Package boundaries only; future implementation must use API/runtime contracts and never mutate `.specgraph` directly. |
-| `crates/sg-core/src/model.rs` | Trusted core | Graph objects, deltas, findings, receipts, and common data model. |
-| `crates/sg-core/src/canonical.rs`, `hashing.rs`, `stable_key.rs` | Trusted core | Canonical serialization, hashing, and stable-key validation. |
+| `crates/sg-model/src/lib.rs` | Trusted foundation crate | Graph objects, deltas, findings, receipts, and common data model. |
+| `crates/sg-canonical/src/*.rs` | Trusted foundation crate | Canonical serialization, hashing, and stable-key validation. |
 | `crates/sg-core/src/store.rs` | Trusted core with transitional local persistence boundary | Owns current event/snapshot operations. Future crate split should isolate ambient filesystem access behind explicit storage/runtime interfaces. |
 | `crates/sg-core/src/operation_abi.rs` | Trusted core | Operation request/definition/receipt validation and ABI registry. |
 | `crates/sg-core/src/ontology.rs`, `ontology_pack.rs` | Trusted core plus pack manifest boundary | Built-in ontology and pack validation/install/lock foundation. Pack contents remain data, not runtime code. |
@@ -144,7 +145,8 @@ The check currently fails when required modular crates/package boundaries are mi
 
 - `sg-core` declares dependencies on CLI, server, SDK, Studio, adapter, provider, network, LLM, UI, or ambient async/runtime crates;
 - trusted-core Rust source imports known outer-layer, provider, network, LLM, UI, subprocess, or network APIs directly;
-- transitional adapter-facing modules such as code indexing, adoption, or Git helpers mark observations as `Accepted` or `Trusted` directly instead of leaving acceptance to the Operation Runtime.
+- transitional adapter-facing modules such as code indexing, adoption, or Git helpers mark observations as `Accepted` or `Trusted` directly instead of leaving acceptance to the Operation Runtime;
+- extracted foundation crates such as `sg-model` and `sg-canonical` depend back on `sg-core` or duplicate their former `sg-core/src/*.rs` modules.
 
 These checks are intentionally conservative and should expand as future crates are introduced. They do not replace runtime policy/ontology validation; they prevent obvious dependency-direction and trust-promotion regressions before code review.
 

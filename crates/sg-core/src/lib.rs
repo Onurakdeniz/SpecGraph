@@ -8,7 +8,9 @@ pub mod adapter;
 pub mod adoption;
 pub mod architecture_graph;
 pub mod architecture_pack;
-pub mod canonical;
+pub mod canonical {
+    pub use sg_canonical::canonical::*;
+}
 pub mod code_graph;
 pub mod code_indexer;
 pub mod cross_domain;
@@ -17,12 +19,16 @@ pub mod drift;
 pub mod git;
 pub mod git_graph;
 pub mod graph_merge;
-pub mod hashing;
+pub mod hashing {
+    pub use sg_canonical::hashing::*;
+}
 pub mod identity;
 pub mod impact;
 pub mod issue_graph;
 pub mod migration_runtime;
-pub mod model;
+pub mod model {
+    pub use sg_model::*;
+}
 pub mod module_graph;
 pub mod ontology;
 pub mod ontology_evolution;
@@ -33,7 +39,9 @@ pub mod project_graph;
 pub mod proposal;
 pub mod query;
 pub mod spec;
-pub mod stable_key;
+pub mod stable_key {
+    pub use sg_canonical::stable_key::*;
+}
 pub mod store;
 pub mod test_runner;
 pub mod trace;

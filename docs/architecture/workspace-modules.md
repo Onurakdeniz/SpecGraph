@@ -4,17 +4,18 @@ This document records the modular workspace split introduced before Phase 6 so p
 
 ## Split strategy
 
-The split is intentionally two-step:
+The split is intentionally staged:
 
-1. **Boundary crates now.** Each crate is a narrow public facade over the existing trusted implementation. This makes dependency direction, ownership, Cargo build coverage, and future extraction points explicit while keeping CLI/proof behavior stable.
-2. **Code extraction next.** Modules can move from `sg-core/src/*.rs` into their boundary crates without changing external command behavior. During extraction, `sg-core` remains a compatibility facade until downstream callers migrate.
+1. **Boundary crates.** Each full-system area has an explicit crate/package boundary so dependency direction, ownership, Cargo build coverage, and extraction points are visible.
+2. **Foundation extraction.** Base crates that other areas depend on must own real implementation first. `sg-model` now owns the graph/event/snapshot/finding model, and `sg-canonical` now owns deterministic JSON, state hashing, and stable-key validation. `sg-core` depends inward on these crates and re-exports compatibility modules for existing callers.
+3. **Runtime/domain extraction.** Store, operation, ontology, policy, validation, query, domain graph, adapter, server, SDK, and Studio code moves outward from `sg-core` only after its dependencies have been extracted. During this period, `sg-core` remains a compatibility facade, not the long-term owner.
 
 ## Rust crates
 
 | Crate | Boundary | Owns / exposes |
 |---|---|---|
-| `sg-model` | Base model | Graph, deltas, events, snapshots, findings, operation request/receipt types. |
-| `sg-canonical` | Deterministic identity | Canonical hashing and stable-key registry APIs. |
+| `sg-model` | Base model | Owns graph, deltas, events, snapshots, findings, operation request/receipt types. |
+| `sg-canonical` | Deterministic identity | Owns canonical JSON, state hashing, and stable-key registry APIs. Depends on `sg-model`, never on `sg-core`. |
 | `sg-store` | Runtime storage | Event replay, snapshots, rebuild, store facade. |
 | `sg-operation` | Operation Runtime ABI | Operation definitions and pre/post/request validation. |
 | `sg-ontology` | Ontology system | Built-in ontology, packs, migrations, ontology change proposals. |
@@ -45,7 +46,7 @@ The split is intentionally two-step:
 | `sg-server` | Future API server | Server boundary placeholder that depends inward on runtime/query APIs. |
 | `sg-sdk` | Rust SDK schema facade | Operation/schema facade for generated SDK work. |
 | `sg-cli` | CLI | Human/JSON command surface and local orchestration only. |
-| `sg-core` | Compatibility facade | Temporary trusted implementation location and re-export surface while modules are extracted. |
+| `sg-core` | Compatibility facade | Re-export surface plus remaining trusted implementation while modules are extracted. It must depend inward on extracted foundation crates rather than duplicating their code. |
 
 ## TypeScript/UI package boundaries
 
@@ -57,6 +58,7 @@ The split is intentionally two-step:
 ## Dependency direction
 
 - `sg-core` must not depend on CLI, server, SDK, Studio, provider, adapter implementation, network, UI, or LLM crates.
-- Boundary crates may depend inward on `sg-core` during this compatibility phase.
-- Future extraction should reverse implementation ownership gradually: e.g. `sg-model` owns model code, then `sg-core` re-exports `sg-model`.
+- Boundary crates may depend inward on `sg-core` only until their implementation is physically extracted.
+- Extracted foundation crates must not depend on `sg-core`; `sg-core` depends on them and re-exports their public APIs for compatibility.
+- Future extraction should continue in dependency order: `sg-store`, `sg-operation`, `sg-ontology`, `sg-policy`, `sg-validation`, `sg-query`, then domain/adapters/server/SDK/Studio.
 - Adapter crates may observe/propose, but only Operation Runtime can accept trusted facts.

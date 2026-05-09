@@ -19,18 +19,20 @@ Expand the repository from an MVP Rust workspace into the full SpecGraph OS runt
 - Current repository files are assigned to architecture boundaries in `docs/architecture/boundaries.md`
 - `scripts/check_architecture_boundaries.py` now enforces the first automated dependency-direction guardrails for the trusted core
 - CI runs the architecture boundary check before clippy/tests
+- `sg-model` now physically owns the graph/event/snapshot/finding model implementation instead of re-exporting it from `sg-core`
+- `sg-canonical` now physically owns canonical JSON, state hashing, and stable-key validation instead of re-exporting them from `sg-core`
 
 ### Partly Implemented
 
 - Modular Rust workspace boundary crates now exist for model, canonical, store, operation, ontology, policy, validation, query, domain graphs, adapters, server, and SDK.
 - `packages/sdk-typescript` and `packages/studio` now exist as future package boundaries.
-- `sg-core` remains a compatibility facade while code is extracted module-by-module into the new crates.
+- `sg-core` remains a compatibility facade while remaining runtime/domain code is extracted module-by-module into the new crates.
 - Some adapter-facing and filesystem-facing foundations still live inside `sg-core` until later crate/package splits enforce the documented boundaries
 - Examples exist only for a narrow backend API path
 
 ### Not Implemented / Remaining
 
-- Physical code extraction from `sg-core/src/*.rs` into each boundary crate
+- Physical code extraction from `sg-core/src/*.rs` into the remaining runtime/domain/adapters boundary crates
 - Expanded architecture boundary checks as future crates/packages are introduced
 - Full TypeScript SDK and Studio implementation
 - Complete packs and example catalog
@@ -54,7 +56,7 @@ CI must ensure core crates do not depend on adapters, outer layers, network/prov
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep `docs/architecture/boundaries.md` aligned with any crate/package split.
 - Keep `scripts/check_architecture_boundaries.py` aligned with new crates, packages, and boundary assignments.
-- Implement or finish: Physical code extraction from the compatibility facade into each dedicated crate.
+- Continue physical code extraction from the compatibility facade into each dedicated crate, in dependency order after `sg-model` and `sg-canonical`.
 - Implement or finish: TypeScript SDK and Studio package implementation.
 - Implement or finish: Complete packs and example catalog.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.

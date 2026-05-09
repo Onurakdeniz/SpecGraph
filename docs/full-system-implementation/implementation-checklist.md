@@ -327,6 +327,11 @@ Related areas:
 - [x] Add root cause classification.
 - [x] Add OntologyChange proposal workflow.
 - [x] Add ontology tests and pack release workflow.
+- [x] Add modular workspace crates and future package boundaries.
+- [x] Extract `sg-model` implementation from `sg-core`.
+- [x] Extract `sg-canonical` implementation from `sg-core`.
+- [x] Enforce extracted foundation crates do not depend back on `sg-core`.
+- [ ] Extract remaining runtime/domain boundary crate implementations from `sg-core`.
 
 ### Gate Checks
 
@@ -339,6 +344,7 @@ Related areas:
 - [x] enforce-new-work mode blocks only new governed work.
 - [x] Reproducible bug fix cannot close without required regression evidence.
 - [x] Ontology change cannot release without tests and migration plan.
+- [x] Foundation crates own their implementation and `sg-core` only re-exports compatibility modules.
 
 ---
 

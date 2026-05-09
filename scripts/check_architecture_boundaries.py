@@ -125,6 +125,11 @@ REQUIRED_PACKAGE_BOUNDARIES = [
     ROOT / "packages" / "studio" / "package.json",
 ]
 
+FOUNDATION_CRATES_EXTRACTED_FROM_CORE = {
+    "sg-model": ["model.rs"],
+    "sg-canonical": ["canonical.rs", "hashing.rs", "stable_key.rs"],
+}
+
 TRUST_PROMOTION_PATTERNS = [
     re.compile(r"json!\(\s*\"(?:Accepted|Trusted)\"\s*\)"),
     re.compile(r"TrustState::(?:Accepted|Trusted)\b"),
@@ -165,6 +170,13 @@ def check_workspace_modules(errors: list[str]) -> None:
             )
 
 
+def manifest_for_crate(crate_name: str) -> Path | None:
+    for manifest in sorted((ROOT / "crates").glob("*/Cargo.toml")):
+        if cargo_package_name(manifest) == crate_name:
+            return manifest
+    return None
+
+
 def dependency_names(manifest: Path) -> set[str]:
     names: set[str] = set()
     in_dependency_table = False
@@ -179,6 +191,8 @@ def dependency_names(manifest: Path) -> set[str]:
         if not in_dependency_table or "=" not in line:
             continue
         name = line.split("=", 1)[0].strip().strip('"').strip("'")
+        if "." in name:
+            name = name.split(".", 1)[0]
         if name:
             names.add(name)
     return names
@@ -196,6 +210,36 @@ def check_core_manifest(errors: list[str]) -> None:
             f"{CORE_MANIFEST.relative_to(ROOT)}: trusted core must not depend on `{dep}`; "
             "put provider/network/UI/server/SDK integrations behind an adapter or outer-layer crate."
         )
+
+    missing_foundation = sorted(set(FOUNDATION_CRATES_EXTRACTED_FROM_CORE) - deps)
+    for dep in missing_foundation:
+        errors.append(
+            f"{CORE_MANIFEST.relative_to(ROOT)}: compatibility core must depend on extracted "
+            f"foundation crate `{dep}` instead of re-owning its implementation."
+        )
+
+
+def check_extracted_foundation_crates(errors: list[str]) -> None:
+    for crate_name, former_core_modules in FOUNDATION_CRATES_EXTRACTED_FROM_CORE.items():
+        manifest = manifest_for_crate(crate_name)
+        if manifest is None:
+            continue
+
+        deps = dependency_names(manifest)
+        if "sg-core" in deps:
+            errors.append(
+                f"{manifest.relative_to(ROOT)}: extracted foundation crate `{crate_name}` "
+                "must not depend on `sg-core`; dependencies must flow from sg-core to the "
+                "foundation crate during the compatibility period."
+            )
+
+        for module in former_core_modules:
+            source = CORE_SRC / module
+            if source.exists():
+                errors.append(
+                    f"{source.relative_to(ROOT)}: `{crate_name}` now owns this implementation; "
+                    "keep sg-core as a compatibility facade instead of duplicating the module."
+                )
 
 
 def check_core_source_imports(errors: list[str]) -> None:
@@ -227,6 +271,7 @@ def main() -> int:
     errors: list[str] = []
     check_workspace_modules(errors)
     check_core_manifest(errors)
+    check_extracted_foundation_crates(errors)
     check_core_source_imports(errors)
     check_adapter_observations_stay_untrusted(errors)
 
