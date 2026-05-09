@@ -4,6 +4,8 @@
 **Scope:** This review analyzes the uploaded concept note and turns its weak points into concrete design corrections.
 
 ---
+> Reference-only review/gap input. The canonical implementation source of truth is `docs/full-system-implementation/phase-gated-implementation-plan.md`; this document does not override that plan.
+
 
 ## 1. Overall Assessment
 

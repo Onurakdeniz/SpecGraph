@@ -1,8 +1,10 @@
 # SpecGraph OS
 
-SpecGraph OS is a graph-constrained software execution runtime. The v0.1 MVP proves the deterministic enforcement foundation before adding LLM proposal workflows.
+SpecGraph OS is a graph-constrained software execution runtime. The current implementation began with the deterministic enforcement foundation and is now planned as a full-system build.
 
-## Current MVP Slice
+> Implementation source of truth: `docs/full-system-implementation/phase-gated-implementation-plan.md` defines the full-system target, order, phase gates, and slice boundaries. This README describes the current repository baseline only.
+
+## Current Implementation Baseline
 
 This repository currently contains a Rust workspace with:
 

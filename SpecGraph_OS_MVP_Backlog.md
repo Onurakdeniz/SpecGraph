@@ -3,6 +3,8 @@
 **Purpose:** Convert the project documentation into an actionable implementation backlog.
 
 ---
+> Historical MVP input only. SpecGraph OS is now planned as a full-system build in `docs/full-system-implementation/phase-gated-implementation-plan.md`; this backlog does not define the target scope.
+
 
 ## MVP Goal
 

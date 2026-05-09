@@ -2,6 +2,8 @@
 
 This checklist turns the core-to-edge implementation plan into trackable work. It uses checkboxes so each phase can be copied into issues or kept as a living project tracker.
 
+**Derived from:** [phase-gated-implementation-plan.md](phase-gated-implementation-plan.md). If this checklist conflicts with the plan, the plan wins and this checklist must be corrected.
+
 **Rule:** do the inner rings first. Do not mark an outer-ring item complete if it bypasses graph operations, ontology validation, policy checks, validation findings, or event replay.
 
 ## Status Legend
@@ -74,6 +76,7 @@ Related areas:
 
 ### Implementation Checklist
 
+- [x] Establish `phase-gated-implementation-plan.md` as the single implementation source of truth.
 - [ ] Define final crate/package boundary map.
 - [ ] Mark which current files belong to trusted core, adapters, CLI, packs, examples, and future UI/server.
 - [ ] Add dependency rules: core cannot depend on filesystem, Git, network, LLM, or UI directly.

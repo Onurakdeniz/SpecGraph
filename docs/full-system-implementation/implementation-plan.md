@@ -1,4 +1,6 @@
-# SpecGraph OS Full-System Implementation Plan
+# SpecGraph OS Legacy Conceptual Implementation Roadmap
+
+> Legacy/reference only. The canonical full-system implementation source of truth is [phase-gated-implementation-plan.md](phase-gated-implementation-plan.md). Do not update this file as a second roadmap; update the canonical plan, checklist, and area docs instead.
 
 This plan orders the full SpecGraph OS build from the **trusted center outward**. The goal is to finish the full project in a logical dependency order instead of jumping directly to UI, LLMs, or integrations before the enforcement core is stable.
 
