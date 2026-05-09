@@ -229,6 +229,7 @@ impl SpecProjection {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_text_items(
     create_nodes: &mut Vec<Node>,
     create_edges: &mut Vec<Edge>,
