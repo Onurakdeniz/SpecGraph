@@ -285,6 +285,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "proposal:PROP-001",
     },
     StableKeyFamily {
+        prefix: "revalidation-queue",
+        description: "Impact-driven revalidation and action replan queue",
+        example: "revalidation-queue:AUTH-001",
+    },
+    StableKeyFamily {
         prefix: "regression",
         description: "Regression scenario requiring test coverage",
         example: "regression:AUTH-001/REG-001",
