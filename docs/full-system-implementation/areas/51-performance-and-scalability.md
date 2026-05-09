@@ -16,17 +16,18 @@ Keep replay, indexing, validation, and queries usable as repositories and event 
 - README says caches are rebuildable
 - Phase 0 performance budget skeleton exists at `docs/performance/budgets.md`
 - Machine-readable benchmark placeholders exist at `tests/performance/budget-placeholders.json` and are checked by `scripts/check_benchmark_budgets.py`
+- Query cost/limit hooks now report scanned nodes/edges and enforce hard max node/edge/depth limits
 
 ### Partly Implemented
 
 - Snapshots/changed-file foundations exist
-- Numeric budgets, executable benchmark fixtures, and the final cost model are not complete
+- Numeric budgets, executable benchmark fixtures, and the final optimizer/cost model are not complete
 
 ### Not Implemented / Remaining
 
 - Executable benchmark suite with non-placeholder thresholds
 - Incremental rebuilds
-- Query cost model
+- Full query optimizer/cost model beyond current hard limits
 - Multi-writer/server design
 
 ## Implementation Parts

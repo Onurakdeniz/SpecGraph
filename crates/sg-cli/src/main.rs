@@ -9,9 +9,9 @@ use sg_core::{
     AppendOperationOptions, BindBranchOptions, CodeIndexObservation, CommitValidationInput,
     CreateWaiverOptions, Edge, Finding, FindingSeverity, GenerateActionGraphOptions,
     GrantRoleOptions, Graph, GraphDelta, InitOptions, LinksManifest, Node, PolicyCheckInput,
-    PolicyEffect, PolicyManifest, PolicyRule, Proposal, RecordApprovalOptions, RecordCommitOptions,
-    RecordPolicyReportOptions, ReplayOptions, Snapshot, SpecGraphStore, SpecProjection, TestLink,
-    TextItem, TrustState, UpsertActorOptions,
+    PolicyEffect, PolicyManifest, PolicyRule, Proposal, QueryContext, QueryLimits, QueryTarget,
+    RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions, Snapshot,
+    SpecGraphStore, SpecProjection, TestLink, TextItem, TrustState, UpsertActorOptions,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -555,6 +555,8 @@ enum GraphCommand {
     Status,
     /// Rebuild derived snapshots and indexes from canonical JSONL events.
     Rebuild,
+    /// Query nodes in current, branch, or snapshot context.
+    Query(GraphQueryArgs),
     /// Diff current replayed graph against a snapshot JSON file.
     Diff(GraphDiffArgs),
     /// Detect semantic conflicts between base, current graph, and another snapshot.
@@ -582,6 +584,24 @@ struct GraphConflictsArgs {
 struct ReplayArgs {
     #[arg(long)]
     check: bool,
+}
+
+#[derive(Debug, Args)]
+struct GraphQueryArgs {
+    #[arg(long = "node-type")]
+    node_type: Option<String>,
+    #[arg(long = "stable-key")]
+    stable_key: Option<String>,
+    #[arg(long)]
+    branch: Option<String>,
+    #[arg(long)]
+    snapshot: Option<String>,
+    #[arg(long = "max-nodes", default_value_t = 1_000)]
+    max_nodes: usize,
+    #[arg(long = "max-edges", default_value_t = 5_000)]
+    max_edges: usize,
+    #[arg(long = "max-depth", default_value_t = 4)]
+    max_depth: usize,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -1479,6 +1499,47 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
             println!("nodes: {}", report.nodes);
             println!("edges: {}", report.edges);
             println!("stateHash: {}", report.state_hash);
+        }
+        GraphCommand::Query(args) => {
+            let target = match (args.snapshot, args.branch) {
+                (Some(snapshot_id), None) => QueryTarget::Snapshot { snapshot_id },
+                (None, Some(graph_branch)) => QueryTarget::Branch { graph_branch },
+                (None, None) => QueryTarget::Current {
+                    graph_branch: "main".to_string(),
+                },
+                (Some(_), Some(_)) => bail!("pass either --snapshot or --branch, not both"),
+            };
+            let context = QueryContext {
+                target,
+                limits: QueryLimits {
+                    max_depth: args.max_depth,
+                    max_nodes: args.max_nodes,
+                    max_edges: args.max_edges,
+                },
+                actor: None,
+                require_permission: false,
+            };
+            let report = store.query_graph(context)?;
+            let query = sg_core::GraphQuery::with_context(&report.graph, report.context.clone());
+            let nodes = if let Some(stable_key) = args.stable_key {
+                query
+                    .get_node_by_stable_key(&stable_key)
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            } else if let Some(node_type) = args.node_type {
+                query.nodes_by_type(&node_type)
+            } else {
+                let mut nodes = report.graph.nodes.values().collect::<Vec<_>>();
+                nodes.sort_by(|left, right| left.id.cmp(&right.id));
+                nodes
+            };
+            println!("stateHash: {}", report.state_hash);
+            println!("nodes: {}", nodes.len());
+            println!("costNodes: {}", report.cost.nodes_scanned);
+            println!("costEdges: {}", report.cost.edges_scanned);
+            for node in nodes {
+                println!("{} {} {}", node.id, node.node_type, node.stable_key);
+            }
         }
         GraphCommand::Diff(args) => {
             let report = store.replay(ReplayOptions { check_hashes: true })?;

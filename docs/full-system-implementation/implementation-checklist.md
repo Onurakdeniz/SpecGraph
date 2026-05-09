@@ -121,7 +121,7 @@ Related areas:
 - [x] Add central stable-key registry with parser, formatter, built-in core families, and remediation-rich errors.
 - [x] Add duplicate stable-key detection.
 - [x] Add deterministic query API with stable ordering.
-- [x] Add query cost/limit placeholders.
+- [x] Add query context targets for current/branch/snapshot plus query cost/limit checks and `sg graph query`.
 - [x] Add `sg graph rebuild` command to rebuild derived snapshots/indexes from canonical JSONL events.
 
 ### Gate Checks
