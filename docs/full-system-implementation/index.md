@@ -34,7 +34,7 @@ This directory breaks the full SpecGraph OS system into one Markdown file per **
 
 ## Implementation Plan
 
-Use the phase-gated roadmap in [phase-gated-implementation-plan.md](phase-gated-implementation-plan.md). It resets delivery to Phase 0 → Phase 1 → Phase 2 before outer features.
+Use the full-system phase-gated roadmap in [phase-gated-implementation-plan.md](phase-gated-implementation-plan.md). It is not an MVP plan; it maps all 52 system areas and still builds from Phase 0 → Phase 1 → Phase 2 before outer features.
 - Keep [implementation-checklist.md](implementation-checklist.md) as the checkbox tracker with phase gates and validation checks.
 - Keep the older conceptual roadmap in [implementation-plan.md](implementation-plan.md) as background context only.
 
