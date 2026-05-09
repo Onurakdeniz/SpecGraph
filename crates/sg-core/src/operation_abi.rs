@@ -253,7 +253,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             description: "Install and lock an ontology pack manifest.",
             required_input_fields: &["name", "version", "path"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
-            allowed_create_node_types: &["OntologyPack", "OntologyVersion"],
+            allowed_create_node_types: &["OntologyPack", "OntologyVersion", "OntologyMigration"],
             allowed_create_edge_types: &[],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },

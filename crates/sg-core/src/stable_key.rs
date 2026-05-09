@@ -100,6 +100,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "ontology-pack:ddd-backend",
     },
     StableKeyFamily {
+        prefix: "ontology-migration",
+        description: "Ontology pack migration plan",
+        example: "ontology-migration:ddd-backend:0.1.0->0.2.0",
+    },
+    StableKeyFamily {
         prefix: "ontology-version",
         description: "Ontology pack or core version",
         example: "ontology-version:ddd-backend@0.1.0",
@@ -335,6 +340,7 @@ mod tests {
             "git-commit",
             "graph-snapshot",
             "ontology-pack",
+            "ontology-migration",
             "ontology-version",
             "actor",
             "role",
@@ -393,6 +399,7 @@ mod tests {
             "git-commit:abc123",
             "graph-snapshot:sha256:abc123",
             "ontology-pack:ddd-backend",
+            "ontology-migration:ddd-backend:0.1.0->0.2.0",
             "ontology-version:ddd-backend@0.1.0",
             "edge:node_spec_auth_001:HAS_REQUIREMENT:node_req_auth_001",
         ] {

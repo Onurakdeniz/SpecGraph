@@ -60,6 +60,30 @@ pub struct OntologyPackValidationReport {
     pub findings: Vec<Finding>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OntologyMigrationPlan {
+    pub pack: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_version: Option<String>,
+    pub to_version: String,
+    pub action: OntologyMigrationAction,
+    #[serde(default)]
+    pub migrations: Vec<OntologyMigration>,
+    #[serde(default)]
+    pub findings: Vec<Finding>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum OntologyMigrationAction {
+    Install,
+    Noop,
+    Upgrade,
+    Downgrade,
+    Replace,
+}
+
 pub fn load_pack(path: &Path) -> Result<OntologyPackManifest, String> {
     let bytes =
         fs::read(path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
@@ -76,6 +100,88 @@ pub fn load_pack(path: &Path) -> Result<OntologyPackManifest, String> {
                 path.display()
             )
         }),
+    }
+}
+
+pub fn plan_pack_migration(
+    current: Option<&OntologyPackManifest>,
+    target: &OntologyPackManifest,
+) -> OntologyMigrationPlan {
+    let validation = validate_pack(target);
+    let mut findings = validation.findings;
+    let mut migrations = Vec::new();
+    let mut action = OntologyMigrationAction::Install;
+    let from_version = current.map(|pack| pack.version.clone());
+
+    if let Some(current) = current {
+        if current.name != target.name {
+            action = OntologyMigrationAction::Replace;
+            findings.push(finding(
+                "ontology_pack.migration_pack_mismatch",
+                FindingSeverity::Error,
+                format!(
+                    "Cannot plan migration from pack `{}` to different pack `{}`",
+                    current.name, target.name
+                ),
+            ));
+        } else {
+            match compare_semver(&current.version, &target.version) {
+                Some(std::cmp::Ordering::Equal) => {
+                    action = OntologyMigrationAction::Noop;
+                }
+                Some(std::cmp::Ordering::Less) => {
+                    action = OntologyMigrationAction::Upgrade;
+                    let matching_migrations: Vec<_> = target
+                        .migrations
+                        .iter()
+                        .filter(|migration| {
+                            migration.from == current.version && migration.to == target.version
+                        })
+                        .cloned()
+                        .collect();
+                    if matching_migrations.is_empty() {
+                        findings.push(finding(
+                            "ontology_pack.migration_missing",
+                            FindingSeverity::Error,
+                            format!(
+                                "Pack `{}` upgrade {} -> {} requires a matching migration entry",
+                                target.name, current.version, target.version
+                            ),
+                        ));
+                    }
+                    migrations = matching_migrations;
+                    validate_type_compatibility(current, target, &mut findings);
+                }
+                Some(std::cmp::Ordering::Greater) => {
+                    action = OntologyMigrationAction::Downgrade;
+                    findings.push(finding(
+                        "ontology_pack.migration_downgrade",
+                        FindingSeverity::Error,
+                        format!(
+                            "Pack `{}` downgrade {} -> {} is not supported",
+                            target.name, current.version, target.version
+                        ),
+                    ));
+                }
+                None => findings.push(finding(
+                    "ontology_pack.migration_version_uncomparable",
+                    FindingSeverity::Error,
+                    format!(
+                        "Cannot compare pack versions `{}` and `{}` for migration planning",
+                        current.version, target.version
+                    ),
+                )),
+            }
+        }
+    }
+
+    OntologyMigrationPlan {
+        pack: target.name.clone(),
+        from_version,
+        to_version: target.version.clone(),
+        action,
+        migrations,
+        findings,
     }
 }
 
@@ -215,6 +321,59 @@ pub fn validate_pack(pack: &OntologyPackManifest) -> OntologyPackValidationRepor
     }
 }
 
+fn validate_type_compatibility(
+    current: &OntologyPackManifest,
+    target: &OntologyPackManifest,
+    findings: &mut Vec<Finding>,
+) {
+    for node_type in current
+        .node_types
+        .iter()
+        .filter(|node_type| !target.node_types.contains(node_type))
+    {
+        findings.push(finding(
+            "ontology_pack.compatibility.node_type_removed",
+            FindingSeverity::Warning,
+            format!(
+                "Pack `{}` upgrade removes node type `{node_type}`; affected graph facts may require migration",
+                target.name
+            ),
+        ));
+    }
+
+    for edge_type in current
+        .edge_types
+        .iter()
+        .filter(|edge_type| !target.edge_types.contains(edge_type))
+    {
+        findings.push(finding(
+            "ontology_pack.compatibility.edge_type_removed",
+            FindingSeverity::Warning,
+            format!(
+                "Pack `{}` upgrade removes edge type `{edge_type}`; affected graph facts may require migration",
+                target.name
+            ),
+        ));
+    }
+}
+
+fn compare_semver(left: &str, right: &str) -> Option<std::cmp::Ordering> {
+    let left = parse_simple_semver(left)?;
+    let right = parse_simple_semver(right)?;
+    Some(left.cmp(&right))
+}
+
+fn parse_simple_semver(value: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = value.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
 fn validate_source_and_signature(pack: &OntologyPackManifest, findings: &mut Vec<Finding>) {
     let remote_source = match &pack.source {
         Some(source) => validate_source(source, findings),
@@ -338,11 +497,7 @@ fn validate_signature(
 }
 
 fn is_simple_semver(value: &str) -> bool {
-    let parts = value.split('.').collect::<Vec<_>>();
-    parts.len() == 3
-        && parts
-            .iter()
-            .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
+    parse_simple_semver(value).is_some()
 }
 
 fn finding(code: &str, severity: FindingSeverity, message: String) -> Finding {
@@ -528,5 +683,85 @@ mod tests {
                 "{code}"
             );
         }
+    }
+
+    #[test]
+    fn plans_pack_upgrade_with_matching_migration() {
+        let current = OntologyPackManifest {
+            name: "ddd-backend".to_string(),
+            version: "0.1.0".to_string(),
+            source: Some(OntologyPackSource {
+                kind: "local".to_string(),
+                uri: "ddd.yaml".to_string(),
+            }),
+            signature: Some(OntologyPackSignature {
+                algorithm: "unsigned-dev".to_string(),
+                value: "unsigned-dev".to_string(),
+                signed_by: "local-dev".to_string(),
+            }),
+            extends: vec!["core@0.1.0".to_string()],
+            node_types: vec!["Aggregate".to_string()],
+            edge_types: vec!["OWNS_AGGREGATE".to_string()],
+            validators: vec![],
+            policies: vec![],
+            migrations: vec![],
+        };
+        let target = OntologyPackManifest {
+            version: "0.2.0".to_string(),
+            node_types: vec!["Aggregate".to_string(), "DomainEvent".to_string()],
+            migrations: vec![OntologyMigration {
+                from: "0.1.0".to_string(),
+                to: "0.2.0".to_string(),
+                description: "Add domain events".to_string(),
+            }],
+            ..current.clone()
+        };
+
+        let plan = plan_pack_migration(Some(&current), &target);
+
+        assert_eq!(plan.action, OntologyMigrationAction::Upgrade);
+        assert_eq!(plan.from_version.as_deref(), Some("0.1.0"));
+        assert_eq!(plan.to_version, "0.2.0");
+        assert_eq!(plan.migrations.len(), 1);
+        assert!(plan
+            .findings
+            .iter()
+            .all(|finding| finding.severity != FindingSeverity::Error));
+    }
+
+    #[test]
+    fn rejects_pack_upgrade_without_matching_migration() {
+        let current = OntologyPackManifest {
+            name: "ddd-backend".to_string(),
+            version: "0.1.0".to_string(),
+            source: Some(OntologyPackSource {
+                kind: "local".to_string(),
+                uri: "ddd.yaml".to_string(),
+            }),
+            signature: Some(OntologyPackSignature {
+                algorithm: "unsigned-dev".to_string(),
+                value: "unsigned-dev".to_string(),
+                signed_by: "local-dev".to_string(),
+            }),
+            extends: vec!["core@0.1.0".to_string()],
+            node_types: vec!["Aggregate".to_string()],
+            edge_types: vec!["OWNS_AGGREGATE".to_string()],
+            validators: vec![],
+            policies: vec![],
+            migrations: vec![],
+        };
+        let target = OntologyPackManifest {
+            version: "0.2.0".to_string(),
+            migrations: vec![],
+            ..current.clone()
+        };
+
+        let plan = plan_pack_migration(Some(&current), &target);
+
+        assert_eq!(plan.action, OntologyMigrationAction::Upgrade);
+        assert!(plan
+            .findings
+            .iter()
+            .any(|finding| finding.code == "ontology_pack.migration_missing"));
     }
 }
