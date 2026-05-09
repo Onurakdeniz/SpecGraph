@@ -85,6 +85,16 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "code-file:src/identity/password-reset.js",
     },
     StableKeyFamily {
+        prefix: "code-import",
+        description: "Code import dependency observation or accepted fact",
+        example: "code-import:src/app.ts->src/router.ts",
+    },
+    StableKeyFamily {
+        prefix: "code-route",
+        description: "Code route handler observation or accepted fact",
+        example: "code-route:POST-/password-reset",
+    },
+    StableKeyFamily {
         prefix: "code-symbol",
         description: "Observed or accepted code symbol",
         example: "code-symbol:src/lib.rs/function/main",

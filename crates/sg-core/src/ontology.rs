@@ -86,6 +86,8 @@ impl MvpOntology {
                 "GitBranch",
                 "GitCommit",
                 "CodeFile",
+                "CodeImport",
+                "CodeRoute",
                 "CodeSymbol",
                 "TestCase",
                 "ValidationRun",
@@ -172,6 +174,13 @@ impl MvpOntology {
                 "IMPLEMENTS_ACTION_GROUP",
                 "FOLLOWS_COMMIT_PLAN",
                 "CHANGES_FILE",
+                "DEFINES_SYMBOL",
+                "HAS_IMPORT",
+                "IMPORTS_FILE",
+                "DECLARES_ROUTE",
+                "HANDLED_BY_SYMBOL",
+                "IMPLEMENTS_BEHAVIOR",
+                "ADDRESSES_RISK",
                 "VERIFIES",
                 "VALIDATED_BY",
                 "HAS_VALIDATOR_EXECUTION",
@@ -363,6 +372,7 @@ impl MvpOntology {
         self.validate_project_profile(graph, &mut findings);
         self.validate_module_graph(graph, &mut findings);
         self.validate_architecture_graph(graph, &mut findings);
+        findings.extend(crate::code_graph::validate_code_graph(graph));
         findings.extend(crate::data_graph::validate_data_graph(graph));
         findings.extend(crate::migration_runtime::validate_migration_runtime(graph));
         self.validate_spec_completeness(graph, &mut findings);
@@ -1002,7 +1012,10 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "CONSUMES_DATA_CONTRACT" => Some((&["Module"], &["DataContract"])),
         "READS_TABLE" => Some((&["Module", "Query", "ReadModel"], &["Table"])),
         "WRITES_TABLE" => Some((&["Module"], &["Table"])),
-        "OWNED_BY_MODULE" => Some((&["Migration"], &["Module"])),
+        "OWNED_BY_MODULE" => Some((
+            &["Migration", "CodeFile", "CodeSymbol", "CodeRoute"],
+            &["Module"],
+        )),
         "AFFECTS_TABLE" => Some((&["Migration"], &["Table"])),
         "HAS_ROLLBACK_PLAN" => Some((&["Migration"], &["RollbackPlan"])),
         "HAS_MIGRATION_TEST" => Some((
@@ -1042,6 +1055,13 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "IMPLEMENTS_ACTION_GROUP" => Some((&["GitCommit"], &["ActionGroup"])),
         "FOLLOWS_COMMIT_PLAN" => Some((&["GitCommit"], &["CommitPlan"])),
         "CHANGES_FILE" => Some((&["GitCommit"], &["CodeFile"])),
+        "DEFINES_SYMBOL" => Some((&["CodeFile"], &["CodeSymbol"])),
+        "HAS_IMPORT" => Some((&["CodeFile"], &["CodeImport"])),
+        "IMPORTS_FILE" => Some((&["CodeFile"], &["CodeFile"])),
+        "DECLARES_ROUTE" => Some((&["CodeFile"], &["CodeRoute"])),
+        "HANDLED_BY_SYMBOL" => Some((&["CodeRoute"], &["CodeSymbol"])),
+        "IMPLEMENTS_BEHAVIOR" => Some((&["CodeFile", "CodeSymbol", "CodeRoute"], &["Behavior"])),
+        "ADDRESSES_RISK" => Some((&["CodeFile", "CodeSymbol", "CodeRoute"], &["Risk"])),
         "VERIFIES" => Some((&["TestCase"], &["AcceptanceCriterion"])),
         "VALIDATED_BY" => Some((
             &["Project", "Spec", "GitCommit", "CodeFile", "TestCase"],

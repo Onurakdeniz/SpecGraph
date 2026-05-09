@@ -258,7 +258,8 @@ Related areas:
 - [~] Formalize adapter trait/capability model.
 - [~] Mark all adapter output as observations unless accepted by operation.
 - [~] Stabilize `CodeIndexObservation` schema.
-- [~] Add source locations for symbols and files.
+- [x] Add CodeGraph semantic model for files, symbols, imports, routes, ownership, behavior links, and risk links.
+- [x] Add source locations for CodeGraph symbols/routes/imports.
 - [ ] Expand link manifest for code-symbol-to-use-case links.
 - [ ] Expand link manifest for route-to-endpoint links.
 - [ ] Expand link manifest for behavior and risk test links.

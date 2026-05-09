@@ -9,6 +9,7 @@ pub mod adoption;
 pub mod architecture_graph;
 pub mod architecture_pack;
 pub mod canonical;
+pub mod code_graph;
 pub mod code_indexer;
 pub mod data_graph;
 pub mod git;
@@ -85,6 +86,11 @@ pub use architecture_graph::{
 pub use architecture_pack::{
     validate_architecture_graph_with_pack, validate_architecture_pack, ArchitecturePack,
     ArchitecturePackValidationReport, ForbiddenDependencyRule,
+};
+pub use code_graph::{
+    code_file_node_id, code_import_node_id, code_route_node_id, code_symbol_node_id,
+    validate_code_graph, CodeBehaviorLink, CodeFileFact, CodeGraphProjection, CodeImportFact,
+    CodeOwnershipFact, CodeRiskLink, CodeRouteFact, CodeSymbolFact, SourceLocation,
 };
 pub use code_indexer::{
     index_source_file, language_for_path, observations_to_delta, CodeIndexObservation, CodeIndexer,
