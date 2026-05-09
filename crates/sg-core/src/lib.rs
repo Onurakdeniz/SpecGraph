@@ -7,6 +7,7 @@
 pub mod adapter;
 pub mod adoption;
 pub mod architecture_graph;
+pub mod architecture_pack;
 pub mod canonical;
 pub mod code_indexer;
 pub mod git;
@@ -74,6 +75,10 @@ pub use architecture_graph::{
     ArchitectureGraphProjection, DependencyCall, ForbiddenDependency, PortDefinition,
     PortDirection,
 };
+pub use architecture_pack::{
+    validate_architecture_graph_with_pack, validate_architecture_pack, ArchitecturePack,
+    ArchitecturePackValidationReport, ForbiddenDependencyRule,
+};
 pub use code_indexer::{
     index_source_file, language_for_path, observations_to_delta, CodeIndexObservation, CodeIndexer,
     CodeSymbolObservation, LightweightCodeIndexer,
@@ -102,7 +107,7 @@ pub use trace::{validate_trace_links, LinksManifest, TestLink};
 pub use validation::{
     built_in_validators, find_validator, ValidatorDefinition, ValidatorExecution,
     ValidatorExecutionStatus, CORE_VALIDATOR_VERSION, VALIDATOR_ADAPTER_TRUST,
-    VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING, VALIDATOR_ONTOLOGY,
-    VALIDATOR_ONTOLOGY_PACK, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT,
-    VALIDATOR_TRACE_LINKS,
+    VALIDATOR_ARCHITECTURE_PACK, VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE,
+    VALIDATOR_GIT_BINDING, VALIDATOR_ONTOLOGY, VALIDATOR_ONTOLOGY_PACK, VALIDATOR_OPERATION_ABI,
+    VALIDATOR_POLICY, VALIDATOR_SNAPSHOT, VALIDATOR_TRACE_LINKS,
 };

@@ -12,6 +12,7 @@ pub const VALIDATOR_POLICY: &str = "validator.policy";
 pub const VALIDATOR_SNAPSHOT: &str = "validator.snapshot";
 pub const VALIDATOR_TRACE_LINKS: &str = "validator.trace_links";
 pub const VALIDATOR_ADAPTER_TRUST: &str = "validator.adapter_trust";
+pub const VALIDATOR_ARCHITECTURE_PACK: &str = "validator.architecture_pack";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -90,6 +91,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Test Mapping",
             description: "Validates TestCase to AcceptanceCriterion traceability links.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_ARCHITECTURE_PACK,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Architecture Packs",
+            description: "Runs architecture pack dependency rules against graph fixtures and accepted facts.",
         },
         ValidatorDefinition {
             id: VALIDATOR_ADAPTER_TRUST,
