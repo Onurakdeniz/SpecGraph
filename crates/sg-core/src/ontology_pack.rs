@@ -12,6 +12,10 @@ pub struct OntologyPackManifest {
     pub name: String,
     pub version: String,
     #[serde(default)]
+    pub source: Option<OntologyPackSource>,
+    #[serde(default)]
+    pub signature: Option<OntologyPackSignature>,
+    #[serde(default)]
     pub extends: Vec<String>,
     #[serde(default)]
     pub node_types: Vec<String>,
@@ -23,6 +27,21 @@ pub struct OntologyPackManifest {
     pub policies: Vec<String>,
     #[serde(default)]
     pub migrations: Vec<OntologyMigration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OntologyPackSource {
+    pub kind: String,
+    pub uri: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OntologyPackSignature {
+    pub algorithm: String,
+    pub value: String,
+    pub signed_by: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +107,8 @@ pub fn validate_pack(pack: &OntologyPackManifest) -> OntologyPackValidationRepor
             ),
         ));
     }
+
+    validate_source_and_signature(pack, &mut findings);
 
     let mut node_type_names = BTreeSet::new();
     for node_type in &pack.node_types {
@@ -194,6 +215,128 @@ pub fn validate_pack(pack: &OntologyPackManifest) -> OntologyPackValidationRepor
     }
 }
 
+fn validate_source_and_signature(pack: &OntologyPackManifest, findings: &mut Vec<Finding>) {
+    let remote_source = match &pack.source {
+        Some(source) => validate_source(source, findings),
+        None => {
+            findings.push(finding(
+                "ontology_pack.source_missing",
+                FindingSeverity::Warning,
+                "Ontology pack source is not declared; local installs should record source kind and URI for lockfile provenance".to_string(),
+            ));
+            false
+        }
+    };
+
+    match &pack.signature {
+        Some(signature) => validate_signature(signature, remote_source, findings),
+        None if remote_source => findings.push(finding(
+            "ontology_pack.signature_required_for_remote_source",
+            FindingSeverity::Error,
+            "Remote or registry ontology pack sources require signature metadata before installation".to_string(),
+        )),
+        None => findings.push(finding(
+            "ontology_pack.signature_missing",
+            FindingSeverity::Warning,
+            "Ontology pack signature is not declared; use `unsigned-dev` only for local development packs".to_string(),
+        )),
+    }
+}
+
+fn validate_source(source: &OntologyPackSource, findings: &mut Vec<Finding>) -> bool {
+    let kind = source.kind.trim();
+    let uri = source.uri.trim();
+    let mut remote_source = false;
+
+    if uri.is_empty() {
+        findings.push(finding(
+            "ontology_pack.source_uri_required",
+            FindingSeverity::Error,
+            "Ontology pack source URI is required".to_string(),
+        ));
+    }
+
+    match kind {
+        "local" => {}
+        "remote" | "registry" => {
+            remote_source = true;
+            if !uri.starts_with("https://") {
+                findings.push(finding(
+                    "ontology_pack.source_uri_insecure",
+                    FindingSeverity::Error,
+                    format!("Ontology pack {kind} source `{uri}` must use an https:// URI"),
+                ));
+            }
+        }
+        "" => findings.push(finding(
+            "ontology_pack.source_kind_required",
+            FindingSeverity::Error,
+            "Ontology pack source kind is required".to_string(),
+        )),
+        other => findings.push(finding(
+            "ontology_pack.source_kind_invalid",
+            FindingSeverity::Error,
+            format!("Ontology pack source kind `{other}` must be local, remote, or registry"),
+        )),
+    }
+
+    remote_source
+}
+
+fn validate_signature(
+    signature: &OntologyPackSignature,
+    remote_source: bool,
+    findings: &mut Vec<Finding>,
+) {
+    let algorithm = signature.algorithm.trim();
+    if !matches!(
+        algorithm,
+        "unsigned-dev" | "sha256" | "sigstore" | "minisign"
+    ) {
+        findings.push(finding(
+            "ontology_pack.signature_algorithm_invalid",
+            FindingSeverity::Error,
+            format!(
+                "Ontology pack signature algorithm `{}` must be unsigned-dev, sha256, sigstore, or minisign",
+                signature.algorithm
+            ),
+        ));
+    }
+
+    if remote_source && algorithm == "unsigned-dev" {
+        findings.push(finding(
+            "ontology_pack.signature_unsigned_remote",
+            FindingSeverity::Error,
+            "Remote or registry ontology pack sources cannot use unsigned-dev signatures"
+                .to_string(),
+        ));
+    }
+
+    if signature.value.trim().is_empty() {
+        findings.push(finding(
+            "ontology_pack.signature_value_required",
+            FindingSeverity::Error,
+            "Ontology pack signature value is required".to_string(),
+        ));
+    }
+
+    if algorithm == "sha256" && !signature.value.starts_with("sha256:") {
+        findings.push(finding(
+            "ontology_pack.signature_sha256_invalid",
+            FindingSeverity::Error,
+            "Ontology pack sha256 signature value must start with `sha256:`".to_string(),
+        ));
+    }
+
+    if signature.signed_by.trim().is_empty() {
+        findings.push(finding(
+            "ontology_pack.signature_signed_by_required",
+            FindingSeverity::Error,
+            "Ontology pack signature signedBy is required".to_string(),
+        ));
+    }
+}
+
 fn is_simple_semver(value: &str) -> bool {
     let parts = value.split('.').collect::<Vec<_>>();
     parts.len() == 3
@@ -240,6 +383,8 @@ mod tests {
         let report = validate_pack(&OntologyPackManifest {
             name: String::new(),
             version: String::new(),
+            source: None,
+            signature: None,
             extends: vec![],
             node_types: vec![],
             edge_types: vec![],
@@ -262,6 +407,15 @@ mod tests {
         let report = validate_pack(&OntologyPackManifest {
             name: "ddd-backend".to_string(),
             version: "0.1.0".to_string(),
+            source: Some(OntologyPackSource {
+                kind: "local".to_string(),
+                uri: "docs/ontology-packs/ddd-backend.yaml".to_string(),
+            }),
+            signature: Some(OntologyPackSignature {
+                algorithm: "unsigned-dev".to_string(),
+                value: "unsigned-dev".to_string(),
+                signed_by: "local-dev".to_string(),
+            }),
             extends: vec!["core@0.1.0".to_string()],
             node_types: vec!["Aggregate".to_string()],
             edge_types: vec!["OWNS_AGGREGATE".to_string()],
@@ -285,6 +439,8 @@ mod tests {
         let report = validate_pack(&OntologyPackManifest {
             name: "bad-pack".to_string(),
             version: "latest".to_string(),
+            source: None,
+            signature: None,
             extends: vec![],
             node_types: vec!["aggregate".to_string(), "aggregate".to_string()],
             edge_types: vec!["ownsAggregate".to_string(), "ownsAggregate".to_string()],
@@ -305,6 +461,67 @@ mod tests {
             "ontology_pack.invalid_edge_type_name",
             "ontology_pack.migration_description_required",
             "ontology_pack.migration_noop",
+        ] {
+            assert!(
+                report.findings.iter().any(|finding| finding.code == code),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn validates_pack_source_and_signature_metadata() {
+        let report = validate_pack(&OntologyPackManifest {
+            name: "remote-pack".to_string(),
+            version: "1.2.3".to_string(),
+            source: Some(OntologyPackSource {
+                kind: "registry".to_string(),
+                uri: "https://packs.example/specgraph/remote-pack.yaml".to_string(),
+            }),
+            signature: Some(OntologyPackSignature {
+                algorithm: "sha256".to_string(),
+                value: "sha256:abc123".to_string(),
+                signed_by: "SpecGraph Registry".to_string(),
+            }),
+            extends: vec!["core@0.1.0".to_string()],
+            node_types: vec!["RemoteFact".to_string()],
+            edge_types: vec!["USES_REMOTE_FACT".to_string()],
+            validators: vec![],
+            policies: vec![],
+            migrations: vec![],
+        });
+
+        assert!(report
+            .findings
+            .iter()
+            .all(|finding| finding.severity != FindingSeverity::Error));
+    }
+
+    #[test]
+    fn rejects_remote_pack_without_trusted_signature() {
+        let report = validate_pack(&OntologyPackManifest {
+            name: "remote-pack".to_string(),
+            version: "1.2.3".to_string(),
+            source: Some(OntologyPackSource {
+                kind: "remote".to_string(),
+                uri: "http://packs.example/remote-pack.yaml".to_string(),
+            }),
+            signature: Some(OntologyPackSignature {
+                algorithm: "unsigned-dev".to_string(),
+                value: "unsigned-dev".to_string(),
+                signed_by: "local-dev".to_string(),
+            }),
+            extends: vec!["core@0.1.0".to_string()],
+            node_types: vec!["RemoteFact".to_string()],
+            edge_types: vec!["USES_REMOTE_FACT".to_string()],
+            validators: vec![],
+            policies: vec![],
+            migrations: vec![],
+        });
+
+        for code in [
+            "ontology_pack.source_uri_insecure",
+            "ontology_pack.signature_unsigned_remote",
         ] {
             assert!(
                 report.findings.iter().any(|finding| finding.code == code),

@@ -2,7 +2,7 @@
 
 **System area:** Ontology Pack Registry  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** code audit plus Phase 2.3 pack registry hardening implementation slice.
 
 ## Purpose
 
@@ -14,16 +14,19 @@ Support local and remote ontology, architecture, language, and security packs wi
 
 - YAML/JSON pack validation and install into .specgraph/ontology/packs are documented
 - Installed packs extend replay ontology
+- Pack manifests validate `source` provenance metadata for local, remote, and future registry sources
+- Pack manifests validate signature metadata, require signed remote/registry sources, and reject unsigned remote packs
+- Ontology lockfiles record installed pack source and signature metadata for provenance
 
 ### Partly Implemented
 
-- DDD backend pack example/foundation exists
-- Remote registry, signatures, and migration workflows are future
+- DDD backend pack example/foundation exists with local development source/signature metadata
+- Remote registry publishing and migration workflows are future
 
 ### Not Implemented / Remaining
 
 - Registry index and publishing workflow
-- Signed packs
+- Cryptographic signature verification beyond metadata/hardening
 - Sandboxed validators
 - Explicit third-party trust levels
 
@@ -41,11 +44,19 @@ sg ontology validate-pack, install-pack, list-packs, future publish/search/updat
 
 Pack schema, dependency compatibility, signature/trust checks, migration availability, policies preventing weakened enforcement
 
+
+### Source and Signature Metadata
+
+- Pack manifests may declare `source.kind` (`local`, `remote`, or `registry`) and `source.uri`; remote and registry sources must use HTTPS URIs.
+- Pack manifests may declare `signature.algorithm` (`unsigned-dev`, `sha256`, `sigstore`, or `minisign`), `signature.value`, and `signature.signedBy`.
+- Remote and registry sources require signature metadata and cannot use `unsigned-dev`; local development packs may use `unsigned-dev` while still recording provenance in the lockfile.
+- Installed pack graph facts include source/signature attributes so future policy and registry checks can inspect pack trust boundaries.
+
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: Registry index and publishing workflow.
-- Implement or finish: Signed packs.
+- Implement or finish: Cryptographic signature verification beyond metadata/hardening.
 - Implement or finish: Sandboxed validators.
 - Implement or finish: Explicit third-party trust levels.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.

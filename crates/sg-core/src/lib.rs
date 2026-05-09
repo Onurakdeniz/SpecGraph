@@ -62,7 +62,8 @@ pub use code_indexer::{
 pub use graph_merge::{detect_merge_conflicts, diff_graphs, GraphDiff, MergeConflict};
 pub use impact::{analyze_impact, ImpactAnalysis};
 pub use ontology_pack::{
-    load_pack, validate_pack, OntologyMigration, OntologyPackManifest, OntologyPackValidationReport,
+    load_pack, validate_pack, OntologyMigration, OntologyPackManifest, OntologyPackSignature,
+    OntologyPackSource, OntologyPackValidationReport,
 };
 pub use policy::{
     built_in_non_waivable_policies, evaluate_policies, evaluate_policies_with_manifests,

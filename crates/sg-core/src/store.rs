@@ -611,20 +611,31 @@ pub fn install_ontology_pack(
         "ontology_version",
         &format!("{}@{}", pack.name, pack.version),
     );
+    let mut pack_attributes = BTreeMap::from([
+        ("name".to_string(), json!(pack.name)),
+        ("version".to_string(), json!(pack.version)),
+        (
+            "path".to_string(),
+            json!(installed_path.display().to_string()),
+        ),
+    ]);
+    if let Some(source) = &pack.source {
+        pack_attributes.insert("sourceKind".to_string(), json!(source.kind));
+        pack_attributes.insert("sourceUri".to_string(), json!(source.uri));
+    }
+    if let Some(signature) = &pack.signature {
+        pack_attributes.insert("signatureAlgorithm".to_string(), json!(signature.algorithm));
+        pack_attributes.insert("signatureValue".to_string(), json!(signature.value));
+        pack_attributes.insert("signedBy".to_string(), json!(signature.signed_by));
+    }
+
     let delta = GraphDelta {
         create_nodes: vec![
             Node {
                 id: pack_node_id,
                 stable_key: format!("ontology-pack:{}", pack.name),
                 node_type: "OntologyPack".to_string(),
-                attributes: BTreeMap::from([
-                    ("name".to_string(), json!(pack.name)),
-                    ("version".to_string(), json!(pack.version)),
-                    (
-                        "path".to_string(),
-                        json!(installed_path.display().to_string()),
-                    ),
-                ]),
+                attributes: pack_attributes,
             },
             Node {
                 id: version_node_id,
@@ -1845,14 +1856,38 @@ fn active_ontology(root: &Path) -> Result<MvpOntology> {
 
 fn write_ontology_lock(sg_dir: &Path, packs: &[OntologyPackManifest]) -> Result<()> {
     let mut locks = BTreeMap::from([("core".to_string(), "0.1.0".to_string())]);
+    let mut sources = BTreeMap::new();
+    let mut signatures = BTreeMap::new();
     for pack in packs {
         locks.insert(pack.name.clone(), pack.version.clone());
+        let key = format!("{}@{}", pack.name, pack.version);
+        if let Some(source) = &pack.source {
+            sources.insert(
+                key.clone(),
+                json!({
+                    "kind": source.kind,
+                    "uri": source.uri,
+                }),
+            );
+        }
+        if let Some(signature) = &pack.signature {
+            signatures.insert(
+                key,
+                json!({
+                    "algorithm": signature.algorithm,
+                    "value": signature.value,
+                    "signedBy": signature.signed_by,
+                }),
+            );
+        }
     }
     write_json(
         &sg_dir.join("ontology.lock.json"),
         &json!({
             "locks": locks,
-            "ontologyVersion": CORE_ONTOLOGY_VERSION
+            "ontologyVersion": CORE_ONTOLOGY_VERSION,
+            "sources": sources,
+            "signatures": signatures
         }),
     )
 }
@@ -3560,6 +3595,13 @@ acceptanceCriteria:
             r#"
 name: ddd-backend
 version: 0.1.0
+source:
+  kind: local
+  uri: ddd.yaml
+signature:
+  algorithm: unsigned-dev
+  value: unsigned-dev
+  signedBy: local-dev
 extends:
   - core@0.1.0
 nodeTypes:
@@ -3584,6 +3626,8 @@ edgeTypes:
 
         let lock = fs::read_to_string(tmp.path().join(".specgraph/ontology.lock.json")).unwrap();
         assert!(lock.contains("ddd-backend"));
+        assert!(lock.contains("signatures"));
+        assert!(lock.contains("source"));
 
         let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
         assert_eq!(replay.events_replayed, 2);
@@ -3591,7 +3635,8 @@ edgeTypes:
             .graph
             .nodes
             .values()
-            .any(|node| node.node_type == "OntologyPack"));
+            .any(|node| node.node_type == "OntologyPack"
+                && node.attributes.get("signatureAlgorithm") == Some(&json!("unsigned-dev"))));
     }
 
     #[test]
