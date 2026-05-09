@@ -95,9 +95,34 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "commit-plan:AUTH-001/Implementation",
     },
     StableKeyFamily {
+        prefix: "domain-entity",
+        description: "Spec domain entity projection",
+        example: "domain-entity:AUTH-001/User",
+    },
+    StableKeyFamily {
+        prefix: "domain-event",
+        description: "Spec domain event projection",
+        example: "domain-event:AUTH-001/PasswordResetRequested",
+    },
+    StableKeyFamily {
+        prefix: "endpoint",
+        description: "Spec endpoint projection",
+        example: "endpoint:AUTH-001/POST-/password-reset",
+    },
+    StableKeyFamily {
         prefix: "edge",
         description: "Stable graph edge identity",
         example: "edge:node_spec_auth_001:HAS_REQUIREMENT:node_req_auth_001",
+    },
+    StableKeyFamily {
+        prefix: "behavior",
+        description: "Spec expected or forbidden behavior",
+        example: "behavior:AUTH-001/BEH-001",
+    },
+    StableKeyFamily {
+        prefix: "data-object",
+        description: "Spec data object projection",
+        example: "data-object:AUTH-001/PasswordResetToken",
     },
     StableKeyFamily {
         prefix: "dependency-boundary",
@@ -210,6 +235,16 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "proposal:PROP-001",
     },
     StableKeyFamily {
+        prefix: "risk",
+        description: "Spec risk projection",
+        example: "risk:AUTH-001/RISK-001",
+    },
+    StableKeyFamily {
+        prefix: "mitigation",
+        description: "Spec risk mitigation projection",
+        example: "mitigation:AUTH-001/MIT-001",
+    },
+    StableKeyFamily {
         prefix: "requirement",
         description: "Spec requirement",
         example: "requirement:AUTH-001/REQ-001",
@@ -253,6 +288,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "test-case",
         description: "Test case evidence",
         example: "test-case:tests/auth.spec.ts::reset",
+    },
+    StableKeyFamily {
+        prefix: "use-case",
+        description: "Spec use case projection",
+        example: "use-case:AUTH-001/UC-001",
     },
     StableKeyFamily {
         prefix: "validation-run",

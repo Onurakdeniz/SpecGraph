@@ -207,8 +207,8 @@ Related areas:
 - [x] Add module graph facts: modules, layers, packages, capabilities, and public/private interfaces.
 - [x] Add architecture graph facts: ports/adapters, dependency boundaries, and forbidden layer dependency constraints.
 - [ ] Add module lifecycle commands.
-- [ ] Expand spec projection schema for risks, mitigations, expected/forbidden behaviors, use cases, endpoints, entities, events, and data changes.
-- [ ] Add spec import dry-run showing intended graph delta.
+- [x] Expand spec projection schema for risks, mitigations, expected/forbidden behaviors, use cases, endpoints, entities, events, and data changes.
+- [x] Add spec import dry-run showing intended graph delta.
 - [ ] Add orphan structured concept validation.
 - [ ] Enforce full Spec state machine.
 - [ ] Add `sg spec status` with blockers and next operations.
