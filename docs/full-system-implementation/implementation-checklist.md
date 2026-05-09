@@ -116,7 +116,7 @@ Related areas:
 - [x] Version `Node`, `Edge`, `GraphDelta`, `GraphSnapshot`, and graph hash schema contracts.
 - [x] Version canonical event JSON schema and preserve legacy deserialization defaults.
 - [x] Add strict event schema validation during replay.
-- [~] Add event chain hash continuity checks.
+- [x] Add event sequence, previous-event, pre-state, and post-state continuity checks.
 - [x] Add snapshot verification against replayed state hash.
 - [~] Add stable-key parser and formatter.
 - [x] Add duplicate stable-key detection.

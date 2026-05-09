@@ -61,6 +61,14 @@ pub enum StoreError {
         expected: u64,
         actual: u64,
     },
+    #[error(
+        "event chain mismatch in {path}: expected previous event {expected:?}, got {actual:?}"
+    )]
+    EventChainMismatch {
+        path: PathBuf,
+        expected: Option<String>,
+        actual: Option<String>,
+    },
     #[error("event pre-state hash mismatch in {path}: expected {expected}, got {actual}")]
     PreStateHashMismatch {
         path: PathBuf,
@@ -112,6 +120,7 @@ pub struct ReplayReport {
     pub state_hash: String,
     pub events_replayed: usize,
     pub last_sequence: u64,
+    pub last_event_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -441,6 +450,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         schema_version: EVENT_SCHEMA_VERSION.to_string(),
         event_id: event_id.clone(),
         sequence: 1,
+        previous_event_id: None,
         operation_id: operation_id.clone(),
         operation: request.operation.clone(),
         actor: request.actor.clone(),
@@ -1229,6 +1239,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         schema_version: EVENT_SCHEMA_VERSION.to_string(),
         event_id: event_id.clone(),
         sequence: replay.last_sequence + 1,
+        previous_event_id: replay.last_event_id.clone(),
         operation_id: operation_id.clone(),
         operation: request.operation.clone(),
         actor: request.actor.clone(),
@@ -1296,6 +1307,7 @@ fn replay_events_until(
     let mut graph = Graph::default();
     let mut expected_sequence = 1;
     let mut events_replayed = 0;
+    let mut previous_event_id: Option<String> = None;
 
     'files: for file in files {
         let reader = BufReader::new(File::open(&file).map_err(|source| StoreError::Io {
@@ -1329,6 +1341,14 @@ fn replay_events_until(
                 });
             }
 
+            if event.previous_event_id != previous_event_id {
+                return Err(StoreError::EventChainMismatch {
+                    path: file.clone(),
+                    expected: previous_event_id,
+                    actual: event.previous_event_id,
+                });
+            }
+
             if options.check_hashes {
                 let actual_pre = state_hash(&graph, &event.ontology_version);
                 if actual_pre != event.pre_state_hash {
@@ -1353,6 +1373,7 @@ fn replay_events_until(
                 }
             }
 
+            previous_event_id = Some(event.event_id.clone());
             expected_sequence += 1;
             events_replayed += 1;
         }
@@ -1374,6 +1395,7 @@ fn replay_events_until(
         state_hash,
         events_replayed,
         last_sequence: expected_sequence.saturating_sub(1),
+        last_event_id: previous_event_id,
     })
 }
 
@@ -2090,6 +2112,111 @@ mod tests {
         assert!(matches!(
             error,
             StoreError::PreStateHashMismatch { .. } | StoreError::PostStateHashMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn replay_verifies_previous_event_chain_continuity() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:alice".to_string(),
+                display_name: Some("Alice".to_string()),
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let lines: Vec<String> = fs::read_to_string(&event_path)
+            .unwrap()
+            .lines()
+            .map(ToOwned::to_owned)
+            .collect();
+        let first: Value = serde_json::from_str(&lines[0]).unwrap();
+        let second: Value = serde_json::from_str(&lines[1]).unwrap();
+        assert_eq!(second["previousEventId"], first["eventId"]);
+
+        let mut tampered_second = second;
+        tampered_second["previousEventId"] = json!("evt_wrong");
+        fs::write(
+            &event_path,
+            format!(
+                "{}\n{}\n",
+                lines[0],
+                serde_json::to_string(&tampered_second).unwrap()
+            ),
+        )
+        .unwrap();
+
+        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        assert!(matches!(error, StoreError::EventChainMismatch { .. }));
+    }
+
+    #[test]
+    fn replay_rejects_event_sequence_gap() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:alice".to_string(),
+                display_name: Some("Alice".to_string()),
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let lines: Vec<String> = fs::read_to_string(&event_path)
+            .unwrap()
+            .lines()
+            .map(ToOwned::to_owned)
+            .collect();
+        let mut second: Value = serde_json::from_str(&lines[1]).unwrap();
+        second["sequence"] = json!(3);
+        fs::write(
+            &event_path,
+            format!(
+                "{}\n{}\n",
+                lines[0],
+                serde_json::to_string(&second).unwrap()
+            ),
+        )
+        .unwrap();
+
+        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::SequenceMismatch {
+                expected: 2,
+                actual: 3,
+                ..
+            }
         ));
     }
 

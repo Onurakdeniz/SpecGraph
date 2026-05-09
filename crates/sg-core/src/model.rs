@@ -105,6 +105,8 @@ pub struct Event {
     pub schema_version: String,
     pub event_id: String,
     pub sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_event_id: Option<String>,
     pub operation_id: String,
     pub operation: String,
     pub actor: String,
@@ -372,6 +374,7 @@ mod tests {
             schema_version: EVENT_SCHEMA_VERSION.to_string(),
             event_id: "evt_test".to_string(),
             sequence: 1,
+            previous_event_id: None,
             operation_id: "op_test".to_string(),
             operation: "Project.Init".to_string(),
             actor: "local:test".to_string(),
@@ -417,6 +420,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(event.schema_version, EVENT_SCHEMA_VERSION);
+        assert_eq!(event.previous_event_id, None);
 
         let snapshot: Snapshot = serde_json::from_value(json!({
             "snapshotId": "snap_legacy",
