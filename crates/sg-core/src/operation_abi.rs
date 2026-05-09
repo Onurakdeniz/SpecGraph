@@ -131,6 +131,28 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
+
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "DataGraph.Upsert",
+            category: "data",
+            description: "Create or update graph-native tables, columns, ownership, and data contracts.",
+            required_input_fields: &["dataGraph"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["Table", "Column", "DataContract", "ReadModel", "Query"],
+            allowed_create_edge_types: &[
+                "HAS_TABLE",
+                "HAS_COLUMN",
+                "OWNS_TABLE",
+                "HAS_DATA_CONTRACT",
+                "OWNS_DATA_CONTRACT",
+                "COVERS_TABLE",
+                "CONSUMES_DATA_CONTRACT",
+                "READS_TABLE",
+                "WRITES_TABLE",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Spec.Create",

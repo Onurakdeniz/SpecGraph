@@ -1,7 +1,7 @@
 # 19. DataGraph
 
 **System area:** DataGraph  
-**Implementation status:** ⬜ Not implemented  
+**Implementation status:** 🟡 Partly implemented
 **Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
 
 ## Purpose
@@ -16,11 +16,13 @@ Represent domain data, persistence structures, read models, queries, migrations,
 
 ### Partly Implemented
 
-- Policy foundation can express migration approvals, but DataGraph is not implemented
+- Policy foundation can express migration approvals.
+- DataGraph projection now models `Table`, `Column`, `DataContract`, table ownership, contract coverage, and consumers.
+- Built-in validation requires each table to have exactly one owning module and at least one column.
 
 ### Not Implemented / Remaining
 
-- Data ontology
+- Full DataGraph ontology beyond table/column/contract/read model/query foundations
 - Migration/schema indexers
 - Ownership validators
 - Cross-module read/write policies

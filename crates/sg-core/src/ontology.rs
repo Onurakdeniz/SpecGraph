@@ -56,6 +56,11 @@ impl MvpOntology {
                 "Package",
                 "Capability",
                 "PublicInterface",
+                "Table",
+                "Column",
+                "DataContract",
+                "ReadModel",
+                "Query",
                 "Port",
                 "Adapter",
                 "DependencyBoundary",
@@ -113,6 +118,15 @@ impl MvpOntology {
                 "PACKAGE_IN_MODULE",
                 "HAS_CAPABILITY",
                 "EXPOSES_INTERFACE",
+                "HAS_TABLE",
+                "HAS_COLUMN",
+                "OWNS_TABLE",
+                "HAS_DATA_CONTRACT",
+                "OWNS_DATA_CONTRACT",
+                "COVERS_TABLE",
+                "CONSUMES_DATA_CONTRACT",
+                "READS_TABLE",
+                "WRITES_TABLE",
                 "HAS_PORT",
                 "HAS_ADAPTER",
                 "USES_PORT",
@@ -324,6 +338,7 @@ impl MvpOntology {
         self.validate_project_profile(graph, &mut findings);
         self.validate_module_graph(graph, &mut findings);
         self.validate_architecture_graph(graph, &mut findings);
+        findings.extend(crate::data_graph::validate_data_graph(graph));
         self.validate_spec_completeness(graph, &mut findings);
         findings
     }
@@ -952,6 +967,15 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "PACKAGE_IN_MODULE" => Some((&["Module"], &["Package"])),
         "HAS_CAPABILITY" => Some((&["Module"], &["Capability"])),
         "EXPOSES_INTERFACE" => Some((&["Module"], &["PublicInterface"])),
+        "HAS_TABLE" => Some((&["Project"], &["Table"])),
+        "HAS_COLUMN" => Some((&["Table"], &["Column"])),
+        "OWNS_TABLE" => Some((&["Module"], &["Table"])),
+        "HAS_DATA_CONTRACT" => Some((&["Project"], &["DataContract"])),
+        "OWNS_DATA_CONTRACT" => Some((&["Module"], &["DataContract"])),
+        "COVERS_TABLE" => Some((&["DataContract"], &["Table"])),
+        "CONSUMES_DATA_CONTRACT" => Some((&["Module"], &["DataContract"])),
+        "READS_TABLE" => Some((&["Module", "Query", "ReadModel"], &["Table"])),
+        "WRITES_TABLE" => Some((&["Module"], &["Table"])),
         "HAS_PORT" => Some((&["Project", "Module"], &["Port"])),
         "HAS_ADAPTER" => Some((&["Project", "Module"], &["Adapter"])),
         "USES_PORT" => Some((&["Module", "Adapter"], &["Port"])),
