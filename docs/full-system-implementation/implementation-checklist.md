@@ -270,8 +270,9 @@ Related areas:
 - [ ] Add test runner result model.
 - [ ] Add `sg test run --record`.
 - [ ] Add `TestRun` evidence links to `ValidationRun`.
-- [ ] Add route/API drift detector.
-- [ ] Add migration/DataGraph drift detector.
+- [x] Add route/API drift detector.
+- [x] Add migration/DataGraph drift detector.
+- [x] Add spec-code-test-data-architecture drift report with blocker count.
 - [x] Add first complete architecture pack validator.
 - [x] Add table ownership model.
 - [x] Add migration rollback strategy model.
@@ -284,7 +285,7 @@ Related areas:
 - [x] Required AC without linked TestCase fails.
 - [x] Spec endpoint without linked route creates traceability finding.
 - [ ] Linked required test failing blocks review/merge.
-- [ ] Spec endpoint without observed/accepted route creates drift finding.
+- [x] Spec endpoint without observed/accepted route creates drift finding.
 - [x] Migration without owner/rollback/approval/test evidence fails according to policy.
 - [x] Architecture pack detects at least one invalid dependency in a fixture.
 

@@ -14,6 +14,7 @@ pub const VALIDATOR_TRACE_LINKS: &str = "validator.trace_links";
 pub const VALIDATOR_ADAPTER_TRUST: &str = "validator.adapter_trust";
 pub const VALIDATOR_ARCHITECTURE_PACK: &str = "validator.architecture_pack";
 pub const VALIDATOR_MIGRATION_RUNTIME: &str = "validator.migration_runtime";
+pub const VALIDATOR_DRIFT: &str = "validator.drift";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -110,6 +111,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Adapter Layer",
             description: "Validates adapter capabilities, provenance, and observations-only trust boundaries.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_DRIFT,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Drift Detection",
+            description: "Detects spec-code-test-data-architecture drift and emits blocking actionable findings.",
         },
         ValidatorDefinition {
             id: VALIDATOR_SNAPSHOT,

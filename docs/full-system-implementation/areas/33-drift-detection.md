@@ -14,24 +14,23 @@ Detect divergence between accepted graph facts and repository reality before rev
 
 - Code scope and trace validation are MVP foundations
 - Docs list concrete drift examples
+- Drift detector now emits blocking findings for missing route/API links, missing behavior/risk evidence, migration files without Migration facts, and code imports that bypass ArchitectureGraph calls
 
 ### Partly Implemented
 
 - Basic missing test link and out-of-scope file checks exist
-- Semantic drift is future
+- Phase 4 semantic drift detector covers spec-code-test-data-architecture foundations; stale projection and broader schema drift remain partial
 
 ### Not Implemented / Remaining
 
-- Route/API drift
-- Migration/DataGraph drift
-- Symbol/use-case/entity drift
+- Symbol/use-case/entity drift beyond behavior/risk/endpoint foundations
 - Projection stale-vs-graph drift
 
 ## Implementation Parts
 
 ### 1. Graph Model / Runtime Objects
 
-SpecGraph, CodeGraph, DataGraph, TestGraph, GitGraph, ValidationGraph facts and findings
+SpecGraph, CodeGraph, DataGraph, ArchitectureGraph, TestGraph, GitGraph, ValidationGraph facts, DriftReport, and blocking findings
 
 ### 2. Commands / APIs
 
@@ -44,9 +43,10 @@ Missing route, unlinked test, out-of-scope code, route change without graph upda
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Route/API drift.
-- Implement or finish: Migration/DataGraph drift.
-- Implement or finish: Symbol/use-case/entity drift.
+- Implemented foundation: Route/API drift.
+- Implemented foundation: Migration/DataGraph drift for migration files without graph facts.
+- Implemented foundation: Architecture/code import drift.
+- Implement or finish: Symbol/use-case/entity drift beyond behavior/risk/endpoint foundations.
 - Implement or finish: Projection stale-vs-graph drift.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
