@@ -11,6 +11,7 @@ pub mod architecture_pack;
 pub mod canonical;
 pub mod code_graph;
 pub mod code_indexer;
+pub mod cross_domain;
 pub mod data_graph;
 pub mod drift;
 pub mod git;
@@ -106,6 +107,7 @@ pub use code_indexer::{
     validate_code_index_observations, CodeImportObservation, CodeIndexObservation, CodeIndexer,
     CodeRouteObservation, CodeSymbolObservation, FrameworkAwareCodeIndexer, LightweightCodeIndexer,
 };
+pub use cross_domain::validate_cross_domain_traceability;
 pub use data_graph::{
     column_node_id, data_contract_node_id, table_node_id, validate_data_graph, ColumnDefinition,
     DataContractDefinition, DataGraphProjection, TableDefinition,
@@ -142,8 +144,9 @@ pub use trace::{
 pub use validation::{
     built_in_validators, find_validator, ValidatorDefinition, ValidatorExecution,
     ValidatorExecutionStatus, CORE_VALIDATOR_VERSION, VALIDATOR_ADAPTER_TRUST,
-    VALIDATOR_ARCHITECTURE_PACK, VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE, VALIDATOR_DRIFT,
-    VALIDATOR_GIT_BINDING, VALIDATOR_MIGRATION_RUNTIME, VALIDATOR_ONTOLOGY,
-    VALIDATOR_ONTOLOGY_PACK, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT,
-    VALIDATOR_TEST_RUNNER, VALIDATOR_TRACE_LINKS,
+    VALIDATOR_ARCHITECTURE_PACK, VALIDATOR_BRANCH_METADATA, VALIDATOR_CODE_SCOPE,
+    VALIDATOR_CROSS_DOMAIN_TRACE, VALIDATOR_DRIFT, VALIDATOR_GIT_BINDING,
+    VALIDATOR_MIGRATION_RUNTIME, VALIDATOR_ONTOLOGY, VALIDATOR_ONTOLOGY_PACK,
+    VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT, VALIDATOR_TEST_RUNNER,
+    VALIDATOR_TRACE_LINKS,
 };

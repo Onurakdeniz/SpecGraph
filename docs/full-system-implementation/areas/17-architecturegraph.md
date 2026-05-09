@@ -20,6 +20,9 @@ Encode allowed dependency directions, layer rules, ports/adapters, public/privat
 
 ### Partly Implemented
 
+- Cross-domain traceability validator now checks architecture, data, and security facts for links to code, tests, or policy evidence.
+- `Trace.CrossDomain` Operation ABI records `TRACE_TO_CODE`, `TRACE_TO_TEST`, and `TRACE_TO_POLICY` edges without bypassing runtime validation.
+
 - Pack foundations exist, and graph-native architecture facts/forbidden dependency validation now exist in `sg-core`.
 - Drift extraction/reporting and complete architecture pack validators remain partial/future work.
 
