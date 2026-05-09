@@ -262,10 +262,11 @@ Related areas:
 - [x] Add deterministic import extraction for JS/TS, Rust, and Python observations.
 - [x] Add CodeGraph semantic model for files, symbols, imports, routes, ownership, behavior links, and risk links.
 - [x] Add source locations for CodeGraph symbols/routes/imports.
-- [ ] Expand link manifest for code-symbol-to-use-case links.
-- [ ] Expand link manifest for route-to-endpoint links.
-- [ ] Expand link manifest for behavior and risk test links.
-- [ ] Add code annotation parser after manifest schema is stable.
+- [x] Expand link manifest for code-symbol-to-use-case links.
+- [x] Expand link manifest for route-to-endpoint links.
+- [x] Expand link manifest for behavior and risk test links.
+- [x] Validate annotation and inferred link records with trust-state rules.
+- [ ] Add full code annotation parser after manifest schema is stable.
 - [ ] Add test runner result model.
 - [ ] Add `sg test run --record`.
 - [ ] Add `TestRun` evidence links to `ValidationRun`.
@@ -281,6 +282,7 @@ Related areas:
 - [~] Code indexer cannot directly create trusted semantic facts.
 - [x] Unknown links in manifest fail validation.
 - [x] Required AC without linked TestCase fails.
+- [x] Spec endpoint without linked route creates traceability finding.
 - [ ] Linked required test failing blocks review/merge.
 - [ ] Spec endpoint without observed/accepted route creates drift finding.
 - [x] Migration without owner/rollback/approval/test evidence fails according to policy.

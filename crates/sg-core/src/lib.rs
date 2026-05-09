@@ -121,7 +121,10 @@ pub use query::{
     QueryTarget,
 };
 
-pub use trace::{validate_trace_links, LinksManifest, TestLink};
+pub use trace::{
+    validate_trace_links, AnnotationLink, BehaviorTestLink, CodeUseCaseLink, InferredLink,
+    LinksManifest, RiskTestLink, RouteEndpointLink, TestLink,
+};
 pub use validation::{
     built_in_validators, find_validator, ValidatorDefinition, ValidatorExecution,
     ValidatorExecutionStatus, CORE_VALIDATOR_VERSION, VALIDATOR_ADAPTER_TRUST,

@@ -14,16 +14,16 @@ Standardize links between code, tests, specs, requirements, ACs, symbols, behavi
 
 - .specgraph/links.yaml exists for tests to acceptance criteria
 - Docs define manifest, annotations, and inference as three methods
+- LinksManifest now validates TestCase↔AcceptanceCriterion, CodeSymbol↔UseCase, CodeRoute↔Endpoint, TestCase↔Behavior, and TestCase↔Risk links
 
 ### Partly Implemented
 
-- Manifest linking exists
-- Annotations and robust inference are incomplete
+- Manifest linking covers required Phase 4 relationships
+- Annotation and inferred link records validate relation shape, source/target existence, confidence, and untrusted state; full source parser remains partial
 
 ### Not Implemented / Remaining
 
-- Annotation syntax/parser
-- Inference trust model
+- Full annotation syntax parser
 - Link conflict resolution
 - Round-trip link reports
 
@@ -31,7 +31,7 @@ Standardize links between code, tests, specs, requirements, ACs, symbols, behavi
 
 ### 1. Graph Model / Runtime Objects
 
-VERIFIES, IMPLEMENTS, SATISFIES, ASSERTS, ASSERTS_NOT, COVERS_RISK and artifact edges
+VERIFIES, IMPLEMENTS_USE_CASE, ROUTES_TO_ENDPOINT, TESTS_BEHAVIOR, TESTS_RISK, future SATISFIES/ASSERTS/COVERS_RISK variants
 
 ### 2. Commands / APIs
 
@@ -44,8 +44,9 @@ Unknown links fail; missing required links produce findings; inferred links rema
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Annotation syntax/parser.
-- Implement or finish: Inference trust model.
+- Implemented foundation: Annotation link validation.
+- Implemented foundation: Inferred links remain Inferred/Observed and validate confidence.
+- Implement or finish: Full annotation syntax/parser.
 - Implement or finish: Link conflict resolution.
 - Implement or finish: Round-trip link reports.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
