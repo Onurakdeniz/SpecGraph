@@ -1293,6 +1293,52 @@ mod tests {
     }
 
     #[test]
+    fn replay_rejects_unknown_event_schema_fields() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let line = fs::read_to_string(&event_path).unwrap();
+        let mut event: Value = serde_json::from_str(line.trim()).unwrap();
+        event["unexpectedField"] = json!(true);
+        fs::write(&event_path, format!("{event}\n")).unwrap();
+
+        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        assert!(matches!(error, StoreError::Json { .. }));
+    }
+
+    #[test]
+    fn replay_rejects_unknown_nested_delta_schema_fields() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let line = fs::read_to_string(&event_path).unwrap();
+        let mut event: Value = serde_json::from_str(line.trim()).unwrap();
+        event["delta"]["createNodes"][0]["unexpectedNodeField"] = json!(true);
+        fs::write(&event_path, format!("{event}\n")).unwrap();
+
+        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        assert!(matches!(error, StoreError::Json { .. }));
+    }
+
+    #[test]
     fn replay_rejects_post_state_hash_mismatch_when_checked() {
         let tmp = tempdir().unwrap();
         init_project(
