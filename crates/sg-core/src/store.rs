@@ -235,6 +235,17 @@ pub struct SnapshotValidationReport {
     pub findings: Vec<Finding>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RebuildReport {
+    pub state_hash: String,
+    pub events_replayed: usize,
+    pub last_sequence: u64,
+    pub snapshots_rebuilt: usize,
+    pub indexes_rebuilt: usize,
+    pub nodes: usize,
+    pub edges: usize,
+}
+
 impl SpecGraphStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -338,6 +349,10 @@ impl SpecGraphStore {
 
     pub fn validate_snapshots(&self) -> Result<SnapshotValidationReport> {
         validate_snapshots(self.root())
+    }
+
+    pub fn rebuild_projections(&self) -> Result<RebuildReport> {
+        rebuild_projections(self.root())
     }
 }
 
@@ -1531,6 +1546,51 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
     })
 }
 
+pub fn rebuild_projections(root: &Path) -> Result<RebuildReport> {
+    let sg_dir = root.join(".specgraph");
+    if !sg_dir.exists() {
+        return Err(StoreError::NotFound(sg_dir));
+    }
+
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let snapshot_dir = sg_dir.join("snapshots");
+    let index_dir = sg_dir.join("indexes");
+
+    replace_dir(&snapshot_dir)?;
+    replace_dir(&index_dir)?;
+
+    write_snapshot(
+        &sg_dir,
+        &replay.graph,
+        replay.last_sequence,
+        &replay.state_hash,
+        "main",
+    )?;
+
+    write_json(
+        &index_dir.join("graph-summary.json"),
+        &json!({
+            "schemaVersion": "specgraph.derived-index/v1",
+            "derivedFrom": "events/*.jsonl",
+            "stateHash": replay.state_hash.clone(),
+            "eventSequence": replay.last_sequence,
+            "eventsReplayed": replay.events_replayed,
+            "nodeCount": replay.graph.nodes.len(),
+            "edgeCount": replay.graph.edges.len(),
+        }),
+    )?;
+
+    Ok(RebuildReport {
+        state_hash: replay.state_hash,
+        events_replayed: replay.events_replayed,
+        last_sequence: replay.last_sequence,
+        snapshots_rebuilt: 1,
+        indexes_rebuilt: 1,
+        nodes: replay.graph.nodes.len(),
+        edges: replay.graph.edges.len(),
+    })
+}
+
 fn snapshot_finding(code: &str, message: String) -> Finding {
     Finding::new(code, FindingSeverity::Error, message)
         .with_validator(VALIDATOR_SNAPSHOT, CORE_VALIDATOR_VERSION)
@@ -1588,6 +1648,19 @@ fn append_event(path: &Path, event: &Event) -> Result<()> {
         source,
     })?;
     writeln!(file, "{line}").map_err(|source| StoreError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn replace_dir(path: &Path) -> Result<()> {
+    if path.exists() {
+        fs::remove_dir_all(path).map_err(|source| StoreError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
+    fs::create_dir_all(path).map_err(|source| StoreError::Io {
         path: path.to_path_buf(),
         source,
     })
@@ -2296,6 +2369,50 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding.code == "snapshot.event_sequence_ahead"));
+    }
+
+    #[test]
+    fn rebuild_projections_recreates_snapshots_and_indexes_from_events() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let snapshot_path = only_snapshot_path(tmp.path());
+        let mut snapshot: Value =
+            serde_json::from_slice(&fs::read(&snapshot_path).unwrap()).unwrap();
+        snapshot["nodes"][0]["attributes"]["name"] = json!("tampered");
+        fs::write(
+            &snapshot_path,
+            serde_json::to_vec_pretty(&snapshot).unwrap(),
+        )
+        .unwrap();
+        let before = validate_snapshots(tmp.path()).unwrap();
+        assert!(before
+            .findings
+            .iter()
+            .any(|finding| finding.code == "snapshot.embedded_graph_hash_mismatch"));
+
+        let report = rebuild_projections(tmp.path()).unwrap();
+        assert_eq!(report.snapshots_rebuilt, 1);
+        assert_eq!(report.indexes_rebuilt, 1);
+        assert_eq!(report.events_replayed, 1);
+
+        let after = validate_snapshots(tmp.path()).unwrap();
+        assert_eq!(after.snapshots_checked, 1);
+        assert!(after.findings.is_empty());
+
+        let summary_path = tmp.path().join(".specgraph/indexes/graph-summary.json");
+        let summary: Value = serde_json::from_slice(&fs::read(summary_path).unwrap()).unwrap();
+        assert_eq!(summary["schemaVersion"], "specgraph.derived-index/v1");
+        assert_eq!(summary["derivedFrom"], "events/*.jsonl");
+        assert_eq!(summary["stateHash"], report.state_hash);
     }
 
     #[test]

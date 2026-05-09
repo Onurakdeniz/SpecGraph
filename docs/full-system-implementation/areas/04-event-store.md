@@ -17,6 +17,7 @@ Use append-only JSONL events as canonical graph history while snapshots and inde
 - Event and snapshot JSON now include schema-version fields with legacy defaults
 - State-hash payload schema version is defined and tested
 - Replay enforces event sequence continuity, previous-event chain continuity, and pre/post state hash continuity
+- `sg graph rebuild` / `rebuild_projections` rebuilds derived snapshots and indexes from JSONL events only
 
 ### Partly Implemented
 
@@ -28,7 +29,7 @@ Use append-only JSONL events as canonical graph history while snapshots and inde
 - Branch-specific event files or sequence ranges beyond the current canonical JSONL log
 - Signed events
 - Remote snapshot storage
-- Automatic cache invalidation
+- Automatic cache invalidation beyond the explicit rebuild command
 
 ## Implementation Parts
 
@@ -38,7 +39,7 @@ schemaVersion, EventId, previousEventId, sequence, operationId, actor, ontologyV
 
 ### 2. Commands / APIs
 
-sg graph replay --check, sg graph status, sg ci validate, future maintenance/snapshot commands
+`sg graph replay --check`, `sg graph status`, `sg graph rebuild`, `sg ci validate`, future maintenance/snapshot commands
 
 ### 3. Validation and Policy Gates
 

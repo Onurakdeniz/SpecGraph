@@ -122,7 +122,7 @@ Related areas:
 - [x] Add duplicate stable-key detection.
 - [x] Add deterministic query API with stable ordering.
 - [x] Add query cost/limit placeholders.
-- [~] Add cache/index rebuild command or documented rebuild behavior.
+- [x] Add `sg graph rebuild` command to rebuild derived snapshots/indexes from canonical JSONL events.
 
 ### Gate Checks
 

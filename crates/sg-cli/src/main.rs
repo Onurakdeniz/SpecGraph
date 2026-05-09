@@ -553,6 +553,8 @@ struct GraphArgs {
 enum GraphCommand {
     Replay(ReplayArgs),
     Status,
+    /// Rebuild derived snapshots and indexes from canonical JSONL events.
+    Rebuild,
     /// Diff current replayed graph against a snapshot JSON file.
     Diff(GraphDiffArgs),
     /// Detect semantic conflicts between base, current graph, and another snapshot.
@@ -1467,6 +1469,16 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
             for (node_type, count) in counts {
                 println!("{node_type}: {count}");
             }
+        }
+        GraphCommand::Rebuild => {
+            let report = store.rebuild_projections()?;
+            println!("snapshotsRebuilt: {}", report.snapshots_rebuilt);
+            println!("indexesRebuilt: {}", report.indexes_rebuilt);
+            println!("events: {}", report.events_replayed);
+            println!("lastSequence: {}", report.last_sequence);
+            println!("nodes: {}", report.nodes);
+            println!("edges: {}", report.edges);
+            println!("stateHash: {}", report.state_hash);
         }
         GraphCommand::Diff(args) => {
             let report = store.replay(ReplayOptions { check_hashes: true })?;
