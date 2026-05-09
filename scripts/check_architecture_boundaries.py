@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Phase 0 architecture boundary checks for SpecGraph OS.
+"""Architecture boundary checks for the modular SpecGraph OS workspace.
 
-These checks automate the trusted-core rules documented in
-`docs/architecture/boundaries.md`. They verify both trusted-core dependency direction and the modular workspace crate boundaries.
+These checks automate the dependency-direction and trust-promotion rules in
+`docs/architecture/boundaries.md`. `sg-core` is now a compatibility facade; real
+implementation must live in the modular crates and must not depend back on the
+facade.
 """
 
 from __future__ import annotations
@@ -12,77 +14,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE_MANIFEST = ROOT / "crates" / "sg-core" / "Cargo.toml"
-CORE_SRC = ROOT / "crates" / "sg-core" / "src"
-
-# Crates that represent outward layers, provider-specific adapters, networking,
-# LLMs, UI frameworks, or process/async runtimes that must not be linked by the
-# deterministic trusted core. Adapter crates may use these later, but not sg-core.
-BANNED_CORE_DEPENDENCIES = {
-    # CLI / outer SpecGraph layers
-    "sg-cli",
-    "sg-server",
-    "sg-sdk",
-    "sg-studio",
-    "sg-adapter",
-    "sg-adapters",
-    # network / server / provider SDKs
-    "reqwest",
-    "hyper",
-    "axum",
-    "warp",
-    "rocket",
-    "actix-web",
-    "tonic",
-    "tower",
-    "octocrab",
-    "gitlab",
-    "graphql_client",
-    # git/provider adapter implementations
-    "git2",
-    "ignore",
-    "notify",
-    # async/process/network runtimes that imply ambient host integration
-    "tokio",
-    "async-std",
-    # LLM / AI provider or model crates
-    "async-openai",
-    "openai",
-    "llm",
-    "candle-core",
-    "candle-nn",
-    "langchain-rust",
-    # UI / desktop / web frontend
-    "tauri",
-    "dioxus",
-    "yew",
-    "leptos",
-    "egui",
-    "slint",
-    "wry",
-}
-
-BANNED_CORE_IMPORT_PATTERNS = [
-    (re.compile(r"^\s*(?:use|extern\s+crate)\s+sg_cli\b", re.MULTILINE), "sg-cli"),
-    (re.compile(r"^\s*(?:use|extern\s+crate)\s+sg_(?:server|sdk|studio|adapter|adapters)\b", re.MULTILINE), "outer SpecGraph layer"),
-    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:reqwest|hyper|axum|warp|rocket|tonic|tower|actix_web)\b", re.MULTILINE), "network/server crate"),
-    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:octocrab|gitlab|graphql_client|git2|ignore|notify)\b", re.MULTILINE), "provider/adapter crate"),
-    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:tokio|async_std)\b", re.MULTILINE), "ambient async runtime"),
-    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:async_openai|openai|llm|candle_core|candle_nn|langchain_rust)\b", re.MULTILINE), "LLM/model crate"),
-    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:tauri|dioxus|yew|leptos|egui|slint|wry)\b", re.MULTILINE), "UI crate"),
-    (re.compile(r"\bstd::net::"), "network API"),
-    (re.compile(r"\bstd::os::(?:unix|windows)::net::"), "platform network API"),
-    (re.compile(r"\bstd::process::Command\b"), "subprocess execution"),
-]
-
-# Transitional adapter-facing modules are allowed to construct observations, but
-# must not mark their outputs accepted/trusted. Acceptance must happen via an
-# Operation Runtime receipt.
-ADAPTER_OBSERVATION_MODULES = [
-    CORE_SRC / "code_indexer.rs",
-    CORE_SRC / "adoption.rs",
-    CORE_SRC / "git.rs",
-]
+CRATES_DIR = ROOT / "crates"
+CORE_FACADE_MANIFEST = CRATES_DIR / "sg-core" / "Cargo.toml"
+CORE_FACADE_SRC = CRATES_DIR / "sg-core" / "src"
 
 REQUIRED_WORKSPACE_CRATES = {
     "sg-core",
@@ -120,15 +54,135 @@ REQUIRED_WORKSPACE_CRATES = {
     "sg-sdk",
 }
 
+# Crates that own trusted/deterministic implementation. These must not depend on
+# adapters, CLI/server/SDK/UI, network/provider SDKs, ambient runtimes, or LLMs.
+TRUSTED_IMPLEMENTATION_CRATES = {
+    "sg-model",
+    "sg-canonical",
+    "sg-store",
+    "sg-operation",
+    "sg-ontology",
+    "sg-policy",
+    "sg-validation",
+    "sg-query",
+    "sg-project",
+    "sg-module-graph",
+    "sg-architecture",
+    "sg-data",
+    "sg-spec",
+    "sg-action",
+    "sg-gitgraph",
+    "sg-codegraph",
+    "sg-testgraph",
+    "sg-impact",
+    "sg-merge",
+    "sg-issue",
+    "sg-proposal",
+}
+
+ADAPTER_OR_OBSERVATION_CRATES = {
+    "sg-adapter-api",
+    "sg-adapter-code",
+    "sg-adapter-git",
+    "sg-adapter-test",
+    "sg-adapter-ci",
+    "sg-adapter-hosting",
+    "sg-adapter-llm",
+    "sg-adoption",
+}
+
+BANNED_TRUSTED_DEPENDENCIES = ADAPTER_OR_OBSERVATION_CRATES | {
+    # outer SpecGraph layers
+    "sg-cli",
+    "sg-core",
+    "sg-server",
+    "sg-sdk",
+    "sg-studio",
+    # network / server / provider SDKs
+    "reqwest",
+    "hyper",
+    "axum",
+    "warp",
+    "rocket",
+    "actix-web",
+    "tonic",
+    "tower",
+    "octocrab",
+    "gitlab",
+    "graphql_client",
+    # git/provider adapter implementations
+    "git2",
+    "ignore",
+    "notify",
+    # async/process/network runtimes that imply ambient host integration
+    "tokio",
+    "async-std",
+    # LLM / AI provider or model crates
+    "async-openai",
+    "openai",
+    "llm",
+    "candle-core",
+    "candle-nn",
+    "langchain-rust",
+    # UI / desktop / web frontend
+    "tauri",
+    "dioxus",
+    "yew",
+    "leptos",
+    "egui",
+    "slint",
+    "wry",
+}
+
+BANNED_TRUSTED_IMPORT_PATTERNS = [
+    (re.compile(r"^\s*(?:use|extern\s+crate)\s+sg_core\b", re.MULTILINE), "sg-core compatibility facade"),
+    (re.compile(r"^\s*(?:use|extern\s+crate)\s+sg_cli\b", re.MULTILINE), "sg-cli"),
+    (re.compile(r"^\s*(?:use|extern\s+crate)\s+sg_(?:server|sdk|studio|adapter|adoption)\b", re.MULTILINE), "outer/adapter SpecGraph layer"),
+    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:reqwest|hyper|axum|warp|rocket|tonic|tower|actix_web)\b", re.MULTILINE), "network/server crate"),
+    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:octocrab|gitlab|graphql_client|git2|ignore|notify)\b", re.MULTILINE), "provider/adapter crate"),
+    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:tokio|async_std)\b", re.MULTILINE), "ambient async runtime"),
+    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:async_openai|openai|llm|candle_core|candle_nn|langchain_rust)\b", re.MULTILINE), "LLM/model crate"),
+    (re.compile(r"^\s*(?:use|extern\s+crate)\s+(?:tauri|dioxus|yew|leptos|egui|slint|wry)\b", re.MULTILINE), "UI crate"),
+    (re.compile(r"\bstd::net::"), "network API"),
+    (re.compile(r"\bstd::os::(?:unix|windows)::net::"), "platform network API"),
+    (re.compile(r"\bstd::process::Command\b"), "subprocess execution"),
+]
+
+ADAPTER_OBSERVATION_MODULES = [
+    CRATES_DIR / "sg-adapter-code" / "src" / "lib.rs",
+    CRATES_DIR / "sg-adoption" / "src" / "lib.rs",
+]
+
+EXTRACTED_MODULES_FROM_CORE = {
+    "sg-model": ["model.rs"],
+    "sg-canonical": ["canonical.rs", "hashing.rs", "stable_key.rs"],
+    "sg-operation": ["operation_abi.rs"],
+    "sg-query": ["query.rs"],
+    "sg-validation": ["validation.rs", "cross_domain.rs", "drift.rs"],
+    "sg-adapter-api": ["adapter.rs"],
+    "sg-adapter-code": ["code_indexer.rs"],
+    "sg-adoption": ["adoption.rs"],
+    "sg-project": ["project_graph.rs"],
+    "sg-module-graph": ["module_graph.rs"],
+    "sg-architecture": ["architecture_graph.rs", "architecture_pack.rs"],
+    "sg-data": ["data_graph.rs", "migration_runtime.rs"],
+    "sg-spec": ["spec.rs"],
+    "sg-gitgraph": ["git.rs", "git_graph.rs"],
+    "sg-codegraph": ["code_graph.rs"],
+    "sg-testgraph": ["test_runner.rs", "trace.rs"],
+    "sg-impact": ["impact.rs"],
+    "sg-merge": ["graph_merge.rs"],
+    "sg-issue": ["issue_graph.rs"],
+    "sg-proposal": ["proposal.rs"],
+    "sg-policy": ["policy.rs"],
+    "sg-ontology": ["ontology.rs", "ontology_pack.rs", "ontology_evolution.rs"],
+    "sg-store": ["store.rs", "identity.rs"],
+}
+
 REQUIRED_PACKAGE_BOUNDARIES = [
     ROOT / "packages" / "sdk-typescript" / "package.json",
     ROOT / "packages" / "studio" / "package.json",
 ]
-
-FOUNDATION_CRATES_EXTRACTED_FROM_CORE = {
-    "sg-model": ["model.rs"],
-    "sg-canonical": ["canonical.rs", "hashing.rs", "stable_key.rs"],
-}
 
 TRUST_PROMOTION_PATTERNS = [
     re.compile(r"json!\(\s*\"(?:Accepted|Trusted)\"\s*\)"),
@@ -153,25 +207,8 @@ def cargo_package_name(manifest: Path) -> str | None:
     return None
 
 
-def check_workspace_modules(errors: list[str]) -> None:
-    manifests = sorted((ROOT / "crates").glob("*/Cargo.toml"))
-    packages = {name for manifest in manifests if (name := cargo_package_name(manifest))}
-    missing = sorted(REQUIRED_WORKSPACE_CRATES - packages)
-    for crate in missing:
-        errors.append(
-            f"crates/{crate}/Cargo.toml: required modular workspace crate is missing. "
-            "Update docs/architecture/workspace-modules.md and the workspace split together."
-        )
-
-    for package in REQUIRED_PACKAGE_BOUNDARIES:
-        if not package.exists():
-            errors.append(
-                f"{package.relative_to(ROOT)}: required future package boundary is missing."
-            )
-
-
 def manifest_for_crate(crate_name: str) -> Path | None:
-    for manifest in sorted((ROOT / "crates").glob("*/Cargo.toml")):
+    for manifest in sorted(CRATES_DIR.glob("*/Cargo.toml")):
         if cargo_package_name(manifest) == crate_name:
             return manifest
     return None
@@ -202,54 +239,94 @@ def line_number(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
-def check_core_manifest(errors: list[str]) -> None:
-    deps = dependency_names(CORE_MANIFEST)
-    banned = sorted(deps & BANNED_CORE_DEPENDENCIES)
-    for dep in banned:
+def check_workspace_modules(errors: list[str]) -> None:
+    manifests = sorted(CRATES_DIR.glob("*/Cargo.toml"))
+    packages = {name for manifest in manifests if (name := cargo_package_name(manifest))}
+    for crate in sorted(REQUIRED_WORKSPACE_CRATES - packages):
         errors.append(
-            f"{CORE_MANIFEST.relative_to(ROOT)}: trusted core must not depend on `{dep}`; "
-            "put provider/network/UI/server/SDK integrations behind an adapter or outer-layer crate."
+            f"crates/{crate}/Cargo.toml: required modular workspace crate is missing. "
+            "Update docs/architecture/workspace-modules.md and the workspace split together."
         )
 
-    missing_foundation = sorted(set(FOUNDATION_CRATES_EXTRACTED_FROM_CORE) - deps)
-    for dep in missing_foundation:
+    for package in REQUIRED_PACKAGE_BOUNDARIES:
+        if not package.exists():
+            errors.append(f"{package.relative_to(ROOT)}: required future package boundary is missing.")
+
+
+def check_core_facade_manifest(errors: list[str]) -> None:
+    deps = dependency_names(CORE_FACADE_MANIFEST)
+    non_workspace_deps = sorted(dep for dep in deps if not dep.startswith("sg-"))
+    for dep in non_workspace_deps:
         errors.append(
-            f"{CORE_MANIFEST.relative_to(ROOT)}: compatibility core must depend on extracted "
-            f"foundation crate `{dep}` instead of re-owning its implementation."
+            f"{CORE_FACADE_MANIFEST.relative_to(ROOT)}: `sg-core` is a compatibility facade and "
+            f"must not keep implementation dependency `{dep}`. Depend on the owning sg-* crate instead."
+        )
+
+    for dep in sorted(deps & {"sg-cli", "sg-server", "sg-sdk", "sg-studio"}):
+        errors.append(
+            f"{CORE_FACADE_MANIFEST.relative_to(ROOT)}: compatibility facade must not depend on outer layer `{dep}`."
         )
 
 
-def check_extracted_foundation_crates(errors: list[str]) -> None:
-    for crate_name, former_core_modules in FOUNDATION_CRATES_EXTRACTED_FROM_CORE.items():
+def check_no_crate_depends_on_core(errors: list[str]) -> None:
+    for manifest in sorted(CRATES_DIR.glob("*/Cargo.toml")):
+        crate_name = cargo_package_name(manifest)
+        if crate_name in {None, "sg-core"}:
+            continue
+        if "sg-core" in dependency_names(manifest):
+            errors.append(
+                f"{manifest.relative_to(ROOT)}: modular crate `{crate_name}` must not depend on `sg-core`; "
+                "depend on the owning crate directly."
+            )
+
+
+def check_trusted_manifest_dependencies(errors: list[str]) -> None:
+    for crate_name in sorted(TRUSTED_IMPLEMENTATION_CRATES):
         manifest = manifest_for_crate(crate_name)
         if manifest is None:
             continue
-
-        deps = dependency_names(manifest)
-        if "sg-core" in deps:
+        banned = sorted(dependency_names(manifest) & BANNED_TRUSTED_DEPENDENCIES)
+        for dep in banned:
             errors.append(
-                f"{manifest.relative_to(ROOT)}: extracted foundation crate `{crate_name}` "
-                "must not depend on `sg-core`; dependencies must flow from sg-core to the "
-                "foundation crate during the compatibility period."
+                f"{manifest.relative_to(ROOT)}: trusted implementation crate `{crate_name}` must not depend on `{dep}`; "
+                "route adapters/outer layers through untrusted observation or API boundaries."
             )
 
-        for module in former_core_modules:
-            source = CORE_SRC / module
-            if source.exists():
-                errors.append(
-                    f"{source.relative_to(ROOT)}: `{crate_name}` now owns this implementation; "
-                    "keep sg-core as a compatibility facade instead of duplicating the module."
-                )
+
+def check_trusted_source_imports(errors: list[str]) -> None:
+    for crate_name in sorted(TRUSTED_IMPLEMENTATION_CRATES):
+        crate_src = CRATES_DIR / crate_name / "src"
+        if not crate_src.exists():
+            continue
+        for path in sorted(crate_src.rglob("*.rs")):
+            text = path.read_text()
+            for pattern, reason in BANNED_TRUSTED_IMPORT_PATTERNS:
+                for match in pattern.finditer(text):
+                    errors.append(
+                        f"{path.relative_to(ROOT)}:{line_number(text, match.start())}: "
+                        f"trusted implementation imports {reason}; route that integration through an adapter/outer layer."
+                    )
 
 
-def check_core_source_imports(errors: list[str]) -> None:
-    for path in sorted(CORE_SRC.rglob("*.rs")):
-        text = path.read_text()
-        for pattern, reason in BANNED_CORE_IMPORT_PATTERNS:
-            for match in pattern.finditer(text):
+def check_extracted_core_modules_are_facades(errors: list[str]) -> None:
+    for crate_name, former_modules in EXTRACTED_MODULES_FROM_CORE.items():
+        manifest = manifest_for_crate(crate_name)
+        if manifest is None:
+            continue
+        if "sg-core" in dependency_names(manifest):
+            errors.append(
+                f"{manifest.relative_to(ROOT)}: extracted crate `{crate_name}` must not depend on `sg-core`."
+            )
+
+        for module in former_modules:
+            source = CORE_FACADE_SRC / module
+            if not source.exists():
+                continue
+            text = source.read_text()
+            if "Compatibility re-export" not in text or "pub use" not in text:
                 errors.append(
-                    f"{path.relative_to(ROOT)}:{line_number(text, match.start())}: "
-                    f"trusted core imports {reason}; route that integration through an adapter/outer layer."
+                    f"{source.relative_to(ROOT)}: implementation moved to `{crate_name}`; "
+                    "the sg-core module may only be a compatibility re-export."
                 )
 
 
@@ -270,9 +347,11 @@ def check_adapter_observations_stay_untrusted(errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     check_workspace_modules(errors)
-    check_core_manifest(errors)
-    check_extracted_foundation_crates(errors)
-    check_core_source_imports(errors)
+    check_core_facade_manifest(errors)
+    check_no_crate_depends_on_core(errors)
+    check_trusted_manifest_dependencies(errors)
+    check_trusted_source_imports(errors)
+    check_extracted_core_modules_are_facades(errors)
     check_adapter_observations_stay_untrusted(errors)
 
     if errors:

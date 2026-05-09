@@ -19,8 +19,8 @@ This directory breaks the full SpecGraph OS system into one Markdown file per **
 | Status | Count |
 |---|---:|
 | ✅ Fully implemented | 0 |
-| 🟡 Partly implemented | 48 |
-| ⬜ Not implemented | 4 |
+| 🟡 Partly implemented | 49 |
+| ⬜ Not implemented | 3 |
 | **Total** | **52** |
 
 ## Source Markdown Read
@@ -91,7 +91,7 @@ Use the full-system phase-gated roadmap in [phase-gated-implementation-plan.md](
 | 45 | [Security Boundaries](areas/45-security-boundaries.md) | 🟡 Partly implemented |
 | 46 | [Adapter Layer](areas/46-adapter-layer.md) | 🟡 Partly implemented |
 | 47 | [Studio UI](areas/47-studio-ui.md) | ⬜ Not implemented |
-| 48 | [API Server and SDK](areas/48-api-server-and-sdk.md) | ⬜ Not implemented |
+| 48 | [API Server and SDK](areas/48-api-server-and-sdk.md) | 🟡 Partly implemented |
 | 49 | [Examples and Proof](areas/49-examples-and-proof.md) | 🟡 Partly implemented |
 | 50 | [Documentation Set](areas/50-documentation-set.md) | 🟡 Partly implemented |
 | 51 | [Performance and Scalability](areas/51-performance-and-scalability.md) | 🟡 Partly implemented |

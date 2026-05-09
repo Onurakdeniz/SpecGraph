@@ -331,7 +331,10 @@ Related areas:
 - [x] Extract `sg-model` implementation from `sg-core`.
 - [x] Extract `sg-canonical` implementation from `sg-core`.
 - [x] Enforce extracted foundation crates do not depend back on `sg-core`.
-- [ ] Extract remaining runtime/domain boundary crate implementations from `sg-core`.
+- [x] Extract remaining runtime/domain/adapter boundary crate implementations from `sg-core`.
+- [x] Convert `sg-core` into compatibility re-exports only.
+- [x] Make CLI/server/SDK depend on owning crates directly instead of `sg-core`.
+- [x] Enforce no modular crate depends back on `sg-core`.
 
 ### Gate Checks
 
@@ -345,6 +348,7 @@ Related areas:
 - [x] Reproducible bug fix cannot close without required regression evidence.
 - [x] Ontology change cannot release without tests and migration plan.
 - [x] Foundation crates own their implementation and `sg-core` only re-exports compatibility modules.
+- [x] Runtime/domain/adapter crates own their implementation and pass workspace validation.
 
 ---
 

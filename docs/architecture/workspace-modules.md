@@ -7,8 +7,8 @@ This document records the modular workspace split introduced before Phase 6 so p
 The split is intentionally staged:
 
 1. **Boundary crates.** Each full-system area has an explicit crate/package boundary so dependency direction, ownership, Cargo build coverage, and extraction points are visible.
-2. **Foundation extraction.** Base crates that other areas depend on must own real implementation first. `sg-model` now owns the graph/event/snapshot/finding model, and `sg-canonical` now owns deterministic JSON, state hashing, and stable-key validation. `sg-core` depends inward on these crates and re-exports compatibility modules for existing callers.
-3. **Runtime/domain extraction.** Store, operation, ontology, policy, validation, query, domain graph, adapter, server, SDK, and Studio code moves outward from `sg-core` only after its dependencies have been extracted. During this period, `sg-core` remains a compatibility facade, not the long-term owner.
+2. **Implementation extraction.** Rust implementation has moved out of `sg-core` into owning crates. `sg-core` is now a compatibility facade made of re-export modules for existing callers.
+3. **Outer surfaces.** CLI/server/SDK crates depend on the owning crates directly. Future TypeScript SDK and Studio packages must use generated API/Operation contracts rather than `.specgraph` file mutation.
 
 ## Rust crates
 
@@ -16,21 +16,21 @@ The split is intentionally staged:
 |---|---|---|
 | `sg-model` | Base model | Owns graph, deltas, events, snapshots, findings, operation request/receipt types. |
 | `sg-canonical` | Deterministic identity | Owns canonical JSON, state hashing, and stable-key registry APIs. Depends on `sg-model`, never on `sg-core`. |
-| `sg-store` | Runtime storage | Event replay, snapshots, rebuild, store facade. |
+| `sg-store` | Runtime storage | Owns event replay, snapshots, rebuild, actor identity helpers, ActionGraph generation, and store operations. |
 | `sg-operation` | Operation Runtime ABI | Operation definitions and pre/post/request validation. |
 | `sg-ontology` | Ontology system | Built-in ontology, packs, migrations, ontology change proposals. |
 | `sg-policy` | Policy engine | Policy manifests, decisions, approvals/waiver policy evaluation. |
-| `sg-validation` | Validation runtime | Validator registry, trace/drift/test/cross-domain validation entrypoints. |
+| `sg-validation` | Validation runtime | Owns validator registry plus cross-domain and drift validation entrypoints. |
 | `sg-query` | Query layer | Deterministic graph query APIs and limits. |
 | `sg-project` | ProjectGraph | Project profile facts. |
 | `sg-module-graph` | ModuleGraphs | Modules, layers, packages, capabilities, interfaces. |
 | `sg-architecture` | ArchitectureGraph | Architecture graph, ports/adapters, packs, dependency validators. |
 | `sg-data` | DataGraph / migrations | Tables, contracts, migration runtime evidence. |
 | `sg-spec` | SpecGraph | Rich spec projection and spec state/status operations. |
-| `sg-action` | ActionGraph | ActionGraph generation/listing and action lifecycle types. |
+| `sg-action` | ActionGraph | ActionGraph command boundary backed by `sg-store`. |
 | `sg-gitgraph` | GitGraph | Git facts, commit trailers, CommitPlan validation. |
 | `sg-codegraph` | CodeGraph | Files, symbols, imports, routes, ownership and behavior/risk links. |
-| `sg-testgraph` | TestGraph | Test mapping and TestRun/TestResult evidence. |
+| `sg-testgraph` | TestGraph | Owns test mapping, trace-link validation, and TestRun/TestResult evidence. |
 | `sg-impact` | Impact / revalidation | Impact traversal, revalidation queue, replan triggers. |
 | `sg-merge` | Graph merge/rebase | Diff, conflict, merge/rebase dry-run reports. |
 | `sg-adoption` | Existing repo adoption | Adoption scanning and deterministic adoption reports. |
@@ -46,7 +46,7 @@ The split is intentionally staged:
 | `sg-server` | Future API server | Server boundary placeholder that depends inward on runtime/query APIs. |
 | `sg-sdk` | Rust SDK schema facade | Operation/schema facade for generated SDK work. |
 | `sg-cli` | CLI | Human/JSON command surface and local orchestration only. |
-| `sg-core` | Compatibility facade | Re-export surface plus remaining trusted implementation while modules are extracted. It must depend inward on extracted foundation crates rather than duplicating their code. |
+| `sg-core` | Compatibility facade | Backward-compatible Rust re-export surface only. It must not own implementation logic or non-`sg-*` implementation dependencies. |
 
 ## TypeScript/UI package boundaries
 
@@ -57,8 +57,7 @@ The split is intentionally staged:
 
 ## Dependency direction
 
-- `sg-core` must not depend on CLI, server, SDK, Studio, provider, adapter implementation, network, UI, or LLM crates.
-- Boundary crates may depend inward on `sg-core` only until their implementation is physically extracted.
-- Extracted foundation crates must not depend on `sg-core`; `sg-core` depends on them and re-exports their public APIs for compatibility.
-- Future extraction should continue in dependency order: `sg-store`, `sg-operation`, `sg-ontology`, `sg-policy`, `sg-validation`, `sg-query`, then domain/adapters/server/SDK/Studio.
+- No modular crate may depend on `sg-core`; depend on the crate that owns the API.
+- Trusted implementation crates must not depend on adapters, CLI/server/SDK/Studio, provider/network/UI/LLM crates, or ambient runtimes.
+- `sg-core` may depend on owning `sg-*` crates only to preserve compatibility re-exports.
 - Adapter crates may observe/propose, but only Operation Runtime can accept trusted facts.

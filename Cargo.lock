@@ -648,7 +648,21 @@ dependencies = [
  "clap",
  "serde_json",
  "serde_yaml",
- "sg-core",
+ "sg-adapter-code",
+ "sg-adoption",
+ "sg-gitgraph",
+ "sg-impact",
+ "sg-merge",
+ "sg-model",
+ "sg-ontology",
+ "sg-operation",
+ "sg-policy",
+ "sg-proposal",
+ "sg-query",
+ "sg-spec",
+ "sg-store",
+ "sg-testgraph",
+ "sg-validation",
 ]
 
 [[package]]
@@ -665,11 +679,6 @@ dependencies = [
 name = "sg-core"
 version = "0.1.0"
 dependencies = [
- "globset",
- "hex",
- "serde",
- "serde_json",
- "serde_yaml",
  "sg-adapter-api",
  "sg-adapter-code",
  "sg-adoption",
@@ -693,11 +702,6 @@ dependencies = [
  "sg-store",
  "sg-testgraph",
  "sg-validation",
- "sha2",
- "tempfile",
- "thiserror",
- "time",
- "uuid",
 ]
 
 [[package]]
