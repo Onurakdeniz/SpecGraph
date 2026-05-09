@@ -2,7 +2,7 @@
 
 **System area:** Security Boundaries  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** code audit plus Phase 0 architecture checks, pack trust metadata, and Phase 2.9 adapter capability/trust implementation slice.
 
 ## Purpose
 
@@ -22,11 +22,12 @@ Protect trusted core from malicious LLMs, hook bypass, event tampering, secret l
 - Hashing, policies, locks, proposal states are foundations
 - Dependency and trust-promotion checks are now automated for the current compact Rust workspace
 - Event replay now rejects sequence gaps, previous-event chain breaks, and pre/post hash tampering
-- Ontology pack source/signature metadata is validated and locked; event signatures, capability enforcement, and sandboxing remain
+- Ontology pack source/signature metadata is validated and locked; event signatures and sandboxing remain
+- Adapter capability descriptors and adapter-output trust validation prevent direct `Accepted`/`Trusted` promotion by observation adapters
 
 ### Not Implemented / Remaining
 
-- Capability model
+- Capability model beyond current adapter descriptor foundation
 - Cryptographic signed events/packs verification beyond pack metadata hardening
 - Secret prevention at tool level
 - Security review workflows
@@ -52,11 +53,18 @@ CI repeats checks, event hash/previous-event chain validation, architecture boun
 - Remote and registry pack sources must be HTTPS and must include non-`unsigned-dev` signature metadata before install can proceed.
 - Lockfiles retain source and signature metadata so later policy, registry, and cryptographic verification work has an auditable trusted input.
 
+
+### Adapter Trust Boundary
+
+- Adapter descriptors declare explicit capabilities such as filesystem read, code indexing, and observation emission.
+- `validate_adapter_delta` rejects adapter-created nodes that attempt to mark themselves `Accepted` or `Trusted`.
+- Current code-index and adoption adapters stamp observations with `trustState: Observed`, `sourceTrust: Observation`, and `observedBy` provenance.
+
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep trusted-core dependency/import deny lists current as new security-sensitive layers or providers are introduced.
-- Implement or finish: Capability model.
+- Implement or finish: Capability model beyond current adapter descriptor foundation.
 - Implement or finish: Cryptographic signed events/packs verification beyond pack metadata hardening.
 - Implement or finish: Secret prevention at tool level.
 - Implement or finish: Security review workflows.

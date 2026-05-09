@@ -11,6 +11,7 @@ pub const VALIDATOR_OPERATION_ABI: &str = "validator.operation_abi";
 pub const VALIDATOR_POLICY: &str = "validator.policy";
 pub const VALIDATOR_SNAPSHOT: &str = "validator.snapshot";
 pub const VALIDATOR_TRACE_LINKS: &str = "validator.trace_links";
+pub const VALIDATOR_ADAPTER_TRUST: &str = "validator.adapter_trust";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -89,6 +90,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Test Mapping",
             description: "Validates TestCase to AcceptanceCriterion traceability links.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_ADAPTER_TRUST,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Adapter Layer",
+            description: "Validates adapter capabilities, provenance, and observations-only trust boundaries.",
         },
         ValidatorDefinition {
             id: VALIDATOR_SNAPSHOT,
