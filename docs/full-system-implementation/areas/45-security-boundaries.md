@@ -14,10 +14,13 @@ Protect trusted core from malicious LLMs, hook bypass, event tampering, secret l
 
 - Threat model and security controls are documented
 - Policy examples include secret/production denial
+- Phase 0 architecture boundary checks now reject trusted-core dependencies/imports for outer layers, network/provider SDKs, LLM/model crates, UI frameworks, subprocess execution, and network APIs
+- The same check prevents current adapter-facing observation modules from promoting output directly to `Accepted` or `Trusted`
 
 ### Partly Implemented
 
 - Hashing, policies, locks, proposal states are foundations
+- Dependency and trust-promotion checks are now automated for the current compact Rust workspace
 - Signatures/capabilities/sandboxing remain
 
 ### Not Implemented / Remaining
@@ -35,15 +38,16 @@ Risk, Mitigation, Approval, Waiver, PolicyDecision, Signature, pack trust metada
 
 ### 2. Commands / APIs
 
-Policy checks now; future signature/trust/security report commands
+Policy checks and `python3 scripts/check_architecture_boundaries.py` now; future signature/trust/security report commands
 
 ### 3. Validation and Policy Gates
 
-CI repeats checks, hash chain, deny secrets/production by default, migrations require approval, packs are locked/signed/sandboxed
+CI repeats checks, hash chain, architecture boundary checks, deny secrets/production by default, migrations require approval, packs are locked/signed/sandboxed
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
+- Keep trusted-core dependency/import deny lists current as new security-sensitive layers or providers are introduced.
 - Implement or finish: Capability model.
 - Implement or finish: Signed events/packs.
 - Implement or finish: Secret prevention at tool level.
@@ -68,4 +72,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-
