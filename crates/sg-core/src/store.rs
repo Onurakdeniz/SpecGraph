@@ -1,5 +1,6 @@
 use crate::git::{parse_commit_trailers, validate_commit_binding, CommitValidationInput};
 use crate::hashing::state_hash;
+use crate::identity::{actor_permissions, actor_roles, infer_actor_kind, resolve_actor_identity};
 use crate::model::{
     Edge, Event, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt,
     OperationRequest, Snapshot, EVENT_SCHEMA_VERSION, OPERATION_RECEIPT_SCHEMA_VERSION,
@@ -1348,7 +1349,10 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         ));
     }
 
-    let policy_report = evaluate_policies(&graph, &policy_check_input(&request, &options.delta));
+    let policy_report = evaluate_policies(
+        &graph,
+        &policy_check_input(&graph, &request, &options.delta),
+    );
     let blocking_policy_count = policy_report
         .decisions
         .iter()
@@ -1961,7 +1965,12 @@ fn active_ontology(root: &Path) -> Result<MvpOntology> {
     ))
 }
 
-fn policy_check_input(request: &OperationRequest, delta: &GraphDelta) -> PolicyCheckInput {
+fn policy_check_input(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> PolicyCheckInput {
+    let identity = resolve_actor_identity(graph, &request.actor);
     PolicyCheckInput {
         operation: request.operation.clone(),
         actor: Some(request.actor.clone()),
@@ -1970,7 +1979,10 @@ fn policy_check_input(request: &OperationRequest, delta: &GraphDelta) -> PolicyC
         } else {
             changed_files_for_policy(request, delta)
         },
-        actor_roles: Vec::new(),
+        actor_roles: identity
+            .as_ref()
+            .map(|identity| identity.roles.clone())
+            .unwrap_or_default(),
         approvals: Vec::new(),
         waivers: Vec::new(),
     }
@@ -2348,6 +2360,7 @@ fn actor_node(options: &UpsertActorOptions) -> Node {
         .subject
         .clone()
         .unwrap_or_else(|| options.actor_id.clone());
+    let kind = infer_actor_kind(&options.actor_id, Some(&provider));
 
     Node {
         id: node_id("actor", &options.actor_id),
@@ -2358,6 +2371,7 @@ fn actor_node(options: &UpsertActorOptions) -> Node {
             ("displayName".to_string(), json!(display_name)),
             ("provider".to_string(), json!(provider)),
             ("subject".to_string(), json!(subject)),
+            ("kind".to_string(), json!(kind)),
         ]),
     }
 }
@@ -2535,8 +2549,8 @@ fn actor_has_approval_authority(
     scope: Option<&str>,
     action: ApprovalAuthorityAction,
 ) -> bool {
-    let roles = actor_role_names(graph, actor_node_id);
-    let permissions = actor_permission_names(graph, actor_node_id);
+    let roles = actor_roles(graph, actor_node_id);
+    let permissions = actor_permissions(graph, actor_node_id);
     let is_data_migration = policy == Some("policy.data.migration_approval")
         || scope.is_some_and(|scope| {
             scope.starts_with("migrations/") || scope.contains("/migrations/")
@@ -2575,46 +2589,6 @@ fn actor_has_approval_authority(
                 })
         }
     }
-}
-
-fn actor_role_names(graph: &Graph, actor_node_id: &str) -> Vec<String> {
-    graph
-        .edges
-        .values()
-        .filter(|edge| edge.edge_type == "HAS_ROLE" && edge.from == actor_node_id)
-        .filter_map(|edge| graph.nodes.get(&edge.to))
-        .filter(|node| node.node_type == "Role")
-        .filter_map(named_graph_fact)
-        .collect()
-}
-
-fn actor_permission_names(graph: &Graph, actor_node_id: &str) -> Vec<String> {
-    graph
-        .edges
-        .values()
-        .filter(|edge| edge.edge_type == "HAS_ROLE" && edge.from == actor_node_id)
-        .filter_map(|role_edge| graph.nodes.get(&role_edge.to))
-        .flat_map(|role_node| {
-            graph.edges.values().filter(move |edge| {
-                edge.edge_type == "GRANTS_PERMISSION" && edge.from == role_node.id
-            })
-        })
-        .filter_map(|permission_edge| graph.nodes.get(&permission_edge.to))
-        .filter(|node| node.node_type == "Permission")
-        .filter_map(named_graph_fact)
-        .collect()
-}
-
-fn named_graph_fact(node: &Node) -> Option<String> {
-    node.attributes
-        .get("name")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .or_else(|| {
-            node.stable_key
-                .split_once(':')
-                .map(|(_, identifier)| identifier.to_string())
-        })
 }
 
 fn edge(from: &str, edge_type: &str, to: &str) -> Edge {
@@ -3588,6 +3562,9 @@ acceptanceCriteria:
         assert_eq!(actor.node_type, "Actor");
         assert_eq!(actor.stable_key, "actor:local:developer");
         assert_eq!(actor.attributes["displayName"], json!("Developer"));
+        assert_eq!(actor.attributes["kind"], json!("Human"));
+        let identity = resolve_actor_identity(&replay.graph, "local:developer").unwrap();
+        assert_eq!(identity.kind, crate::identity::ActorKind::Human);
     }
 
     #[test]
