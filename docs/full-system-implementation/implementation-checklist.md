@@ -77,6 +77,7 @@ Related areas:
 - [46. Adapter Layer](areas/46-adapter-layer.md)
 - [50. Documentation Set](areas/50-documentation-set.md)
 - [51. Performance and Scalability](areas/51-performance-and-scalability.md)
+- [52. Release and Distribution](areas/52-release-and-distribution.md)
 
 ### Implementation Checklist
 
@@ -88,6 +89,7 @@ Related areas:
 - [x] Define CLI UX contract with planned command inventory, output modes, and exit codes in [`docs/cli/ux-contract.md`](../cli/ux-contract.md).
 - [x] Add docs source-of-truth check for canonical plan, derived trackers, area files, and reference docs.
 - [x] Add benchmark placeholders for replay, query, validation, indexing, adoption, and CI performance in [`tests/performance/budget-placeholders.json`](../../tests/performance/budget-placeholders.json).
+- [x] Define release/distribution requirements for binaries, GitHub Action, packs, docs, examples, SDK/server/Studio futures, and evidence artifacts in [`docs/release/distribution.md`](../release/distribution.md).
 - [~] Keep `docs/full-system-implementation/index.md` updated when areas change status.
 
 ### Gate Checks
