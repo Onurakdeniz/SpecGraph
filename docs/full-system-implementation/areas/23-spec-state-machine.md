@@ -16,6 +16,10 @@ Enforce lifecycle from Draft through Validated, Planned, BranchBound, Implementi
 
 ### Partly Implemented
 
+- `Spec.Transition` operation updates Spec state through the Operation Runtime.
+- `sg spec status` reports current state, next states, and evidence blockers.
+- Implementing/Review/Released transitions are evidence-gated by branch binding, ActionGraph, commits, and validation evidence.
+
 - Validators enforce pieces such as branch/action requirements
 - Full transition enforcement is not implemented
 

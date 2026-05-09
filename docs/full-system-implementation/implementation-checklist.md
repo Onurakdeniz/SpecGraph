@@ -210,8 +210,8 @@ Related areas:
 - [x] Expand spec projection schema for risks, mitigations, expected/forbidden behaviors, use cases, endpoints, entities, events, and data changes.
 - [x] Add spec import dry-run showing intended graph delta.
 - [ ] Add orphan structured concept validation.
-- [ ] Enforce full Spec state machine.
-- [ ] Add `sg spec status` with blockers and next operations.
+- [x] Enforce full Spec state machine.
+- [x] Add `sg spec status` with blockers and next operations.
 - [ ] Add ActionNode state machine.
 - [ ] Add `sg action start`.
 - [ ] Add `sg action complete`.
@@ -227,8 +227,8 @@ Related areas:
 
 - [x] Spec without requirement fails.
 - [x] Spec without acceptance criterion fails.
-- [ ] Spec cannot enter Implementing without branch binding.
-- [ ] Spec cannot enter Implementing without ActionGraph.
+- [x] Spec cannot enter Implementing without branch binding.
+- [x] Spec cannot enter Implementing without ActionGraph.
 - [ ] Action cannot complete without required validation evidence.
 - [x] Commit without `Spec`, `ActionGroup`, and `CommitPlan` trailers fails.
 - [x] Commit referencing nonexistent spec/action/plan fails.
