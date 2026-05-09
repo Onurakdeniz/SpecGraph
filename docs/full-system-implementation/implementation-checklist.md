@@ -268,7 +268,7 @@ Related areas:
 - [ ] Add `TestRun` evidence links to `ValidationRun`.
 - [ ] Add route/API drift detector.
 - [ ] Add migration/DataGraph drift detector.
-- [ ] Add first complete architecture pack validator.
+- [x] Add first complete architecture pack validator.
 - [ ] Add table ownership model.
 - [ ] Add migration rollback strategy model.
 - [ ] Add migration approval/test evidence validator.
@@ -281,7 +281,7 @@ Related areas:
 - [ ] Linked required test failing blocks review/merge.
 - [ ] Spec endpoint without observed/accepted route creates drift finding.
 - [ ] Migration without owner/rollback/approval/test evidence fails according to policy.
-- [ ] Architecture pack detects at least one invalid dependency in a fixture.
+- [x] Architecture pack detects at least one invalid dependency in a fixture.
 
 ---
 

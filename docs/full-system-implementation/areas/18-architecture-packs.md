@@ -17,6 +17,9 @@ Provide reusable packs for project styles with skeletons, dependencies, policies
 
 ### Partly Implemented
 
+- Architecture pack rule model now supports forbidden layer dependency rules.
+- `validate_architecture_graph_with_pack` runs pack rules against graph fixtures/accepted facts and emits architecture findings.
+
 - Pack manifests can be validated and installed
 - Complete pack catalog is not implemented
 
