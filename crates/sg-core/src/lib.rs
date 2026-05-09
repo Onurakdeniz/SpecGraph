@@ -114,8 +114,9 @@ pub use data_graph::{
 };
 pub use drift::{detect_drift, DriftReport};
 pub use graph_merge::{
-    detect_merge_conflicts, detect_semantic_conflicts, diff_graphs, GraphDiff, MergeConflict,
-    SemanticConflictDimension, SemanticConflictReport,
+    detect_merge_conflicts, detect_semantic_conflicts, diff_graphs, dry_run_graph_merge,
+    dry_run_graph_rebase, GraphDiff, GraphIntegrationDryRun, GraphIntegrationMode,
+    GraphIntegrationStatus, MergeConflict, SemanticConflictDimension, SemanticConflictReport,
 };
 pub use impact::{analyze_impact, ImpactAnalysis};
 pub use ontology_pack::{
