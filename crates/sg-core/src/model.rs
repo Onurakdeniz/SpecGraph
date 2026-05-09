@@ -9,7 +9,7 @@ pub type NodeType = String;
 pub type EdgeType = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Node {
     pub id: NodeId,
     pub stable_key: StableKey,
@@ -19,7 +19,7 @@ pub struct Node {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Edge {
     pub id: EdgeId,
     pub stable_key: StableKey,
@@ -31,7 +31,7 @@ pub struct Edge {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GraphDelta {
     #[serde(default)]
     pub create_nodes: Vec<Node>,
@@ -48,7 +48,7 @@ pub struct GraphDelta {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Graph {
     #[serde(default)]
     pub nodes: BTreeMap<NodeId, Node>,
@@ -85,7 +85,7 @@ impl Graph {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Event {
     pub event_id: String,
     pub sequence: u64,
@@ -103,7 +103,7 @@ pub struct Event {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OperationRequest {
     pub operation_id: String,
     pub operation: String,
@@ -112,25 +112,41 @@ pub struct OperationRequest {
     pub ontology_version: String,
     pub graph_branch: String,
     #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
     pub input: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OperationReceipt {
     pub operation_id: String,
     pub operation: String,
     pub accepted: bool,
+    #[serde(default)]
+    pub dry_run: bool,
     pub pre_state_hash: String,
     pub post_state_hash: String,
     #[serde(default)]
     pub event_ids: Vec<String>,
     #[serde(default)]
+    pub created_nodes: Vec<NodeId>,
+    #[serde(default)]
+    pub updated_nodes: Vec<NodeId>,
+    #[serde(default)]
+    pub deleted_nodes: Vec<NodeId>,
+    #[serde(default)]
+    pub created_edges: Vec<EdgeId>,
+    #[serde(default)]
+    pub updated_edges: Vec<EdgeId>,
+    #[serde(default)]
+    pub deleted_edges: Vec<EdgeId>,
+    #[serde(default)]
     pub findings: Vec<Finding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Snapshot {
     pub snapshot_id: String,
     pub graph_branch: String,
@@ -142,7 +158,7 @@ pub struct Snapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Finding {
     pub code: String,
     pub severity: FindingSeverity,

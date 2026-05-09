@@ -6,7 +6,9 @@ use crate::model::{
 };
 use crate::ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
 use crate::ontology_pack::{load_pack, validate_pack, OntologyPackManifest};
-use crate::operation_abi::validate_operation_request;
+use crate::operation_abi::{
+    validate_operation_postconditions, validate_operation_preconditions, validate_operation_request,
+};
 use crate::spec::SpecProjection;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -111,6 +113,7 @@ pub struct AppendOperationOptions {
     pub graph_branch: String,
     pub input: Value,
     pub delta: GraphDelta,
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +156,12 @@ pub struct ActionGraphSummary {
 #[derive(Debug, Clone)]
 pub struct SpecValidationReport {
     pub state_hash: String,
+    pub findings: Vec<Finding>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SnapshotValidationReport {
+    pub snapshots_checked: usize,
     pub findings: Vec<Finding>,
 }
 
@@ -233,6 +242,10 @@ impl SpecGraphStore {
     pub fn validate_specs(&self) -> Result<SpecValidationReport> {
         validate_specs(self.root())
     }
+
+    pub fn validate_snapshots(&self) -> Result<SnapshotValidationReport> {
+        validate_snapshots(self.root())
+    }
 }
 
 pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceipt> {
@@ -303,6 +316,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         timestamp: timestamp.clone(),
         ontology_version: CORE_ONTOLOGY_VERSION.to_string(),
         graph_branch: options.graph_branch.clone(),
+        dry_run: false,
         input: json!({
             "projectName": options.project_name,
         }),
@@ -317,6 +331,28 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         return Err(StoreError::OperationValidationFailed(operation_error_count));
     }
 
+    let precondition_findings = validate_operation_preconditions(&empty, &delta);
+    let precondition_error_count = precondition_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if precondition_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(
+            precondition_error_count,
+        ));
+    }
+
+    let postcondition_findings = validate_operation_postconditions(&graph, &delta);
+    let postcondition_error_count = postcondition_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if postcondition_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(
+            postcondition_error_count,
+        ));
+    }
+
     let event = Event {
         event_id: event_id.clone(),
         sequence: 1,
@@ -328,7 +364,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         graph_branch: request.graph_branch.clone(),
         pre_state_hash: pre_state_hash.clone(),
         post_state_hash: post_state_hash.clone(),
-        delta,
+        delta: delta.clone(),
         signatures: vec![],
     };
 
@@ -338,9 +374,32 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         operation_id,
         operation: request.operation,
         accepted: true,
+        dry_run: false,
         pre_state_hash,
         post_state_hash: post_state_hash.clone(),
         event_ids: vec![event_id],
+        created_nodes: delta
+            .create_nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect(),
+        updated_nodes: delta
+            .update_nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect(),
+        deleted_nodes: delta.delete_nodes.clone(),
+        created_edges: delta
+            .create_edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect(),
+        updated_edges: delta
+            .update_edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect(),
+        deleted_edges: delta.delete_edges.clone(),
         findings: vec![],
     };
     write_json(
@@ -439,6 +498,7 @@ pub fn install_ontology_pack(
                 "path": installed_path.display().to_string(),
             }),
             delta,
+            dry_run: false,
         },
     )
 }
@@ -507,6 +567,7 @@ pub fn import_spec_file(
                 "spec": spec_id,
             }),
             delta,
+            dry_run: false,
         },
     )
 }
@@ -528,6 +589,7 @@ pub fn generate_action_graph(
             graph_branch: options.graph_branch,
             input: json!({"spec": options.spec}),
             delta,
+            dry_run: false,
         },
     )
 }
@@ -654,6 +716,7 @@ pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<Op
                 "commit": options.input.commit,
                 "changedFiles": options.input.changed_files,
             }),
+            dry_run: false,
             delta: GraphDelta {
                 create_nodes,
                 create_edges,
@@ -725,6 +788,7 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
                 "branch": options.branch,
             }),
             delta,
+            dry_run: false,
         },
     )
 }
@@ -759,6 +823,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         timestamp: timestamp.clone(),
         ontology_version: CORE_ONTOLOGY_VERSION.to_string(),
         graph_branch: options.graph_branch,
+        dry_run: options.dry_run,
         input: options.input,
     };
 
@@ -771,7 +836,29 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         return Err(StoreError::OperationValidationFailed(operation_error_count));
     }
 
+    let precondition_findings = validate_operation_preconditions(&graph, &options.delta);
+    let precondition_error_count = precondition_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if precondition_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(
+            precondition_error_count,
+        ));
+    }
+
     graph.apply_delta(&options.delta);
+
+    let postcondition_findings = validate_operation_postconditions(&graph, &options.delta);
+    let postcondition_error_count = postcondition_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if postcondition_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(
+            postcondition_error_count,
+        ));
+    }
 
     let integrity_findings = active_ontology(root)?.validate_integrity(&graph);
     let error_count = integrity_findings
@@ -783,6 +870,47 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
     }
 
     let post_state_hash = state_hash(&graph, CORE_ONTOLOGY_VERSION);
+
+    let mut receipt = OperationReceipt {
+        operation_id: operation_id.clone(),
+        operation: request.operation.clone(),
+        accepted: true,
+        dry_run: request.dry_run,
+        pre_state_hash: pre_state_hash.clone(),
+        post_state_hash: post_state_hash.clone(),
+        event_ids: vec![],
+        created_nodes: options
+            .delta
+            .create_nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect(),
+        updated_nodes: options
+            .delta
+            .update_nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect(),
+        deleted_nodes: options.delta.delete_nodes.clone(),
+        created_edges: options
+            .delta
+            .create_edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect(),
+        updated_edges: options
+            .delta
+            .update_edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect(),
+        deleted_edges: options.delta.delete_edges.clone(),
+        findings: vec![],
+    };
+
+    if request.dry_run {
+        return Ok(receipt);
+    }
 
     let event = Event {
         event_id: event_id.clone(),
@@ -800,16 +928,8 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
     };
 
     append_event(&sg_dir.join("events").join("00000001.jsonl"), &event)?;
+    receipt.event_ids.push(event_id);
 
-    let receipt = OperationReceipt {
-        operation_id,
-        operation: request.operation,
-        accepted: true,
-        pre_state_hash,
-        post_state_hash: post_state_hash.clone(),
-        event_ids: vec![event_id],
-        findings: vec![],
-    };
     write_json(
         &sg_dir
             .join("operations")
@@ -829,6 +949,14 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
 }
 
 pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport> {
+    replay_events_until(root, options, None)
+}
+
+fn replay_events_until(
+    root: &Path,
+    options: ReplayOptions,
+    max_sequence: Option<u64>,
+) -> Result<ReplayReport> {
     let sg_dir = root.join(".specgraph");
     if !sg_dir.exists() {
         return Err(StoreError::NotFound(sg_dir));
@@ -855,7 +983,7 @@ pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport
     let mut expected_sequence = 1;
     let mut events_replayed = 0;
 
-    for file in files {
+    'files: for file in files {
         let reader = BufReader::new(File::open(&file).map_err(|source| StoreError::Io {
             path: file.clone(),
             source,
@@ -874,6 +1002,10 @@ pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport
                 path: file.clone(),
                 source,
             })?;
+
+            if max_sequence.is_some_and(|max| event.sequence > max) {
+                break 'files;
+            }
 
             if event.sequence != expected_sequence {
                 return Err(StoreError::SequenceMismatch {
@@ -928,6 +1060,127 @@ pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport
         state_hash,
         events_replayed,
         last_sequence: expected_sequence.saturating_sub(1),
+    })
+}
+
+pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
+    let sg_dir = root.join(".specgraph");
+    if !sg_dir.exists() {
+        return Err(StoreError::NotFound(sg_dir));
+    }
+
+    let full_replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let snapshot_dir = sg_dir.join("snapshots");
+    if !snapshot_dir.exists() {
+        return Ok(SnapshotValidationReport {
+            snapshots_checked: 0,
+            findings: vec![],
+        });
+    }
+
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&snapshot_dir).map_err(|source| StoreError::Io {
+        path: snapshot_dir.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StoreError::Io {
+            path: snapshot_dir.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            files.push(path);
+        }
+    }
+    files.sort();
+
+    let mut findings = Vec::new();
+    let mut snapshots_checked = 0;
+    for file in files {
+        let snapshot: Snapshot =
+            serde_json::from_slice(&fs::read(&file).map_err(|source| StoreError::Io {
+                path: file.clone(),
+                source,
+            })?)
+            .map_err(|source| StoreError::Json {
+                path: file.clone(),
+                source,
+            })?;
+        snapshots_checked += 1;
+
+        if snapshot.event_sequence > full_replay.last_sequence {
+            findings.push(Finding {
+                code: "snapshot.event_sequence_ahead".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "Snapshot `{}` references event sequence {} but event log ends at {}. Remediation: delete and rebuild stale snapshot `{}`.",
+                    snapshot.snapshot_id,
+                    snapshot.event_sequence,
+                    full_replay.last_sequence,
+                    file.display()
+                ),
+                related_nodes: vec![],
+                related_edges: vec![],
+            });
+            continue;
+        }
+
+        let replay_at_sequence = replay_events_until(
+            root,
+            ReplayOptions { check_hashes: true },
+            Some(snapshot.event_sequence),
+        )?;
+        if replay_at_sequence.state_hash != snapshot.state_hash {
+            findings.push(Finding {
+                code: "snapshot.replay_hash_mismatch".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "Snapshot `{}` stateHash `{}` does not match replay hash `{}` at event sequence {}. Remediation: delete and rebuild snapshot `{}` from the event log.",
+                    snapshot.snapshot_id,
+                    snapshot.state_hash,
+                    replay_at_sequence.state_hash,
+                    snapshot.event_sequence,
+                    file.display()
+                ),
+                related_nodes: vec![],
+                related_edges: vec![],
+            });
+        }
+
+        let snapshot_graph = Graph {
+            nodes: snapshot
+                .nodes
+                .iter()
+                .cloned()
+                .map(|node| (node.id.clone(), node))
+                .collect(),
+            edges: snapshot
+                .edges
+                .iter()
+                .cloned()
+                .map(|edge| (edge.id.clone(), edge))
+                .collect(),
+        };
+        let embedded_hash = state_hash(&snapshot_graph, CORE_ONTOLOGY_VERSION);
+        if embedded_hash != snapshot.state_hash {
+            findings.push(Finding {
+                code: "snapshot.embedded_graph_hash_mismatch".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "Snapshot `{}` embedded graph hashes to `{embedded_hash}` but declares `{}`. Remediation: delete and rebuild snapshot `{}` from the event log.",
+                    snapshot.snapshot_id,
+                    snapshot.state_hash,
+                    file.display()
+                ),
+                related_nodes: snapshot.nodes.iter().map(|node| node.id.clone()).collect(),
+                related_edges: snapshot.edges.iter().map(|edge| edge.id.clone()).collect(),
+            });
+        }
+    }
+
+    Ok(SnapshotValidationReport {
+        snapshots_checked,
+        findings,
     })
 }
 
@@ -1293,6 +1546,52 @@ mod tests {
     }
 
     #[test]
+    fn replay_rejects_unknown_event_schema_fields() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let line = fs::read_to_string(&event_path).unwrap();
+        let mut event: Value = serde_json::from_str(line.trim()).unwrap();
+        event["unexpectedField"] = json!(true);
+        fs::write(&event_path, format!("{event}\n")).unwrap();
+
+        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        assert!(matches!(error, StoreError::Json { .. }));
+    }
+
+    #[test]
+    fn replay_rejects_unknown_nested_delta_schema_fields() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let line = fs::read_to_string(&event_path).unwrap();
+        let mut event: Value = serde_json::from_str(line.trim()).unwrap();
+        event["delta"]["createNodes"][0]["unexpectedNodeField"] = json!(true);
+        fs::write(&event_path, format!("{event}\n")).unwrap();
+
+        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        assert!(matches!(error, StoreError::Json { .. }));
+    }
+
+    #[test]
     fn replay_rejects_post_state_hash_mismatch_when_checked() {
         let tmp = tempdir().unwrap();
         init_project(
@@ -1315,6 +1614,84 @@ mod tests {
             error,
             StoreError::PreStateHashMismatch { .. } | StoreError::PostStateHashMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn snapshot_validation_accepts_current_snapshots() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let report = validate_snapshots(tmp.path()).unwrap();
+        assert_eq!(report.snapshots_checked, 1);
+        assert!(report.findings.is_empty());
+    }
+
+    #[test]
+    fn snapshot_validation_reports_embedded_graph_hash_mismatch() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let snapshot_path = only_snapshot_path(tmp.path());
+        let mut snapshot: Value =
+            serde_json::from_slice(&fs::read(&snapshot_path).unwrap()).unwrap();
+        snapshot["nodes"][0]["attributes"]["name"] = json!("tampered");
+        fs::write(
+            &snapshot_path,
+            serde_json::to_vec_pretty(&snapshot).unwrap(),
+        )
+        .unwrap();
+
+        let report = validate_snapshots(tmp.path()).unwrap();
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| { finding.code == "snapshot.embedded_graph_hash_mismatch" }));
+    }
+
+    #[test]
+    fn snapshot_validation_reports_future_event_sequence() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let snapshot_path = only_snapshot_path(tmp.path());
+        let mut snapshot: Value =
+            serde_json::from_slice(&fs::read(&snapshot_path).unwrap()).unwrap();
+        snapshot["eventSequence"] = json!(999);
+        fs::write(
+            &snapshot_path,
+            serde_json::to_vec_pretty(&snapshot).unwrap(),
+        )
+        .unwrap();
+
+        let report = validate_snapshots(tmp.path()).unwrap();
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "snapshot.event_sequence_ahead"));
     }
 
     #[test]
@@ -1402,6 +1779,7 @@ acceptanceCriteria:
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
                 input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
                 delta: projection.to_delta(),
             },
         )
@@ -1438,6 +1816,7 @@ acceptanceCriteria:
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
                 input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
                 delta: GraphDelta {
                     create_nodes: vec![Node {
                         id: "node_code_file_src_lib_rs".to_string(),
@@ -1452,6 +1831,168 @@ acceptanceCriteria:
         .unwrap_err();
 
         assert!(matches!(error, StoreError::OperationValidationFailed(1)));
+    }
+
+    #[test]
+    fn append_operation_rejects_malformed_stable_key() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: "node_spec_auth_001".to_string(),
+                        stable_key: "AUTH-001".to_string(),
+                        node_type: "Spec".to_string(),
+                        attributes: BTreeMap::from([
+                            ("spec".to_string(), json!("AUTH-001")),
+                            ("title".to_string(), json!("Password reset")),
+                        ]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::OntologyValidationFailed(1)));
+    }
+
+    #[test]
+    fn append_operation_rejects_precondition_failure() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    update_nodes: vec![Node {
+                        id: "node_spec_auth_001".to_string(),
+                        stable_key: "spec:AUTH-001".to_string(),
+                        node_type: "Spec".to_string(),
+                        attributes: BTreeMap::from([
+                            ("spec".to_string(), json!("AUTH-001")),
+                            ("title".to_string(), json!("Password reset")),
+                        ]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::OperationValidationFailed(1)));
+    }
+
+    #[test]
+    fn append_operation_dry_run_validates_without_mutating_store() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let projection = SpecProjection {
+            spec: "AUTH-001".to_string(),
+            title: "Password reset".to_string(),
+            module: None,
+            priority: None,
+            summary: None,
+            requirements: vec![crate::spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "User can request reset".to_string(),
+            }],
+            acceptance_criteria: vec![crate::spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Generic response".to_string(),
+            }],
+        };
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                dry_run: true,
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap();
+
+        assert!(receipt.accepted);
+        assert!(receipt.dry_run);
+        assert!(receipt.event_ids.is_empty());
+        assert!(receipt
+            .created_nodes
+            .iter()
+            .any(|node_id| node_id == "node_spec_auth_001"));
+        assert!(receipt
+            .created_edges
+            .iter()
+            .any(|edge_id| edge_id.contains("has_requirement")));
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert_eq!(replay.events_replayed, 1);
+        assert!(!replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "Spec"));
+    }
+
+    #[test]
+    fn operation_receipt_records_changed_object_ids() {
+        let tmp = tempdir().unwrap();
+        let init_receipt = init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(init_receipt.created_nodes, vec!["node_project"]);
+        assert!(init_receipt.created_edges.is_empty());
+        assert!(!init_receipt.dry_run);
+        assert_eq!(init_receipt.event_ids.len(), 1);
     }
 
     #[test]
@@ -1642,6 +2183,7 @@ acceptanceCriteria:
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
                 input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
                 delta: projection.to_delta(),
             },
         )
@@ -1691,5 +2233,14 @@ acceptanceCriteria:
         )
         .unwrap_err();
         assert!(matches!(error, StoreError::SpecNotFound(_)));
+    }
+
+    fn only_snapshot_path(root: &Path) -> PathBuf {
+        let snapshots = root.join(".specgraph/snapshots");
+        fs::read_dir(snapshots)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .unwrap()
     }
 }
