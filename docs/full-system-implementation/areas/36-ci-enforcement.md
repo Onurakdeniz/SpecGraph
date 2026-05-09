@@ -18,6 +18,7 @@ Make CI the enforcement boundary by replaying graph state and running all valida
 ### Partly Implemented
 
 - `sg ci validate --report-file` emits a machine-readable `specgraph.ci-report/v1` JSON report with status, checks, findings, and state hash.
+- CI now includes test evidence closure by validating that required linked tests have non-failing `TestResult` evidence before recording validation output.
 - Installed pre-push hook runs the same CI validation path and writes `.specgraph/validation/ci-report.json`.
 
 - Aggregate MVP validation exists
@@ -28,7 +29,7 @@ Make CI the enforcement boundary by replaying graph state and running all valida
 - GitHub/GitLab templates
 - Machine-readable reports
 - Graph merge validation
-- Full policy/test/data/security validators
+- Full provider-native policy/data/security annotations
 
 ## Implementation Parts
 
