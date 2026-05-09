@@ -101,6 +101,11 @@ The current repository is still a compact workspace. Some modules live in transi
 |---|---|---|
 | `Cargo.toml`, `Cargo.lock` | Workspace/release foundation | Defines the current Rust workspace. Future release slices will expand artifact metadata and distribution checks. |
 | `crates/sg-core/Cargo.toml` | Trusted core crate manifest | Core dependencies must stay deterministic and avoid provider/UI/server dependencies. Transitional filesystem-facing code should be split outward in later slices. |
+| `crates/sg-{model,canonical,store,operation,ontology,policy,validation,query}/**` | Trusted core/runtime boundary crates | Narrow workspace facades that define extraction targets for the base model, deterministic identity, store, operation runtime, ontology, policy, validation, and query layers. |
+| `crates/sg-{project,module-graph,architecture,data,spec,action,gitgraph,codegraph,testgraph,impact,merge,adoption,issue,proposal}/**` | Domain graph boundary crates | Narrow workspace facades for domain-specific graph/runtime ownership. `sg-core` remains a compatibility facade until module extraction is complete. |
+| `crates/sg-adapter-*/**` | Adapter boundary crates | Adapter facades expose observation/capability types and must not gain trusted append authority. |
+| `crates/sg-server/**`, `crates/sg-sdk/**` | Future server/SDK Rust boundaries | Compile-time package boundaries for Phase 7 API/SDK work; they depend inward on runtime/query schemas. |
+| `packages/sdk-typescript/**`, `packages/studio/**` | Future TypeScript SDK and Studio boundaries | Package boundaries only; future implementation must use API/runtime contracts and never mutate `.specgraph` directly. |
 | `crates/sg-core/src/model.rs` | Trusted core | Graph objects, deltas, findings, receipts, and common data model. |
 | `crates/sg-core/src/canonical.rs`, `hashing.rs`, `stable_key.rs` | Trusted core | Canonical serialization, hashing, and stable-key validation. |
 | `crates/sg-core/src/store.rs` | Trusted core with transitional local persistence boundary | Owns current event/snapshot operations. Future crate split should isolate ambient filesystem access behind explicit storage/runtime interfaces. |
@@ -135,7 +140,7 @@ Phase 0 Slice 0.2 introduces `scripts/check_architecture_boundaries.py` as the f
 python3 scripts/check_architecture_boundaries.py
 ```
 
-The check currently fails when:
+The check currently fails when required modular crates/package boundaries are missing and when:
 
 - `sg-core` declares dependencies on CLI, server, SDK, Studio, adapter, provider, network, LLM, UI, or ambient async/runtime crates;
 - trusted-core Rust source imports known outer-layer, provider, network, LLM, UI, subprocess, or network APIs directly;

@@ -1,0 +1,10 @@
+{
+  "name": "@specgraph/sdk-typescript",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Future SpecGraph OS TypeScript SDK package boundary. Runtime implementation arrives in Phase 7.",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

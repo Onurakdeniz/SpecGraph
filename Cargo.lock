@@ -544,6 +544,83 @@ dependencies = [
 ]
 
 [[package]]
+name = "sg-action"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-adapter-api"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-adapter-ci"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-adapter-code"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-adapter-git"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-adapter-hosting"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-adapter-llm"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-adapter-test"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-adoption"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-architecture"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-canonical"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
 name = "sg-cli"
 version = "0.1.0"
 dependencies = [
@@ -551,6 +628,13 @@ dependencies = [
  "clap",
  "serde_json",
  "serde_yaml",
+ "sg-core",
+]
+
+[[package]]
+name = "sg-codegraph"
+version = "0.1.0"
+dependencies = [
  "sg-core",
 ]
 
@@ -568,6 +652,139 @@ dependencies = [
  "thiserror",
  "time",
  "uuid",
+]
+
+[[package]]
+name = "sg-data"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-gitgraph"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-impact"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-issue"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-merge"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-model"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-module-graph"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-ontology"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-operation"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-policy"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-project"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-proposal"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-query"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-sdk"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-server"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-spec"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-store"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-testgraph"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
+]
+
+[[package]]
+name = "sg-validation"
+version = "0.1.0"
+dependencies = [
+ "sg-core",
 ]
 
 [[package]]

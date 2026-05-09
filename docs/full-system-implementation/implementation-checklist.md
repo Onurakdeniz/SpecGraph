@@ -303,6 +303,7 @@ Related areas:
 - [40. Existing Repository Adoption](areas/40-existing-repository-adoption.md)
 - [41. IssueGraph](areas/41-issuegraph.md)
 - [42. Ontology Evolution Loop](areas/42-ontology-evolution-loop.md)
+- [01. Repository and Package Structure](areas/01-repository-and-package-structure.md)
 
 ### Implementation Checklist
 

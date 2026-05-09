@@ -1,5 +1,39 @@
 [workspace]
-members = ["crates/sg-core", "crates/sg-cli"]
+members = [
+    "crates/sg-core",
+    "crates/sg-cli",
+    "crates/sg-action",
+    "crates/sg-adapter-api",
+    "crates/sg-adapter-ci",
+    "crates/sg-adapter-code",
+    "crates/sg-adapter-git",
+    "crates/sg-adapter-hosting",
+    "crates/sg-adapter-llm",
+    "crates/sg-adapter-test",
+    "crates/sg-adoption",
+    "crates/sg-architecture",
+    "crates/sg-canonical",
+    "crates/sg-codegraph",
+    "crates/sg-data",
+    "crates/sg-gitgraph",
+    "crates/sg-impact",
+    "crates/sg-issue",
+    "crates/sg-merge",
+    "crates/sg-model",
+    "crates/sg-module-graph",
+    "crates/sg-ontology",
+    "crates/sg-operation",
+    "crates/sg-policy",
+    "crates/sg-project",
+    "crates/sg-proposal",
+    "crates/sg-query",
+    "crates/sg-sdk",
+    "crates/sg-server",
+    "crates/sg-spec",
+    "crates/sg-store",
+    "crates/sg-testgraph",
+    "crates/sg-validation",
+]
 resolver = "2"
 
 [workspace.package]
