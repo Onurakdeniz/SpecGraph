@@ -156,6 +156,12 @@ pub struct SpecValidationReport {
     pub findings: Vec<Finding>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SnapshotValidationReport {
+    pub snapshots_checked: usize,
+    pub findings: Vec<Finding>,
+}
+
 impl SpecGraphStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -232,6 +238,10 @@ impl SpecGraphStore {
 
     pub fn validate_specs(&self) -> Result<SpecValidationReport> {
         validate_specs(self.root())
+    }
+
+    pub fn validate_snapshots(&self) -> Result<SnapshotValidationReport> {
+        validate_snapshots(self.root())
     }
 }
 
@@ -829,6 +839,14 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
 }
 
 pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport> {
+    replay_events_until(root, options, None)
+}
+
+fn replay_events_until(
+    root: &Path,
+    options: ReplayOptions,
+    max_sequence: Option<u64>,
+) -> Result<ReplayReport> {
     let sg_dir = root.join(".specgraph");
     if !sg_dir.exists() {
         return Err(StoreError::NotFound(sg_dir));
@@ -855,7 +873,7 @@ pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport
     let mut expected_sequence = 1;
     let mut events_replayed = 0;
 
-    for file in files {
+    'files: for file in files {
         let reader = BufReader::new(File::open(&file).map_err(|source| StoreError::Io {
             path: file.clone(),
             source,
@@ -874,6 +892,10 @@ pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport
                 path: file.clone(),
                 source,
             })?;
+
+            if max_sequence.is_some_and(|max| event.sequence > max) {
+                break 'files;
+            }
 
             if event.sequence != expected_sequence {
                 return Err(StoreError::SequenceMismatch {
@@ -928,6 +950,127 @@ pub fn replay_events(root: &Path, options: ReplayOptions) -> Result<ReplayReport
         state_hash,
         events_replayed,
         last_sequence: expected_sequence.saturating_sub(1),
+    })
+}
+
+pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
+    let sg_dir = root.join(".specgraph");
+    if !sg_dir.exists() {
+        return Err(StoreError::NotFound(sg_dir));
+    }
+
+    let full_replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let snapshot_dir = sg_dir.join("snapshots");
+    if !snapshot_dir.exists() {
+        return Ok(SnapshotValidationReport {
+            snapshots_checked: 0,
+            findings: vec![],
+        });
+    }
+
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&snapshot_dir).map_err(|source| StoreError::Io {
+        path: snapshot_dir.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StoreError::Io {
+            path: snapshot_dir.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            files.push(path);
+        }
+    }
+    files.sort();
+
+    let mut findings = Vec::new();
+    let mut snapshots_checked = 0;
+    for file in files {
+        let snapshot: Snapshot =
+            serde_json::from_slice(&fs::read(&file).map_err(|source| StoreError::Io {
+                path: file.clone(),
+                source,
+            })?)
+            .map_err(|source| StoreError::Json {
+                path: file.clone(),
+                source,
+            })?;
+        snapshots_checked += 1;
+
+        if snapshot.event_sequence > full_replay.last_sequence {
+            findings.push(Finding {
+                code: "snapshot.event_sequence_ahead".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "Snapshot `{}` references event sequence {} but event log ends at {}. Remediation: delete and rebuild stale snapshot `{}`.",
+                    snapshot.snapshot_id,
+                    snapshot.event_sequence,
+                    full_replay.last_sequence,
+                    file.display()
+                ),
+                related_nodes: vec![],
+                related_edges: vec![],
+            });
+            continue;
+        }
+
+        let replay_at_sequence = replay_events_until(
+            root,
+            ReplayOptions { check_hashes: true },
+            Some(snapshot.event_sequence),
+        )?;
+        if replay_at_sequence.state_hash != snapshot.state_hash {
+            findings.push(Finding {
+                code: "snapshot.replay_hash_mismatch".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "Snapshot `{}` stateHash `{}` does not match replay hash `{}` at event sequence {}. Remediation: delete and rebuild snapshot `{}` from the event log.",
+                    snapshot.snapshot_id,
+                    snapshot.state_hash,
+                    replay_at_sequence.state_hash,
+                    snapshot.event_sequence,
+                    file.display()
+                ),
+                related_nodes: vec![],
+                related_edges: vec![],
+            });
+        }
+
+        let snapshot_graph = Graph {
+            nodes: snapshot
+                .nodes
+                .iter()
+                .cloned()
+                .map(|node| (node.id.clone(), node))
+                .collect(),
+            edges: snapshot
+                .edges
+                .iter()
+                .cloned()
+                .map(|edge| (edge.id.clone(), edge))
+                .collect(),
+        };
+        let embedded_hash = state_hash(&snapshot_graph, CORE_ONTOLOGY_VERSION);
+        if embedded_hash != snapshot.state_hash {
+            findings.push(Finding {
+                code: "snapshot.embedded_graph_hash_mismatch".to_string(),
+                severity: FindingSeverity::Error,
+                message: format!(
+                    "Snapshot `{}` embedded graph hashes to `{embedded_hash}` but declares `{}`. Remediation: delete and rebuild snapshot `{}` from the event log.",
+                    snapshot.snapshot_id,
+                    snapshot.state_hash,
+                    file.display()
+                ),
+                related_nodes: snapshot.nodes.iter().map(|node| node.id.clone()).collect(),
+                related_edges: snapshot.edges.iter().map(|edge| edge.id.clone()).collect(),
+            });
+        }
+    }
+
+    Ok(SnapshotValidationReport {
+        snapshots_checked,
+        findings,
     })
 }
 
@@ -1364,6 +1507,84 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_validation_accepts_current_snapshots() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let report = validate_snapshots(tmp.path()).unwrap();
+        assert_eq!(report.snapshots_checked, 1);
+        assert!(report.findings.is_empty());
+    }
+
+    #[test]
+    fn snapshot_validation_reports_embedded_graph_hash_mismatch() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let snapshot_path = only_snapshot_path(tmp.path());
+        let mut snapshot: Value =
+            serde_json::from_slice(&fs::read(&snapshot_path).unwrap()).unwrap();
+        snapshot["nodes"][0]["attributes"]["name"] = json!("tampered");
+        fs::write(
+            &snapshot_path,
+            serde_json::to_vec_pretty(&snapshot).unwrap(),
+        )
+        .unwrap();
+
+        let report = validate_snapshots(tmp.path()).unwrap();
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| { finding.code == "snapshot.embedded_graph_hash_mismatch" }));
+    }
+
+    #[test]
+    fn snapshot_validation_reports_future_event_sequence() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let snapshot_path = only_snapshot_path(tmp.path());
+        let mut snapshot: Value =
+            serde_json::from_slice(&fs::read(&snapshot_path).unwrap()).unwrap();
+        snapshot["eventSequence"] = json!(999);
+        fs::write(
+            &snapshot_path,
+            serde_json::to_vec_pretty(&snapshot).unwrap(),
+        )
+        .unwrap();
+
+        let report = validate_snapshots(tmp.path()).unwrap();
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "snapshot.event_sequence_ahead"));
+    }
+
+    #[test]
     fn spec_import_creates_graph_facts_and_validates() {
         let tmp = tempdir().unwrap();
         init_project(
@@ -1776,5 +1997,14 @@ acceptanceCriteria:
         )
         .unwrap_err();
         assert!(matches!(error, StoreError::SpecNotFound(_)));
+    }
+
+    fn only_snapshot_path(root: &Path) -> PathBuf {
+        let snapshots = root.join(".specgraph/snapshots");
+        fs::read_dir(snapshots)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .unwrap()
     }
 }

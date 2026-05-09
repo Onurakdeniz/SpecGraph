@@ -1226,6 +1226,19 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
             println!("edges: {}", report.graph.edges.len());
             println!("stateHash: {}", report.state_hash);
             if args.check {
+                let snapshot_report = store.validate_snapshots()?;
+                let snapshot_errors = snapshot_report
+                    .findings
+                    .iter()
+                    .filter(|finding| finding.severity == sg_core::FindingSeverity::Error)
+                    .count();
+                if snapshot_errors > 0 {
+                    for finding in &snapshot_report.findings {
+                        eprintln!("{}: {}", finding.code, finding.message);
+                    }
+                    bail!("snapshot validation failed with {snapshot_errors} error finding(s)");
+                }
+                println!("snapshots: {} checked", snapshot_report.snapshots_checked);
                 println!("check: ok");
             }
         }
