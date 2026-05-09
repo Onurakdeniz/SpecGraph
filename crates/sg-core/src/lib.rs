@@ -14,6 +14,7 @@ pub mod hashing;
 pub mod identity;
 pub mod impact;
 pub mod model;
+pub mod module_graph;
 pub mod ontology;
 pub mod ontology_pack;
 pub mod operation_abi;
@@ -33,6 +34,10 @@ pub use git::{
 pub use hashing::state_hash;
 pub use identity::{infer_actor_kind, resolve_actor_identity, ActorIdentity, ActorKind};
 pub use model::*;
+pub use module_graph::{
+    capability_node_id, interface_node_id, layer_node_id, module_node_id, package_node_id,
+    InterfaceVisibility, ModuleDefinition, ModuleGraphProjection, ModuleInterface,
+};
 pub use ontology::{
     MvpOntology, OntologyStateMachine, OntologyStateTransition, OntologyValidatorRule,
     CORE_ONTOLOGY_VERSION,
