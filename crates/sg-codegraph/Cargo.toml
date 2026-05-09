@@ -1,0 +1,9 @@
+[package]
+name = "sg-codegraph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sg-core = { path = "../sg-core" }

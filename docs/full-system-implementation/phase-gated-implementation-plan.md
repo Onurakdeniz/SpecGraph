@@ -72,7 +72,7 @@ Every area must be closed by this plan. The phase/slice listed below is the prim
 
 | Area | System Area | Primary phase/slice | Full-system closure target |
 |---:|---|---|---|
-| 01 | Repository and Package Structure | 0.1, 0.2 | Final crate/package boundaries, dependency rules, examples layout, extension points. |
+| 01 | Repository and Package Structure | 0.1, 0.2, 5.8 | Final crate/package boundaries, dependency rules, examples layout, extension points. |
 | 02 | CLI UX | 0.3, 7.6 | Complete command inventory, stable JSON output, exit codes, help/reference docs. |
 | 03 | Graph Kernel | 1.1, 1.6, 5.1 | Nodes, edges, deltas, snapshots, branches, diff, merge, rebase, signed events. |
 | 04 | Event Store | 1.1, 1.2, 1.3 | Canonical event schema, chain continuity, locking, compaction, rebuild, snapshots. |
@@ -224,6 +224,7 @@ Every area must be closed by this plan. The phase/slice listed below is the prim
 | 5.5 | IssueGraph | 41 | `feat: add issue graph lifecycle` | Bugs require repro, root cause, fix spec, regression evidence, closure evidence. |
 | 5.6 | Ontology evolution loop | 42 | `feat: add ontology change proposals` | Ontology changes require tests, migration plans, compatibility checks, release evidence. |
 | 5.7 | Team-scale policy replan | 10, 24, 39 | `feat: trigger action replan from impact` | Policy/impact changes invalidate affected work and require replan before continuation. |
+| 5.8 | Workspace modularization | 01, 45, 46, 48 | `refactor: modularize workspace crates` | Trusted core, runtime/domain crates, adapter facades, server/SDK boundaries, and Studio package boundaries exist with dependency checks. |
 
 **Phase 5 gate:** graph merges, rebases, adoption, issues, and ontology evolution are auditable and cannot skip validation.
 

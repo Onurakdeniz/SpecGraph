@@ -2,8 +2,7 @@
 """Phase 0 architecture boundary checks for SpecGraph OS.
 
 These checks automate the trusted-core rules documented in
-`docs/architecture/boundaries.md`. They are intentionally lightweight until the
-workspace is split into dedicated core/adapter/server/SDK/UI crates.
+`docs/architecture/boundaries.md`. They verify both trusted-core dependency direction and the modular workspace crate boundaries.
 """
 
 from __future__ import annotations
@@ -84,12 +83,86 @@ ADAPTER_OBSERVATION_MODULES = [
     CORE_SRC / "adoption.rs",
     CORE_SRC / "git.rs",
 ]
+
+REQUIRED_WORKSPACE_CRATES = {
+    "sg-core",
+    "sg-cli",
+    "sg-model",
+    "sg-canonical",
+    "sg-store",
+    "sg-operation",
+    "sg-ontology",
+    "sg-policy",
+    "sg-validation",
+    "sg-query",
+    "sg-project",
+    "sg-module-graph",
+    "sg-architecture",
+    "sg-data",
+    "sg-spec",
+    "sg-action",
+    "sg-gitgraph",
+    "sg-codegraph",
+    "sg-testgraph",
+    "sg-impact",
+    "sg-merge",
+    "sg-adoption",
+    "sg-issue",
+    "sg-proposal",
+    "sg-adapter-api",
+    "sg-adapter-code",
+    "sg-adapter-git",
+    "sg-adapter-test",
+    "sg-adapter-ci",
+    "sg-adapter-hosting",
+    "sg-adapter-llm",
+    "sg-server",
+    "sg-sdk",
+}
+
+REQUIRED_PACKAGE_BOUNDARIES = [
+    ROOT / "packages" / "sdk-typescript" / "package.json",
+    ROOT / "packages" / "studio" / "package.json",
+]
+
 TRUST_PROMOTION_PATTERNS = [
     re.compile(r"json!\(\s*\"(?:Accepted|Trusted)\"\s*\)"),
     re.compile(r"TrustState::(?:Accepted|Trusted)\b"),
     re.compile(r"\btrustState\b[^\n]*(?:Accepted|Trusted)"),
     re.compile(r"\btrusted\b\s*[:=]\s*true\b", re.IGNORECASE),
 ]
+
+
+def cargo_package_name(manifest: Path) -> str | None:
+    in_package = False
+    for raw_line in manifest.read_text().splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if line == "[package]":
+            in_package = True
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_package = False
+            continue
+        if in_package and line.startswith("name") and "=" in line:
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return None
+
+
+def check_workspace_modules(errors: list[str]) -> None:
+    manifests = sorted((ROOT / "crates").glob("*/Cargo.toml"))
+    packages = {name for manifest in manifests if (name := cargo_package_name(manifest))}
+    missing = sorted(REQUIRED_WORKSPACE_CRATES - packages)
+    for crate in missing:
+        errors.append(
+            f"crates/{crate}/Cargo.toml: required modular workspace crate is missing. "
+            "Update docs/architecture/workspace-modules.md and the workspace split together."
+        )
+
+    for package in REQUIRED_PACKAGE_BOUNDARIES:
+        if not package.exists():
+            errors.append(
+                f"{package.relative_to(ROOT)}: required future package boundary is missing."
+            )
 
 
 def dependency_names(manifest: Path) -> set[str]:
@@ -152,6 +225,7 @@ def check_adapter_observations_stay_untrusted(errors: list[str]) -> None:
 
 def main() -> int:
     errors: list[str] = []
+    check_workspace_modules(errors)
     check_core_manifest(errors)
     check_core_source_imports(errors)
     check_adapter_observations_stay_untrusted(errors)
