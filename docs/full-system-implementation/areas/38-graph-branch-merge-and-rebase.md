@@ -17,10 +17,12 @@ Align Git branches with graph branches and base snapshots for safe semantic merg
 ### Partly Implemented
 
 - Snapshot binding and diff/conflict primitives exist
+- Branch binding now stores base snapshot id, base state hash, base event sequence, and base event id in graph facts and `.specgraph/branches/*.json` metadata
+- `sg graph replay --check` validates branch base metadata against replay
 
 ### Not Implemented / Remaining
 
-- Graph branch event layout
+- Full graph branch event layout beyond current base metadata
 - GraphMerge/Rebase operations
 - Affected action replan
 - Hosting integration
@@ -29,19 +31,20 @@ Align Git branches with graph branches and base snapshots for safe semantic merg
 
 ### 1. Graph Model / Runtime Objects
 
-GitBranch + GraphBranch + base GraphSnapshot; GraphMerge and GraphRebase events
+GitBranch + GraphBranch + base GraphSnapshot; branch base metadata; GraphMerge and GraphRebase events
 
 ### 2. Commands / APIs
 
-Future sg graph branch list, merge, rebase; current conflicts command
+Future sg graph branch list, merge, rebase; current conflicts command; replay/check validates branch metadata
 
 ### 3. Validation and Policy Gates
 
-Apply source delta only after conflict, ontology, and policy validation; record merge/rebase evidence
+Apply source delta only after conflict, ontology, branch base, and policy validation; record merge/rebase evidence
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
+- Preserve branch base metadata validation against canonical replay.
 - Implement or finish: Graph branch event layout.
 - Implement or finish: GraphMerge/Rebase operations.
 - Implement or finish: Affected action replan.
@@ -54,6 +57,7 @@ Apply source delta only after conflict, ontology, and policy validation; record 
 - The documented commands/APIs work for the happy path and at least one intentional failure path.
 - Validation findings identify the graph object, file or command involved, and remediation.
 - The area can be exercised from CLI/CI without relying on untrusted direct mutation.
+- Branch base metadata validates against replayed state hash/event id and fails on tampering.
 
 ## Source Notes
 

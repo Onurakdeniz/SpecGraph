@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 pub const CORE_VALIDATOR_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const VALIDATOR_CODE_SCOPE: &str = "validator.code_scope";
+pub const VALIDATOR_BRANCH_METADATA: &str = "validator.branch_metadata";
 pub const VALIDATOR_GIT_BINDING: &str = "validator.git_binding";
 pub const VALIDATOR_ONTOLOGY: &str = "validator.ontology";
 pub const VALIDATOR_ONTOLOGY_PACK: &str = "validator.ontology_pack";
@@ -57,6 +58,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "CodeGraph",
             description: "Validates changed files against ActionGraph allowed path scopes.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_BRANCH_METADATA,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Graph Branch, Merge, and Rebase",
+            description: "Validates graph branch base metadata against event replay.",
         },
         ValidatorDefinition {
             id: VALIDATOR_TRACE_LINKS,

@@ -12,7 +12,7 @@ use crate::operation_abi::{
 use crate::policy::{PolicyDecision, PolicyReport};
 use crate::query::{QueryContext, QueryCost, QueryTarget};
 use crate::spec::SpecProjection;
-use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_SNAPSHOT};
+use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_BRANCH_METADATA, VALIDATOR_SNAPSHOT};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -238,6 +238,26 @@ pub struct SnapshotValidationReport {
     pub findings: Vec<Finding>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BranchMetadata {
+    pub schema_version: String,
+    pub branch: String,
+    pub spec: String,
+    pub graph_branch: String,
+    pub base_snapshot_id: String,
+    pub base_state_hash: String,
+    pub base_event_sequence: u64,
+    pub base_event_id: Option<String>,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BranchMetadataValidationReport {
+    pub branches_checked: usize,
+    pub findings: Vec<Finding>,
+}
+
 #[derive(Debug, Clone)]
 pub struct RebuildReport {
     pub state_hash: String,
@@ -360,6 +380,10 @@ impl SpecGraphStore {
 
     pub fn validate_snapshots(&self) -> Result<SnapshotValidationReport> {
         validate_snapshots(self.root())
+    }
+
+    pub fn validate_branch_metadata(&self) -> Result<BranchMetadataValidationReport> {
+        validate_branch_metadata(self.root())
     }
 
     pub fn rebuild_projections(&self) -> Result<RebuildReport> {
@@ -1082,6 +1106,9 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
     validate_spec_branch_name(&options.spec, &options.branch)?;
 
     let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let base_state_hash = replay.state_hash.clone();
+    let base_event_sequence = replay.last_sequence;
+    let base_event_id = replay.last_event_id.clone();
     let spec_node = replay
         .graph
         .nodes
@@ -1107,6 +1134,10 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
             ("name".to_string(), json!(options.branch)),
             ("spec".to_string(), json!(options.spec)),
             ("createdBy".to_string(), json!(options.actor)),
+            ("baseSnapshotId".to_string(), json!(snapshot_id)),
+            ("baseStateHash".to_string(), json!(base_state_hash)),
+            ("baseEventSequence".to_string(), json!(base_event_sequence)),
+            ("baseEventId".to_string(), json!(base_event_id)),
         ]),
     };
 
@@ -1115,8 +1146,10 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
         stable_key: format!("graph-snapshot:{}", replay.state_hash),
         node_type: "GraphSnapshot".to_string(),
         attributes: BTreeMap::from([
-            ("stateHash".to_string(), json!(replay.state_hash)),
-            ("eventSequence".to_string(), json!(replay.last_sequence)),
+            ("snapshotId".to_string(), json!(snapshot_id)),
+            ("stateHash".to_string(), json!(base_state_hash)),
+            ("eventSequence".to_string(), json!(base_event_sequence)),
+            ("eventId".to_string(), json!(base_event_id)),
         ]),
     };
 
@@ -1129,7 +1162,19 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
         ..GraphDelta::default()
     };
 
-    append_operation(
+    let metadata = BranchMetadata {
+        schema_version: "specgraph.branch-metadata/v1".to_string(),
+        branch: options.branch.clone(),
+        spec: options.spec.clone(),
+        graph_branch: options.graph_branch.clone(),
+        base_snapshot_id: snapshot_id,
+        base_state_hash,
+        base_event_sequence,
+        base_event_id,
+        created_by: options.actor.clone(),
+    };
+
+    let receipt = append_operation(
         root,
         AppendOperationOptions {
             operation: "Spec.BindBranch".to_string(),
@@ -1142,7 +1187,9 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
             delta,
             dry_run: false,
         },
-    )
+    )?;
+    write_branch_metadata(root, &metadata)?;
+    Ok(receipt)
 }
 
 pub fn validate_specs(root: &Path) -> Result<SpecValidationReport> {
@@ -1561,6 +1608,111 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
     })
 }
 
+pub fn validate_branch_metadata(root: &Path) -> Result<BranchMetadataValidationReport> {
+    let sg_dir = root.join(".specgraph");
+    if !sg_dir.exists() {
+        return Err(StoreError::NotFound(sg_dir));
+    }
+    let branch_dir = sg_dir.join("branches");
+    if !branch_dir.exists() {
+        return Ok(BranchMetadataValidationReport {
+            branches_checked: 0,
+            findings: vec![],
+        });
+    }
+
+    let full_replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&branch_dir).map_err(|source| StoreError::Io {
+        path: branch_dir.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StoreError::Io {
+            path: branch_dir.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            files.push(path);
+        }
+    }
+    files.sort();
+
+    let mut findings = Vec::new();
+    let mut branches_checked = 0;
+    for file in files {
+        let metadata: BranchMetadata =
+            serde_json::from_slice(&fs::read(&file).map_err(|source| StoreError::Io {
+                path: file.clone(),
+                source,
+            })?)
+            .map_err(|source| StoreError::Json {
+                path: file.clone(),
+                source,
+            })?;
+        branches_checked += 1;
+
+        if metadata.schema_version != "specgraph.branch-metadata/v1" {
+            findings.push(branch_metadata_finding(
+                "branch_metadata.schema_version",
+                format!(
+                    "Branch metadata `{}` has unsupported schemaVersion `{}`. Remediation: rebuild branch metadata from the current graph branch binding.",
+                    file.display(),
+                    metadata.schema_version,
+                ),
+            ));
+        }
+
+        if metadata.base_event_sequence > full_replay.last_sequence {
+            findings.push(branch_metadata_finding(
+                "branch_metadata.sequence_ahead",
+                format!(
+                    "Branch `{}` base event sequence {} is ahead of event log sequence {}. Remediation: recreate the branch binding from a valid replay state.",
+                    metadata.branch,
+                    metadata.base_event_sequence,
+                    full_replay.last_sequence,
+                ),
+            ));
+            continue;
+        }
+
+        let replay_at_base = replay_events_until(
+            root,
+            ReplayOptions { check_hashes: true },
+            Some(metadata.base_event_sequence),
+        )?;
+        if replay_at_base.state_hash != metadata.base_state_hash {
+            findings.push(branch_metadata_finding(
+                "branch_metadata.state_hash_mismatch",
+                format!(
+                    "Branch `{}` baseStateHash `{}` does not match replay hash `{}` at sequence {}. Remediation: recreate the branch binding or rebuild branch metadata.",
+                    metadata.branch,
+                    metadata.base_state_hash,
+                    replay_at_base.state_hash,
+                    metadata.base_event_sequence,
+                ),
+            ));
+        }
+        if replay_at_base.last_event_id != metadata.base_event_id {
+            findings.push(branch_metadata_finding(
+                "branch_metadata.event_id_mismatch",
+                format!(
+                    "Branch `{}` baseEventId `{:?}` does not match replay event id `{:?}` at sequence {}. Remediation: recreate the branch binding from the canonical event log.",
+                    metadata.branch,
+                    metadata.base_event_id,
+                    replay_at_base.last_event_id,
+                    metadata.base_event_sequence,
+                ),
+            ));
+        }
+    }
+
+    Ok(BranchMetadataValidationReport {
+        branches_checked,
+        findings,
+    })
+}
+
 pub fn rebuild_projections(root: &Path) -> Result<RebuildReport> {
     let sg_dir = root.join(".specgraph");
     if !sg_dir.exists() {
@@ -1660,6 +1812,11 @@ fn snapshot_finding(code: &str, message: String) -> Finding {
         .with_validator(VALIDATOR_SNAPSHOT, CORE_VALIDATOR_VERSION)
 }
 
+fn branch_metadata_finding(code: &str, message: String) -> Finding {
+    Finding::new(code, FindingSeverity::Error, message)
+        .with_validator(VALIDATOR_BRANCH_METADATA, CORE_VALIDATOR_VERSION)
+}
+
 fn active_ontology(root: &Path) -> Result<MvpOntology> {
     let packs = list_installed_ontology_packs(root)?;
     Ok(MvpOntology::new().with_extensions(
@@ -1715,6 +1872,27 @@ fn append_event(path: &Path, event: &Event) -> Result<()> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn write_branch_metadata(root: &Path, metadata: &BranchMetadata) -> Result<()> {
+    let path = root
+        .join(".specgraph")
+        .join("branches")
+        .join(format!("{}.json", branch_file_stem(&metadata.branch)));
+    write_json(&path, metadata)
+}
+
+fn branch_file_stem(branch: &str) -> String {
+    branch
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn replace_dir(path: &Path) -> Result<()> {
@@ -3386,9 +3564,94 @@ acceptanceCriteria:
             .edges
             .values()
             .any(|edge| edge.edge_type == "STARTS_FROM_SNAPSHOT"));
+        let branch = replay
+            .graph
+            .nodes
+            .values()
+            .find(|node| node.node_type == "GitBranch")
+            .unwrap();
+        assert_eq!(branch.attributes.get("baseEventSequence"), Some(&json!(2)));
+        assert!(branch.attributes.contains_key("baseStateHash"));
+
+        let metadata_path = tmp
+            .path()
+            .join(".specgraph/branches/spec_AUTH-001-password-reset.json");
+        let metadata: BranchMetadata =
+            serde_json::from_slice(&fs::read(metadata_path).unwrap()).unwrap();
+        assert_eq!(metadata.branch, "spec/AUTH-001-password-reset");
+        assert_eq!(metadata.base_event_sequence, 2);
+        let branch_report = validate_branch_metadata(tmp.path()).unwrap();
+        assert_eq!(branch_report.branches_checked, 1);
+        assert!(branch_report.findings.is_empty());
 
         let validation = validate_specs(tmp.path()).unwrap();
         assert!(validation.findings.is_empty());
+    }
+
+    #[test]
+    fn branch_metadata_validation_detects_tampered_base_state() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let spec_path = tmp.path().join("AUTH-001.yaml");
+        fs::write(
+            &spec_path,
+            r#"
+spec: AUTH-001
+title: Password reset
+requirements:
+  - id: REQ-001
+    text: User can request a password reset email.
+acceptanceCriteria:
+  - id: AC-001
+    text: Endpoint returns a generic response.
+"#,
+        )
+        .unwrap();
+        import_spec_file(
+            tmp.path(),
+            &spec_path,
+            "test".to_string(),
+            "main".to_string(),
+        )
+        .unwrap();
+
+        bind_spec_branch(
+            tmp.path(),
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "spec/AUTH-001-password-reset".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let metadata_path = tmp
+            .path()
+            .join(".specgraph/branches/spec_AUTH-001-password-reset.json");
+        let mut metadata: Value =
+            serde_json::from_slice(&fs::read(&metadata_path).unwrap()).unwrap();
+        metadata["baseStateHash"] = json!("sha256:tampered");
+        fs::write(
+            &metadata_path,
+            serde_json::to_vec_pretty(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        let report = validate_branch_metadata(tmp.path()).unwrap();
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "branch_metadata.state_hash_mismatch"));
     }
 
     #[test]

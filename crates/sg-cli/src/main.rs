@@ -1475,6 +1475,21 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
                     bail!("snapshot validation failed with {snapshot_errors} error finding(s)");
                 }
                 println!("snapshots: {} checked", snapshot_report.snapshots_checked);
+                let branch_report = store.validate_branch_metadata()?;
+                let branch_errors = branch_report
+                    .findings
+                    .iter()
+                    .filter(|finding| finding.severity == sg_core::FindingSeverity::Error)
+                    .count();
+                if branch_errors > 0 {
+                    for finding in &branch_report.findings {
+                        eprintln!("{}: {}", finding.code, finding.message);
+                    }
+                    bail!(
+                        "branch metadata validation failed with {branch_errors} error finding(s)"
+                    );
+                }
+                println!("branches: {} checked", branch_report.branches_checked);
                 println!("check: ok");
             }
         }
