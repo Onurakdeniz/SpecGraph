@@ -357,10 +357,7 @@ pub fn detect_semantic_conflicts(
         dimensions.extend(conflict.dimensions.iter().copied());
     }
     let dimensions = dimensions.into_iter().collect::<Vec<_>>();
-    let findings = conflicts
-        .iter()
-        .map(|conflict| conflict_finding(conflict))
-        .collect::<Vec<_>>();
+    let findings = conflicts.iter().map(conflict_finding).collect::<Vec<_>>();
     let blocking = conflicts.iter().any(|conflict| conflict.blocking);
 
     SemanticConflictReport {
