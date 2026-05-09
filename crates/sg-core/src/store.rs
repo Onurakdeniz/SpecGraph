@@ -79,6 +79,8 @@ pub enum StoreError {
     OntologyPackValidationFailed(usize),
     #[error("actor not found in identity registry: {0}")]
     ActorNotFound(String),
+    #[error("approval or waiver id cannot be empty")]
+    EmptyEvidenceId,
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -155,6 +157,30 @@ pub struct GrantRoleOptions {
     pub actor_id: String,
     pub role: String,
     pub permissions: Vec<String>,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecordApprovalOptions {
+    pub approval_id: String,
+    pub approval: String,
+    pub policy: Option<String>,
+    pub scope: Option<String>,
+    pub reason: Option<String>,
+    pub approved_by: String,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateWaiverOptions {
+    pub waiver_id: String,
+    pub policy: String,
+    pub reason: String,
+    pub approved_by: String,
+    pub expires_at: Option<String>,
+    pub scope: Option<String>,
     pub actor: String,
     pub graph_branch: String,
 }
@@ -253,6 +279,14 @@ impl SpecGraphStore {
 
     pub fn grant_role(&self, options: GrantRoleOptions) -> Result<OperationReceipt> {
         grant_role(self.root(), options)
+    }
+
+    pub fn record_approval(&self, options: RecordApprovalOptions) -> Result<OperationReceipt> {
+        record_approval(self.root(), options)
+    }
+
+    pub fn create_waiver(&self, options: CreateWaiverOptions) -> Result<OperationReceipt> {
+        create_waiver(self.root(), options)
     }
 
     pub fn install_ontology_pack(
@@ -843,6 +877,86 @@ pub fn grant_role(root: &Path, options: GrantRoleOptions) -> Result<OperationRec
             dry_run: false,
             delta: GraphDelta {
                 create_nodes,
+                create_edges,
+                ..GraphDelta::default()
+            },
+        },
+    )
+}
+
+pub fn record_approval(root: &Path, options: RecordApprovalOptions) -> Result<OperationReceipt> {
+    if options.approval_id.trim().is_empty() || options.approval.trim().is_empty() {
+        return Err(StoreError::EmptyEvidenceId);
+    }
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let approver_id = find_actor_node_id(&replay.graph, &options.approved_by)
+        .ok_or_else(|| StoreError::ActorNotFound(options.approved_by.clone()))?;
+
+    let approval_node = approval_node(&options);
+    let approval_node_id = approval_node.id.clone();
+    let mut create_edges = Vec::new();
+    let approval_edge = edge(&approver_id, "HAS_APPROVAL", &approval_node_id);
+    if !replay.graph.edges.contains_key(&approval_edge.id) {
+        create_edges.push(approval_edge);
+    }
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Policy.RecordApproval".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "approvalId": options.approval_id,
+                "approval": options.approval,
+                "policy": options.policy,
+                "scope": options.scope,
+                "reason": options.reason,
+                "approvedBy": options.approved_by,
+            }),
+            dry_run: false,
+            delta: GraphDelta {
+                create_nodes: vec![approval_node],
+                create_edges,
+                ..GraphDelta::default()
+            },
+        },
+    )
+}
+
+pub fn create_waiver(root: &Path, options: CreateWaiverOptions) -> Result<OperationReceipt> {
+    if options.waiver_id.trim().is_empty() || options.policy.trim().is_empty() {
+        return Err(StoreError::EmptyEvidenceId);
+    }
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let approver_id = find_actor_node_id(&replay.graph, &options.approved_by)
+        .ok_or_else(|| StoreError::ActorNotFound(options.approved_by.clone()))?;
+
+    let waiver_node = waiver_node(&options);
+    let waiver_node_id = waiver_node.id.clone();
+    let mut create_edges = Vec::new();
+    let waiver_edge = edge(&approver_id, "HAS_WAIVER", &waiver_node_id);
+    if !replay.graph.edges.contains_key(&waiver_edge.id) {
+        create_edges.push(waiver_edge);
+    }
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Policy.CreateWaiver".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "waiverId": options.waiver_id,
+                "policy": options.policy,
+                "reason": options.reason,
+                "approvedBy": options.approved_by,
+                "expiresAt": options.expires_at,
+                "scope": options.scope,
+            }),
+            dry_run: false,
+            delta: GraphDelta {
+                create_nodes: vec![waiver_node],
                 create_edges,
                 ..GraphDelta::default()
             },
@@ -1633,6 +1747,65 @@ fn permission_node(permission: &str) -> Node {
     }
 }
 
+fn approval_node(options: &RecordApprovalOptions) -> Node {
+    let mut attributes = BTreeMap::from([
+        ("approvalId".to_string(), json!(options.approval_id)),
+        ("approval".to_string(), json!(options.approval)),
+        ("approvedBy".to_string(), json!(options.approved_by)),
+    ]);
+    insert_optional_attribute(&mut attributes, "policy", options.policy.as_deref());
+    insert_optional_attribute(&mut attributes, "scope", options.scope.as_deref());
+    insert_optional_attribute(&mut attributes, "reason", options.reason.as_deref());
+
+    Node {
+        id: node_id("approval", &options.approval_id),
+        stable_key: format!("approval:{}", options.approval_id),
+        node_type: "Approval".to_string(),
+        attributes,
+    }
+}
+
+fn waiver_node(options: &CreateWaiverOptions) -> Node {
+    let mut attributes = BTreeMap::from([
+        ("waiverId".to_string(), json!(options.waiver_id)),
+        ("policy".to_string(), json!(options.policy)),
+        ("reason".to_string(), json!(options.reason)),
+        ("approvedBy".to_string(), json!(options.approved_by)),
+    ]);
+    insert_optional_attribute(&mut attributes, "expiresAt", options.expires_at.as_deref());
+    insert_optional_attribute(&mut attributes, "scope", options.scope.as_deref());
+
+    Node {
+        id: node_id("waiver", &options.waiver_id),
+        stable_key: format!("waiver:{}", options.waiver_id),
+        node_type: "Waiver".to_string(),
+        attributes,
+    }
+}
+
+fn insert_optional_attribute(
+    attributes: &mut BTreeMap<String, Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value {
+        attributes.insert(key.to_string(), json!(value));
+    }
+}
+
+fn find_actor_node_id(graph: &Graph, actor_id: &str) -> Option<String> {
+    let actor_stable_key = format!("actor:{actor_id}");
+    graph
+        .nodes
+        .values()
+        .find(|node| {
+            node.node_type == "Actor"
+                && (node.stable_key == actor_stable_key
+                    || node.attributes.get("actorId").and_then(Value::as_str) == Some(actor_id))
+        })
+        .map(|node| node.id.clone())
+}
+
 fn edge(from: &str, edge_type: &str, to: &str) -> Edge {
     Edge {
         id: edge_id(from, edge_type, to),
@@ -2311,6 +2484,224 @@ acceptanceCriteria:
         .unwrap_err();
 
         assert!(matches!(error, StoreError::ActorNotFound(actor) if actor == "local:missing"));
+    }
+
+    #[test]
+    fn policy_record_approval_links_approver_and_satisfies_policy() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:data-lead".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let receipt = record_approval(
+            tmp.path(),
+            RecordApprovalOptions {
+                approval_id: "approval-data-migration".to_string(),
+                approval: "data-migration".to_string(),
+                policy: Some("policy.data.migration_approval".to_string()),
+                scope: Some("migrations/001.sql".to_string()),
+                reason: Some("Reviewed migration".to_string()),
+                approved_by: "local:data-lead".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "Policy.RecordApproval");
+        assert!(receipt
+            .created_edges
+            .iter()
+            .any(|edge_id| edge_id.contains("has_approval")));
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let report = crate::policy::evaluate_policies(
+            &replay.graph,
+            &crate::policy::PolicyCheckInput {
+                operation: "Merge".to_string(),
+                actor: Some("local:developer".to_string()),
+                changed_files: vec!["migrations/001.sql".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![],
+            },
+        );
+        assert!(!report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.data.migration_approval"));
+    }
+
+    #[test]
+    fn policy_create_waiver_links_approver_and_satisfies_policy_until_expired() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:architect".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let receipt = create_waiver(
+            tmp.path(),
+            CreateWaiverOptions {
+                waiver_id: "waiver-data-migration".to_string(),
+                policy: "policy.data.migration_approval".to_string(),
+                reason: "Emergency migration exception".to_string(),
+                approved_by: "local:architect".to_string(),
+                expires_at: Some("2999-01-01T00:00:00Z".to_string()),
+                scope: Some("migrations/001.sql".to_string()),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt.operation, "Policy.CreateWaiver");
+        assert!(receipt
+            .created_edges
+            .iter()
+            .any(|edge_id| edge_id.contains("has_waiver")));
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let report = crate::policy::evaluate_policies(
+            &replay.graph,
+            &crate::policy::PolicyCheckInput {
+                operation: "Merge".to_string(),
+                actor: Some("local:developer".to_string()),
+                changed_files: vec!["migrations/001.sql".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![],
+            },
+        );
+        assert!(!report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.data.migration_approval"));
+    }
+
+    #[test]
+    fn policy_create_waiver_requires_registered_approver() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = create_waiver(
+            tmp.path(),
+            CreateWaiverOptions {
+                waiver_id: "waiver-data-migration".to_string(),
+                policy: "policy.data.migration_approval".to_string(),
+                reason: "Emergency migration exception".to_string(),
+                approved_by: "local:missing".to_string(),
+                expires_at: Some("2999-01-01T00:00:00Z".to_string()),
+                scope: None,
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::ActorNotFound(actor) if actor == "local:missing"));
+    }
+
+    #[test]
+    fn expired_graph_waiver_does_not_satisfy_policy() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:architect".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        create_waiver(
+            tmp.path(),
+            CreateWaiverOptions {
+                waiver_id: "waiver-expired-migration".to_string(),
+                policy: "policy.data.migration_approval".to_string(),
+                reason: "Expired migration exception".to_string(),
+                approved_by: "local:architect".to_string(),
+                expires_at: Some("2000-01-01T00:00:00Z".to_string()),
+                scope: Some("migrations/001.sql".to_string()),
+                actor: "local:admin".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let report = crate::policy::evaluate_policies(
+            &replay.graph,
+            &crate::policy::PolicyCheckInput {
+                operation: "Merge".to_string(),
+                actor: Some("local:developer".to_string()),
+                changed_files: vec!["migrations/001.sql".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![],
+            },
+        );
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.waiver.expired"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.data.migration_approval"));
     }
 
     #[test]

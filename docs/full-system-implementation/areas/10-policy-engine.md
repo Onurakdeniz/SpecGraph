@@ -15,11 +15,13 @@ Implement deterministic policy decisions with built-in rules and declarative man
 - Built-in policy examples are documented
 - Foundation docs state manifest DSL supports operations, globs, approvals, roles, warnings, denies, waivers
 - Manifest required-role checks can resolve roles from graph-native Actor/Role facts
+- Linked graph-native Approval and Waiver evidence can satisfy policy checks
 
 ### Partly Implemented
 
 - Built-in and manifest checks exist at foundation level
 - Waiver validity checks exist for reason, approver, expiration, and non-waivable rules
+- Approval/waiver scope is recorded but not fully matched against changed paths or operations yet
 - Graph-native PolicyDecision persistence remains
 
 ### Not Implemented / Remaining
