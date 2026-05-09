@@ -90,7 +90,7 @@ Related areas:
 - [x] Add docs source-of-truth check for canonical plan, derived trackers, area files, and reference docs.
 - [x] Add benchmark placeholders for replay, query, validation, indexing, adoption, and CI performance in [`tests/performance/budget-placeholders.json`](../../tests/performance/budget-placeholders.json).
 - [x] Define release/distribution requirements for binaries, GitHub Action, packs, docs, examples, SDK/server/Studio futures, and evidence artifacts in [`docs/release/distribution.md`](../release/distribution.md).
-- [~] Keep `docs/full-system-implementation/index.md` updated when areas change status.
+- [x] Keep `docs/full-system-implementation/index.md` updated when areas change status.
 
 ### Gate Checks
 
