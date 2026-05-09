@@ -111,6 +111,7 @@ pub struct AppendOperationOptions {
     pub graph_branch: String,
     pub input: Value,
     pub delta: GraphDelta,
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -313,6 +314,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         timestamp: timestamp.clone(),
         ontology_version: CORE_ONTOLOGY_VERSION.to_string(),
         graph_branch: options.graph_branch.clone(),
+        dry_run: false,
         input: json!({
             "projectName": options.project_name,
         }),
@@ -338,7 +340,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         graph_branch: request.graph_branch.clone(),
         pre_state_hash: pre_state_hash.clone(),
         post_state_hash: post_state_hash.clone(),
-        delta,
+        delta: delta.clone(),
         signatures: vec![],
     };
 
@@ -348,9 +350,32 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         operation_id,
         operation: request.operation,
         accepted: true,
+        dry_run: false,
         pre_state_hash,
         post_state_hash: post_state_hash.clone(),
         event_ids: vec![event_id],
+        created_nodes: delta
+            .create_nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect(),
+        updated_nodes: delta
+            .update_nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect(),
+        deleted_nodes: delta.delete_nodes.clone(),
+        created_edges: delta
+            .create_edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect(),
+        updated_edges: delta
+            .update_edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect(),
+        deleted_edges: delta.delete_edges.clone(),
         findings: vec![],
     };
     write_json(
@@ -449,6 +474,7 @@ pub fn install_ontology_pack(
                 "path": installed_path.display().to_string(),
             }),
             delta,
+            dry_run: false,
         },
     )
 }
@@ -517,6 +543,7 @@ pub fn import_spec_file(
                 "spec": spec_id,
             }),
             delta,
+            dry_run: false,
         },
     )
 }
@@ -538,6 +565,7 @@ pub fn generate_action_graph(
             graph_branch: options.graph_branch,
             input: json!({"spec": options.spec}),
             delta,
+            dry_run: false,
         },
     )
 }
@@ -664,6 +692,7 @@ pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<Op
                 "commit": options.input.commit,
                 "changedFiles": options.input.changed_files,
             }),
+            dry_run: false,
             delta: GraphDelta {
                 create_nodes,
                 create_edges,
@@ -735,6 +764,7 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
                 "branch": options.branch,
             }),
             delta,
+            dry_run: false,
         },
     )
 }
@@ -769,6 +799,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         timestamp: timestamp.clone(),
         ontology_version: CORE_ONTOLOGY_VERSION.to_string(),
         graph_branch: options.graph_branch,
+        dry_run: options.dry_run,
         input: options.input,
     };
 
@@ -794,6 +825,47 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
 
     let post_state_hash = state_hash(&graph, CORE_ONTOLOGY_VERSION);
 
+    let mut receipt = OperationReceipt {
+        operation_id: operation_id.clone(),
+        operation: request.operation.clone(),
+        accepted: true,
+        dry_run: request.dry_run,
+        pre_state_hash: pre_state_hash.clone(),
+        post_state_hash: post_state_hash.clone(),
+        event_ids: vec![],
+        created_nodes: options
+            .delta
+            .create_nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect(),
+        updated_nodes: options
+            .delta
+            .update_nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect(),
+        deleted_nodes: options.delta.delete_nodes.clone(),
+        created_edges: options
+            .delta
+            .create_edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect(),
+        updated_edges: options
+            .delta
+            .update_edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect(),
+        deleted_edges: options.delta.delete_edges.clone(),
+        findings: vec![],
+    };
+
+    if request.dry_run {
+        return Ok(receipt);
+    }
+
     let event = Event {
         event_id: event_id.clone(),
         sequence: replay.last_sequence + 1,
@@ -810,16 +882,8 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
     };
 
     append_event(&sg_dir.join("events").join("00000001.jsonl"), &event)?;
+    receipt.event_ids.push(event_id);
 
-    let receipt = OperationReceipt {
-        operation_id,
-        operation: request.operation,
-        accepted: true,
-        pre_state_hash,
-        post_state_hash: post_state_hash.clone(),
-        event_ids: vec![event_id],
-        findings: vec![],
-    };
     write_json(
         &sg_dir
             .join("operations")
@@ -1669,6 +1733,7 @@ acceptanceCriteria:
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
                 input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
                 delta: projection.to_delta(),
             },
         )
@@ -1705,6 +1770,7 @@ acceptanceCriteria:
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
                 input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
                 delta: GraphDelta {
                     create_nodes: vec![Node {
                         id: "node_code_file_src_lib_rs".to_string(),
@@ -1741,6 +1807,7 @@ acceptanceCriteria:
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
                 input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
                 delta: GraphDelta {
                     create_nodes: vec![Node {
                         id: "node_spec_auth_001".to_string(),
@@ -1758,6 +1825,88 @@ acceptanceCriteria:
         .unwrap_err();
 
         assert!(matches!(error, StoreError::OntologyValidationFailed(1)));
+    }
+
+    #[test]
+    fn append_operation_dry_run_validates_without_mutating_store() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let projection = SpecProjection {
+            spec: "AUTH-001".to_string(),
+            title: "Password reset".to_string(),
+            module: None,
+            priority: None,
+            summary: None,
+            requirements: vec![crate::spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "User can request reset".to_string(),
+            }],
+            acceptance_criteria: vec![crate::spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Generic response".to_string(),
+            }],
+        };
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                dry_run: true,
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap();
+
+        assert!(receipt.accepted);
+        assert!(receipt.dry_run);
+        assert!(receipt.event_ids.is_empty());
+        assert!(receipt
+            .created_nodes
+            .iter()
+            .any(|node_id| node_id == "node_spec_auth_001"));
+        assert!(receipt
+            .created_edges
+            .iter()
+            .any(|edge_id| edge_id.contains("has_requirement")));
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert_eq!(replay.events_replayed, 1);
+        assert!(!replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "Spec"));
+    }
+
+    #[test]
+    fn operation_receipt_records_changed_object_ids() {
+        let tmp = tempdir().unwrap();
+        let init_receipt = init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(init_receipt.created_nodes, vec!["node_project"]);
+        assert!(init_receipt.created_edges.is_empty());
+        assert!(!init_receipt.dry_run);
+        assert_eq!(init_receipt.event_ids.len(), 1);
     }
 
     #[test]
@@ -1948,6 +2097,7 @@ acceptanceCriteria:
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
                 input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
                 delta: projection.to_delta(),
             },
         )

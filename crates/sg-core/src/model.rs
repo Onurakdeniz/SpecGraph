@@ -112,6 +112,8 @@ pub struct OperationRequest {
     pub ontology_version: String,
     pub graph_branch: String,
     #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
     pub input: Value,
 }
 
@@ -121,10 +123,24 @@ pub struct OperationReceipt {
     pub operation_id: String,
     pub operation: String,
     pub accepted: bool,
+    #[serde(default)]
+    pub dry_run: bool,
     pub pre_state_hash: String,
     pub post_state_hash: String,
     #[serde(default)]
     pub event_ids: Vec<String>,
+    #[serde(default)]
+    pub created_nodes: Vec<NodeId>,
+    #[serde(default)]
+    pub updated_nodes: Vec<NodeId>,
+    #[serde(default)]
+    pub deleted_nodes: Vec<NodeId>,
+    #[serde(default)]
+    pub created_edges: Vec<EdgeId>,
+    #[serde(default)]
+    pub updated_edges: Vec<EdgeId>,
+    #[serde(default)]
+    pub deleted_edges: Vec<EdgeId>,
     #[serde(default)]
     pub findings: Vec<Finding>,
 }

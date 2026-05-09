@@ -538,6 +538,7 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
                 actor: args.actor,
                 graph_branch: args.graph_branch,
                 input: json!({ "spec": args.spec }),
+                dry_run: false,
                 delta: projection.to_delta(),
             })?;
             println!("specCreated: {}", projection.spec);
@@ -675,6 +676,7 @@ fn handle_adopt(store: &SpecGraphStore, root: &Path, args: AdoptArgs) -> anyhow:
                 graph_branch: args.graph_branch,
                 input: json!({"mode": args.mode}),
                 delta,
+                dry_run: false,
             })?;
             println!("adoptionMode: {mode:?}");
             println!("codeFilesAdopted: {count}");
@@ -720,6 +722,7 @@ fn handle_proposal(store: &SpecGraphStore, args: ProposalArgs) -> anyhow::Result
                 actor: args.actor,
                 graph_branch: args.graph_branch,
                 input: json!({"proposal": args.id}),
+                dry_run: false,
                 delta: GraphDelta {
                     create_nodes: vec![node],
                     ..GraphDelta::default()
@@ -848,6 +851,7 @@ fn handle_code(store: &SpecGraphStore, root: &Path, args: CodeArgs) -> anyhow::R
                     "observedSymbols": symbol_count,
                 }),
                 delta,
+                dry_run: false,
             })?;
             println!("codeFilesIndexed: {}", files.len());
             println!("codeSymbolsIndexed: {symbol_count}");
@@ -873,6 +877,7 @@ fn handle_trace(store: &SpecGraphStore, root: &Path, args: TraceArgs) -> anyhow:
                 graph_branch: args.graph_branch,
                 input: json!({"links": manifest.links}),
                 delta,
+                dry_run: false,
             })?;
             println!("traceLinksImported: {}", manifest.links.len());
             println!("operationId: {}", receipt.operation_id);
@@ -934,6 +939,7 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
                         &[],
                         &replay.state_hash,
                     ),
+                    dry_run: false,
                 })?;
                 println!("validationRunRecorded: {run_id}");
                 println!("operationId: {}", receipt.operation_id);
@@ -989,6 +995,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         graph_branch: "main".to_string(),
         input: json!({"spec": "AUTH-001"}),
         delta: projection.to_delta(),
+        dry_run: false,
     })?;
     println!("proof:spec ok");
 
@@ -1006,6 +1013,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
             }],
             ..GraphDelta::default()
         },
+        dry_run: false,
     });
     if rejected_operation.is_ok() {
         bail!("proof expected operation ABI validation to reject disallowed node type");
@@ -1051,6 +1059,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
             "observedSymbols": code_symbol_count,
         }),
         delta: observations_to_delta(&code_observations),
+        dry_run: false,
     })?;
     println!("proof:code-index ok");
 
@@ -1074,6 +1083,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         graph_branch: "main".to_string(),
         input: json!({"links": manifest.links}),
         delta: trace_delta,
+        dry_run: false,
     })?;
     println!("proof:trace ok");
 
@@ -1165,6 +1175,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
             }],
             ..GraphDelta::default()
         },
+        dry_run: false,
     })?;
     transition_proposal(
         &store,
@@ -1208,6 +1219,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
             &[],
             &spec_report.state_hash,
         ),
+        dry_run: false,
     })?;
     println!("proof:validation-record ok");
     println!("proof:ok root={}", root.display());
@@ -1580,6 +1592,7 @@ fn transition_proposal(
                 "state": trust_state_label(target),
                 "reason": reason,
             }),
+            dry_run: false,
             delta: GraphDelta {
                 update_nodes: vec![updated],
                 ..GraphDelta::default()

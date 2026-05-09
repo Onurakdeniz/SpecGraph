@@ -252,6 +252,7 @@ mod tests {
                 timestamp: "now".to_string(),
                 ontology_version: "core@0.1.0".to_string(),
                 graph_branch: "main".to_string(),
+                dry_run: false,
                 input: json!({}),
             },
             &GraphDelta::default(),

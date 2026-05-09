@@ -59,6 +59,6 @@ pub use policy::{
 };
 pub use proposal::{Proposal, TrustState};
 
-pub use query::GraphQuery;
+pub use query::{GraphQuery, QueryDirection, QueryLimitExceeded, QueryLimits};
 
 pub use trace::{validate_trace_links, LinksManifest, TestLink};
