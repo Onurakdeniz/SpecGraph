@@ -3,6 +3,8 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -100,6 +102,7 @@ pub fn load_policy_manifest(path: &Path) -> Result<PolicyManifest, String> {
 }
 
 pub fn evaluate_policies(_graph: &Graph, input: &PolicyCheckInput) -> PolicyReport {
+    let now = OffsetDateTime::now_utc();
     let mut report = PolicyReport {
         decisions: vec![PolicyDecision {
             policy: "policy.operation.traceable".to_string(),
@@ -109,7 +112,7 @@ pub fn evaluate_policies(_graph: &Graph, input: &PolicyCheckInput) -> PolicyRepo
                 input.operation
             ),
         }],
-        findings: Vec::new(),
+        findings: validate_waivers(input, now),
     };
 
     for file in &input.changed_files {
@@ -127,10 +130,7 @@ pub fn evaluate_policies(_graph: &Graph, input: &PolicyCheckInput) -> PolicyRepo
         }
 
         if file.starts_with("migrations/") || file.contains("/migrations/") {
-            let waived = input
-                .waivers
-                .iter()
-                .any(|waiver| waiver.policy == "policy.data.migration_approval");
+            let waived = has_valid_waiver(input, "policy.data.migration_approval", now);
             if !input
                 .approvals
                 .iter()
@@ -162,7 +162,8 @@ pub fn evaluate_policies_with_manifests(
 ) -> PolicyReport {
     let mut report = evaluate_policies(graph, input);
     for manifest in manifests {
-        let manifest_report = evaluate_policy_manifest(input, manifest);
+        let manifest_report =
+            evaluate_policy_manifest_inner(input, manifest, OffsetDateTime::now_utc(), false);
         report.decisions.extend(manifest_report.decisions);
         report.findings.extend(manifest_report.findings);
     }
@@ -182,9 +183,22 @@ pub fn evaluate_policy_manifest(
     input: &PolicyCheckInput,
     manifest: &PolicyManifest,
 ) -> PolicyReport {
+    evaluate_policy_manifest_inner(input, manifest, OffsetDateTime::now_utc(), true)
+}
+
+fn evaluate_policy_manifest_inner(
+    input: &PolicyCheckInput,
+    manifest: &PolicyManifest,
+    now: OffsetDateTime,
+    include_waiver_validation: bool,
+) -> PolicyReport {
     let mut report = PolicyReport {
         decisions: Vec::new(),
-        findings: Vec::new(),
+        findings: if include_waiver_validation {
+            validate_waivers(input, now)
+        } else {
+            Vec::new()
+        },
     };
 
     for rule in &manifest.policies {
@@ -192,7 +206,7 @@ pub fn evaluate_policy_manifest(
             continue;
         }
 
-        if rule.waivable && input.waivers.iter().any(|waiver| waiver.policy == rule.id) {
+        if rule.waivable && has_valid_waiver(input, &rule.id, now) {
             report.decisions.push(PolicyDecision {
                 policy: rule.id.clone(),
                 effect: PolicyEffect::Allow,
@@ -238,6 +252,83 @@ pub fn evaluate_policy_manifest(
     }
 
     report
+}
+
+fn validate_waivers(input: &PolicyCheckInput, now: OffsetDateTime) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for waiver in &input.waivers {
+        if waiver.policy.trim().is_empty() {
+            findings.push(finding(
+                "policy.waiver.policy_required",
+                FindingSeverity::Error,
+                "Waiver policy id is required".to_string(),
+            ));
+        }
+        if waiver.reason.trim().is_empty() {
+            findings.push(finding(
+                "policy.waiver.reason_required",
+                FindingSeverity::Error,
+                format!("Waiver for policy `{}` requires a reason", waiver.policy),
+            ));
+        }
+        if waiver.approved_by.trim().is_empty() {
+            findings.push(finding(
+                "policy.waiver.approver_required",
+                FindingSeverity::Error,
+                format!("Waiver for policy `{}` requires an approver", waiver.policy),
+            ));
+        }
+        if let Some(expires_at) = &waiver.expires_at {
+            match parse_waiver_expiration(expires_at) {
+                Ok(expiration) if expiration <= now => findings.push(finding(
+                    "policy.waiver.expired",
+                    FindingSeverity::Error,
+                    format!(
+                        "Waiver for policy `{}` expired at `{expires_at}`",
+                        waiver.policy
+                    ),
+                )),
+                Ok(_) => {}
+                Err(message) => findings.push(finding(
+                    "policy.waiver.expires_at_invalid",
+                    FindingSeverity::Error,
+                    format!(
+                        "Waiver for policy `{}` has invalid expiresAt `{expires_at}`: {message}",
+                        waiver.policy
+                    ),
+                )),
+            }
+        }
+    }
+    findings
+}
+
+fn has_valid_waiver(input: &PolicyCheckInput, policy: &str, now: OffsetDateTime) -> bool {
+    input.waivers.iter().any(|waiver| {
+        waiver.policy == policy
+            && waiver_has_required_fields(waiver)
+            && waiver_is_unexpired(waiver, now)
+    })
+}
+
+fn waiver_has_required_fields(waiver: &Waiver) -> bool {
+    !waiver.policy.trim().is_empty()
+        && !waiver.reason.trim().is_empty()
+        && !waiver.approved_by.trim().is_empty()
+}
+
+fn waiver_is_unexpired(waiver: &Waiver, now: OffsetDateTime) -> bool {
+    match &waiver.expires_at {
+        Some(expires_at) => {
+            parse_waiver_expiration(expires_at).is_ok_and(|expiration| expiration > now)
+        }
+        None => true,
+    }
+}
+
+fn parse_waiver_expiration(value: &str) -> Result<OffsetDateTime, String> {
+    OffsetDateTime::parse(value, &Rfc3339)
+        .map_err(|error| format!("expected RFC3339 timestamp ({error})"))
 }
 
 fn rule_matches(input: &PolicyCheckInput, rule: &PolicyRule) -> bool {
@@ -432,5 +523,183 @@ mod tests {
             &manifest,
         );
         assert_eq!(report.findings[0].severity, FindingSeverity::Warning);
+    }
+
+    #[test]
+    fn built_in_policy_accepts_valid_unexpired_waiver() {
+        let report = evaluate_policies(
+            &Graph::default(),
+            &PolicyCheckInput {
+                operation: "Merge".to_string(),
+                changed_files: vec!["migrations/001.sql".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![Waiver {
+                    policy: "policy.data.migration_approval".to_string(),
+                    reason: "Local development migration exception".to_string(),
+                    approved_by: "architect".to_string(),
+                    expires_at: Some("2999-01-01T00:00:00Z".to_string()),
+                }],
+            },
+        );
+
+        assert!(!report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.data.migration_approval"));
+    }
+
+    #[test]
+    fn expired_waiver_does_not_satisfy_built_in_policy() {
+        let report = evaluate_policies(
+            &Graph::default(),
+            &PolicyCheckInput {
+                operation: "Merge".to_string(),
+                changed_files: vec!["migrations/001.sql".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![Waiver {
+                    policy: "policy.data.migration_approval".to_string(),
+                    reason: "Expired exception".to_string(),
+                    approved_by: "architect".to_string(),
+                    expires_at: Some("2000-01-01T00:00:00Z".to_string()),
+                }],
+            },
+        );
+
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.waiver.expired"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.data.migration_approval"));
+    }
+
+    #[test]
+    fn malformed_waiver_reports_required_fields_and_expiration() {
+        let report = evaluate_policies(
+            &Graph::default(),
+            &PolicyCheckInput {
+                operation: "Merge".to_string(),
+                changed_files: vec![],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![Waiver {
+                    policy: "policy.example".to_string(),
+                    reason: String::new(),
+                    approved_by: String::new(),
+                    expires_at: Some("tomorrow".to_string()),
+                }],
+            },
+        );
+
+        for code in [
+            "policy.waiver.reason_required",
+            "policy.waiver.approver_required",
+            "policy.waiver.expires_at_invalid",
+        ] {
+            assert!(
+                report.findings.iter().any(|finding| finding.code == code),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_waivable_rule_requires_valid_waiver() {
+        let manifest = PolicyManifest {
+            policies: vec![PolicyRule {
+                id: "policy.custom.docs".to_string(),
+                description: None,
+                effect: PolicyEffect::Deny,
+                message: Some("Docs change denied unless waived.".to_string()),
+                operations: vec!["Merge".to_string()],
+                changed_file_globs: vec!["docs/**".to_string()],
+                required_approvals: vec![],
+                required_roles: vec![],
+                waivable: true,
+            }],
+        };
+
+        let expired = evaluate_policy_manifest(
+            &PolicyCheckInput {
+                operation: "Merge".to_string(),
+                changed_files: vec!["docs/readme.md".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![Waiver {
+                    policy: "policy.custom.docs".to_string(),
+                    reason: "Temporary docs migration".to_string(),
+                    approved_by: "maintainer".to_string(),
+                    expires_at: Some("2000-01-01T00:00:00Z".to_string()),
+                }],
+            },
+            &manifest,
+        );
+        assert!(expired
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.custom.docs"));
+
+        let valid = evaluate_policy_manifest(
+            &PolicyCheckInput {
+                operation: "Merge".to_string(),
+                changed_files: vec!["docs/readme.md".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![Waiver {
+                    policy: "policy.custom.docs".to_string(),
+                    reason: "Temporary docs migration".to_string(),
+                    approved_by: "maintainer".to_string(),
+                    expires_at: Some("2999-01-01T00:00:00Z".to_string()),
+                }],
+            },
+            &manifest,
+        );
+        assert!(valid.findings.is_empty());
+        assert!(valid
+            .decisions
+            .iter()
+            .any(|decision| decision.effect == PolicyEffect::Allow));
+    }
+
+    #[test]
+    fn non_waivable_manifest_rule_cannot_be_waived() {
+        let manifest = PolicyManifest {
+            policies: vec![PolicyRule {
+                id: "policy.custom.no-waive".to_string(),
+                description: None,
+                effect: PolicyEffect::Deny,
+                message: Some("This rule cannot be waived.".to_string()),
+                operations: vec!["Merge".to_string()],
+                changed_file_globs: vec!["src/**".to_string()],
+                required_approvals: vec![],
+                required_roles: vec![],
+                waivable: false,
+            }],
+        };
+
+        let report = evaluate_policy_manifest(
+            &PolicyCheckInput {
+                operation: "Merge".to_string(),
+                changed_files: vec!["src/lib.rs".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![Waiver {
+                    policy: "policy.custom.no-waive".to_string(),
+                    reason: "Trying to waive".to_string(),
+                    approved_by: "maintainer".to_string(),
+                    expires_at: Some("2999-01-01T00:00:00Z".to_string()),
+                }],
+            },
+            &manifest,
+        );
+
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.custom.no-waive"));
     }
 }
