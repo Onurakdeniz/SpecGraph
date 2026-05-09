@@ -2,7 +2,7 @@
 
 **System area:** ModuleGraphs  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** fresh Phase 3.2 implementation audit after adding graph-native ModuleGraph model facts.
 
 ## Purpose
 
@@ -14,16 +14,20 @@ Represent bounded capability areas such as modules, frontend areas, CLI command 
 
 - MVP includes Module and TOUCHES_MODULE
 - Spec examples use Identity module
+- Built-in ontology now includes `Layer`, `Package`, `Capability`, and `PublicInterface` graph facts.
+- `ModuleGraph.Upsert` is registered in the Operation ABI for module/layer/package/capability/interface deltas.
+- Public/private interface visibility is validated, and every `PublicInterface` must be exposed by an owning `Module`.
 
 ### Partly Implemented
 
 - Basic module references exist
-- Layers, capabilities, packages, crates, and public interfaces are not complete
+- Layers, packages, capabilities, and public/private interface facts exist in `sg-core` and can be routed through Operation Runtime.
+- Dedicated module lifecycle CLI commands and repository inference are not complete.
 
 ### Not Implemented / Remaining
 
 - Module lifecycle commands
-- Layer/boundary ontology
+- Layer/package/capability/interface ontology is partially implemented; richer boundary rules remain
 - Architecture-pack validators
 - Existing repo module inference
 
@@ -45,7 +49,7 @@ Boundary, dependency, ownership, cross-module policy, action allowed-scope valid
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: Module lifecycle commands.
-- Implement or finish: Layer/boundary ontology.
+- Implement or finish: richer layer/boundary ontology and lifecycle commands.
 - Implement or finish: Architecture-pack validators.
 - Implement or finish: Existing repo module inference.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.

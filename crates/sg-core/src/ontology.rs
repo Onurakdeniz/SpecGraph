@@ -1,6 +1,7 @@
 use crate::model::{Edge, Finding, FindingSeverity, Graph, GraphDelta, Node};
 use crate::stable_key::validate_stable_key;
 use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_ONTOLOGY};
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const CORE_ONTOLOGY_VERSION: &str = "core@0.1.0";
@@ -51,6 +52,10 @@ impl MvpOntology {
                 "TestRunner",
                 "CIProvider",
                 "Module",
+                "Layer",
+                "Package",
+                "Capability",
+                "PublicInterface",
                 "Spec",
                 "Requirement",
                 "AcceptanceCriterion",
@@ -98,6 +103,12 @@ impl MvpOntology {
                 "USES_PACKAGE_MANAGER",
                 "USES_TEST_RUNNER",
                 "USES_CI_PROVIDER",
+                "HAS_LAYER",
+                "HAS_PACKAGE",
+                "IN_LAYER",
+                "PACKAGE_IN_MODULE",
+                "HAS_CAPABILITY",
+                "EXPOSES_INTERFACE",
                 "TOUCHES_MODULE",
                 "HAS_REQUIREMENT",
                 "HAS_ACCEPTANCE_CRITERION",
@@ -299,6 +310,7 @@ impl MvpOntology {
     pub fn validate_graph(&self, graph: &Graph) -> Vec<Finding> {
         let mut findings = self.validate_integrity(graph);
         self.validate_project_profile(graph, &mut findings);
+        self.validate_module_graph(graph, &mut findings);
         self.validate_spec_completeness(graph, &mut findings);
         findings
     }
@@ -337,6 +349,59 @@ impl MvpOntology {
                         .with_related_edges(edges.iter().map(|edge| edge.id.clone())),
                     );
                 }
+            }
+        }
+    }
+
+    fn validate_module_graph(&self, graph: &Graph, findings: &mut Vec<Finding>) {
+        for interface in graph
+            .nodes
+            .values()
+            .filter(|node| node.node_type == "PublicInterface")
+        {
+            match interface.attributes.get("visibility").and_then(Value::as_str) {
+                Some("public" | "private") => {}
+                Some(value) => findings.push(
+                    finding(
+                        "module_graph.interface_visibility_invalid",
+                        format!(
+                            "PublicInterface `{}` has invalid visibility `{}`. Remediation: use `public` or `private`.",
+                            interface.id, value
+                        ),
+                    )
+                    .with_remediation("Set interface visibility to `public` or `private`.")
+                    .with_related_nodes([interface.id.clone()]),
+                ),
+                None => findings.push(
+                    finding(
+                        "module_graph.interface_visibility_required",
+                        format!(
+                            "PublicInterface `{}` must declare visibility. Remediation: set `visibility` to `public` or `private`.",
+                            interface.id
+                        ),
+                    )
+                    .with_remediation("Set interface visibility to `public` or `private`.")
+                    .with_related_nodes([interface.id.clone()]),
+                ),
+            }
+
+            let exposed_by: Vec<_> = graph
+                .edges
+                .values()
+                .filter(|edge| edge.to == interface.id && edge.edge_type == "EXPOSES_INTERFACE")
+                .collect();
+            if exposed_by.is_empty() {
+                findings.push(
+                    finding(
+                        "module_graph.interface_owner_required",
+                        format!(
+                            "PublicInterface `{}` must be exposed by a Module. Remediation: add an EXPOSES_INTERFACE edge from the owning Module.",
+                            interface.id
+                        ),
+                    )
+                    .with_remediation("Add an EXPOSES_INTERFACE edge from the owning Module.")
+                    .with_related_nodes([interface.id.clone()]),
+                );
             }
         }
     }
@@ -791,6 +856,12 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "USES_PACKAGE_MANAGER" => Some((&["Project"], &["PackageManager"])),
         "USES_TEST_RUNNER" => Some((&["Project"], &["TestRunner"])),
         "USES_CI_PROVIDER" => Some((&["Project"], &["CIProvider"])),
+        "HAS_LAYER" => Some((&["Project"], &["Layer"])),
+        "HAS_PACKAGE" => Some((&["Project"], &["Package"])),
+        "IN_LAYER" => Some((&["Module"], &["Layer"])),
+        "PACKAGE_IN_MODULE" => Some((&["Module"], &["Package"])),
+        "HAS_CAPABILITY" => Some((&["Module"], &["Capability"])),
+        "EXPOSES_INTERFACE" => Some((&["Module"], &["PublicInterface"])),
         "TOUCHES_MODULE" => Some((&["Spec"], &["Module"])),
         "HAS_REQUIREMENT" => Some((&["Spec"], &["Requirement"])),
         "HAS_ACCEPTANCE_CRITERION" => Some((&["Spec"], &["AcceptanceCriterion"])),
@@ -1026,5 +1097,28 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "project_profile.singleton"));
+    }
+
+    #[test]
+    fn module_interface_visibility_and_owner_are_validated() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "interface".to_string(),
+            Node {
+                id: "interface".to_string(),
+                stable_key: "public-interface:identity/internal".to_string(),
+                node_type: "PublicInterface".to_string(),
+                attributes: BTreeMap::from([("visibility".to_string(), json!("hidden"))]),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_graph(&graph);
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "module_graph.interface_visibility_invalid"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "module_graph.interface_owner_required"));
     }
 }

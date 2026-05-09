@@ -55,6 +55,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "architecture-style:hexagonal",
     },
     StableKeyFamily {
+        prefix: "capability",
+        description: "Module capability fact",
+        example: "capability:password-reset",
+    },
+    StableKeyFamily {
         prefix: "ci-provider",
         description: "Project continuous integration provider profile fact",
         example: "ci-provider:github-actions",
@@ -100,6 +105,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "graph-snapshot:sha256:abc123",
     },
     StableKeyFamily {
+        prefix: "layer",
+        description: "Module or architecture layer fact",
+        example: "layer:application",
+    },
+    StableKeyFamily {
         prefix: "language",
         description: "Project implementation language profile fact",
         example: "language:typescript",
@@ -113,6 +123,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "package-manager",
         description: "Project package manager profile fact",
         example: "package-manager:npm",
+    },
+    StableKeyFamily {
+        prefix: "package",
+        description: "Package, crate, plugin, or deployable unit fact",
+        example: "package:crates/sg-core",
     },
     StableKeyFamily {
         prefix: "ontology-pack",
@@ -138,6 +153,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "policy-decision",
         description: "Persisted policy decision",
         example: "policy-decision:run-001/policy.secret",
+    },
+    StableKeyFamily {
+        prefix: "public-interface",
+        description: "Module public or private interface fact",
+        example: "public-interface:identity/PasswordResetService",
     },
     StableKeyFamily {
         prefix: "project",
@@ -364,6 +384,10 @@ mod tests {
         for family in [
             "project",
             "module",
+            "layer",
+            "package",
+            "capability",
+            "public-interface",
             "spec",
             "requirement",
             "acceptance-criterion",
