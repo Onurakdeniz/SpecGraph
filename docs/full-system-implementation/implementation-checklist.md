@@ -24,7 +24,7 @@ Before any slice is considered complete:
 - [x] Operation receipt includes actor, operation id, pre-state hash, post-state hash, changed objects, and findings.
 - [~] New graph facts use stable keys.
 - [x] New graph facts validate against the active ontology.
-- [ ] Policy checks run before acceptance.
+- [x] Policy checks run before acceptance.
 - [~] Validation findings include severity, validator id, related graph/file location, and remediation.
 - [x] Event replay remains deterministic.
 - [~] Docs and examples are updated.
@@ -162,7 +162,7 @@ Related areas:
 - [x] Add ontology pack source metadata validation.
 - [x] Add ontology pack signature metadata validation for local and future remote sources.
 - [x] Add pack migration planning model.
-- [~] Add policy result model persistence or receipt inclusion.
+- [x] Add policy append gate before event append.
 - [~] Add actor identity resolution.
 - [~] Add role/permission model foundation.
 - [~] Add graph-native `Approval` and `Waiver` nodes.
@@ -176,7 +176,7 @@ Related areas:
 - [~] No graph mutation can happen without a receipt.
 - [~] Failed operations leave no partial graph events.
 - [x] Invalid ontology delta fails before event append.
-- [ ] Denied policy blocks the operation.
+- [x] Denied policy blocks the operation.
 - [~] Approval-required policy cannot pass without valid scoped approval.
 - [x] Expired waiver cannot satisfy a policy.
 - [x] Secret/production-denied policies cannot be waived unless explicitly designed as waivable.
