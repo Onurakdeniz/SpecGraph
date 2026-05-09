@@ -66,3 +66,48 @@ pub fn detect_merge_conflicts(base: &Graph, ours: &Graph, theirs: &Graph) -> Vec
 
     conflicts
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Node;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn detects_concurrent_node_update_conflict() {
+        let base = graph_with_spec_title("Base");
+        let ours = graph_with_spec_title("Ours");
+        let theirs = graph_with_spec_title("Theirs");
+
+        let conflicts = detect_merge_conflicts(&base, &ours, &theirs);
+
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].kind, "node.concurrent_update");
+    }
+
+    #[test]
+    fn ignores_matching_concurrent_node_updates() {
+        let base = graph_with_spec_title("Base");
+        let ours = graph_with_spec_title("Same");
+        let theirs = graph_with_spec_title("Same");
+
+        let conflicts = detect_merge_conflicts(&base, &ours, &theirs);
+
+        assert!(conflicts.is_empty());
+    }
+
+    fn graph_with_spec_title(title: &str) -> Graph {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "node_spec_auth_001".to_string(),
+            Node {
+                id: "node_spec_auth_001".to_string(),
+                stable_key: "spec:AUTH-001".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::from([("title".to_string(), json!(title))]),
+            },
+        );
+        graph
+    }
+}

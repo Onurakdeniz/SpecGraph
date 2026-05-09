@@ -110,6 +110,15 @@ Compare current replayed graph state with a snapshot JSON file:
 sg graph diff --snapshot .specgraph/snapshots/snap_x.json
 ```
 
+Detect semantic graph conflicts by comparing a base snapshot, the current replayed graph as `ours`, and another snapshot as `theirs`:
+
+```bash
+sg graph conflicts \
+  --base .specgraph/snapshots/base.json \
+  --theirs .specgraph/snapshots/theirs.json \
+  --check
+```
+
 ## Proof-of-Idea Runner
 
 Run a deterministic local scenario that exercises positive and negative enforcement paths:

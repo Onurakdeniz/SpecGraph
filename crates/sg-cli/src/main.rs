@@ -2,7 +2,7 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_core::{
-    analyze_impact, built_in_operations, diff_graphs, evaluate_policies,
+    analyze_impact, built_in_operations, detect_merge_conflicts, diff_graphs, evaluate_policies,
     evaluate_policies_with_manifests, index_source_file, load_pack, load_policy_manifest,
     observations_to_delta, scan_repository, validate_commit_binding, validate_pack,
     validate_trace_links, AdoptionMode, AppendOperationOptions, BindBranchOptions,
@@ -429,12 +429,25 @@ enum GraphCommand {
     Status,
     /// Diff current replayed graph against a snapshot JSON file.
     Diff(GraphDiffArgs),
+    /// Detect semantic conflicts between base, current graph, and another snapshot.
+    Conflicts(GraphConflictsArgs),
 }
 
 #[derive(Debug, Args)]
 struct GraphDiffArgs {
     #[arg(long)]
     snapshot: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct GraphConflictsArgs {
+    #[arg(long)]
+    base: PathBuf,
+    #[arg(long)]
+    theirs: PathBuf,
+    /// Exit non-zero when conflicts are found.
+    #[arg(long)]
+    check: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1100,27 +1113,50 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
         GraphCommand::Diff(args) => {
             let report = store.replay(ReplayOptions { check_hashes: true })?;
             let snapshot_path = resolve_path(root, args.snapshot);
-            let snapshot: Snapshot = serde_json::from_slice(&fs::read(&snapshot_path)?)?;
-            let snapshot_graph = Graph {
-                nodes: snapshot
-                    .nodes
-                    .into_iter()
-                    .map(|node| (node.id.clone(), node))
-                    .collect(),
-                edges: snapshot
-                    .edges
-                    .into_iter()
-                    .map(|edge| (edge.id.clone(), edge))
-                    .collect(),
-            };
+            let snapshot_graph = read_snapshot_graph(&snapshot_path)?;
             let diff = diff_graphs(&snapshot_graph, &report.graph);
             println!("addedNodes: {}", diff.added_nodes.len());
             println!("removedNodes: {}", diff.removed_nodes.len());
             println!("addedEdges: {}", diff.added_edges.len());
             println!("removedEdges: {}", diff.removed_edges.len());
         }
+        GraphCommand::Conflicts(args) => {
+            let report = store.replay(ReplayOptions { check_hashes: true })?;
+            let base_path = resolve_path(root, args.base);
+            let theirs_path = resolve_path(root, args.theirs);
+            let base = read_snapshot_graph(&base_path)?;
+            let theirs = read_snapshot_graph(&theirs_path)?;
+            let conflicts = detect_merge_conflicts(&base, &report.graph, &theirs);
+            println!("conflicts: {}", conflicts.len());
+            for conflict in &conflicts {
+                println!("{} {}: {}", conflict.kind, conflict.id, conflict.message);
+            }
+            if args.check && !conflicts.is_empty() {
+                bail!(
+                    "graph conflict check failed with {} conflict(s)",
+                    conflicts.len()
+                );
+            }
+        }
     }
     Ok(())
+}
+
+fn read_snapshot_graph(path: &Path) -> anyhow::Result<Graph> {
+    let snapshot: Snapshot = serde_json::from_slice(&fs::read(path)?)
+        .with_context(|| format!("failed to parse snapshot {}", path.display()))?;
+    Ok(Graph {
+        nodes: snapshot
+            .nodes
+            .into_iter()
+            .map(|node| (node.id.clone(), node))
+            .collect(),
+        edges: snapshot
+            .edges
+            .into_iter()
+            .map(|edge| (edge.id.clone(), edge))
+            .collect(),
+    })
 }
 
 fn validate_specs_or_fail(store: &SpecGraphStore) -> anyhow::Result<()> {

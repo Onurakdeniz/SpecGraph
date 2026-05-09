@@ -33,6 +33,8 @@ Implemented commands:
 - `sg proof run`
 - `sg graph replay --check`
 - `sg graph status`
+- `sg graph diff`
+- `sg graph conflicts`
 
 ## Quick Start
 
