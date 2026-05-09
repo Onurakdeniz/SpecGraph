@@ -6,7 +6,9 @@ use crate::model::{
     OPERATION_REQUEST_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION,
 };
 use crate::ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
-use crate::ontology_pack::{load_pack, validate_pack, OntologyPackManifest};
+use crate::ontology_pack::{
+    load_pack, plan_pack_migration, validate_pack, OntologyMigrationAction, OntologyPackManifest,
+};
 use crate::operation_abi::{
     validate_operation_postconditions, validate_operation_preconditions, validate_operation_request,
 };
@@ -590,6 +592,23 @@ pub fn install_ontology_pack(
 
     let store = SpecGraphStore::new(root);
     store.ensure_exists()?;
+    let installed_packs = list_installed_ontology_packs(root)?;
+    let current_pack = installed_packs
+        .iter()
+        .filter(|installed| installed.name == pack.name)
+        .max_by(|left, right| left.version.cmp(&right.version));
+    let migration_plan = plan_pack_migration(current_pack, &pack);
+    let migration_error_count = migration_plan
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if migration_error_count > 0 {
+        return Err(StoreError::OntologyPackValidationFailed(
+            migration_error_count,
+        ));
+    }
+
     let pack_dir = store.specgraph_dir().join("ontology").join("packs");
     fs::create_dir_all(&pack_dir).map_err(|source| StoreError::Io {
         path: pack_dir.clone(),
@@ -611,6 +630,11 @@ pub fn install_ontology_pack(
         "ontology_version",
         &format!("{}@{}", pack.name, pack.version),
     );
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let existing_pack_node = replay.graph.nodes.values().find(|node| {
+        node.node_type == "OntologyPack"
+            && node.attributes.get("name").and_then(Value::as_str) == Some(pack.name.as_str())
+    });
     let mut pack_attributes = BTreeMap::from([
         ("name".to_string(), json!(pack.name)),
         ("version".to_string(), json!(pack.version)),
@@ -628,25 +652,64 @@ pub fn install_ontology_pack(
         pack_attributes.insert("signatureValue".to_string(), json!(signature.value));
         pack_attributes.insert("signedBy".to_string(), json!(signature.signed_by));
     }
+    if let Some(from_version) = &migration_plan.from_version {
+        pack_attributes.insert("previousVersion".to_string(), json!(from_version));
+    }
+    pack_attributes.insert("migrationAction".to_string(), json!(migration_plan.action));
 
-    let delta = GraphDelta {
-        create_nodes: vec![
-            Node {
-                id: pack_node_id,
-                stable_key: format!("ontology-pack:{}", pack.name),
-                node_type: "OntologyPack".to_string(),
-                attributes: pack_attributes,
-            },
-            Node {
-                id: version_node_id,
-                stable_key: format!("ontology-version:{}@{}", report.pack, report.version),
-                node_type: "OntologyVersion".to_string(),
+    let mut create_nodes = Vec::new();
+    let mut update_nodes = Vec::new();
+    if let Some(existing_pack_node) = existing_pack_node {
+        let mut updated_pack_node = existing_pack_node.clone();
+        updated_pack_node.attributes = pack_attributes;
+        update_nodes.push(updated_pack_node);
+    } else {
+        create_nodes.push(Node {
+            id: pack_node_id,
+            stable_key: format!("ontology-pack:{}", pack.name),
+            node_type: "OntologyPack".to_string(),
+            attributes: pack_attributes,
+        });
+    }
+    create_nodes.push(Node {
+        id: version_node_id,
+        stable_key: format!("ontology-version:{}@{}", report.pack, report.version),
+        node_type: "OntologyVersion".to_string(),
+        attributes: BTreeMap::from([
+            ("pack".to_string(), json!(report.pack)),
+            ("version".to_string(), json!(report.version)),
+        ]),
+    });
+
+    if migration_plan.action == OntologyMigrationAction::Upgrade {
+        for migration in &migration_plan.migrations {
+            create_nodes.push(Node {
+                id: node_id(
+                    "ontology_migration",
+                    &format!("{}:{}->{}", report.pack, migration.from, migration.to),
+                ),
+                stable_key: format!(
+                    "ontology-migration:{}:{}->{}",
+                    report.pack, migration.from, migration.to
+                ),
+                node_type: "OntologyMigration".to_string(),
                 attributes: BTreeMap::from([
                     ("pack".to_string(), json!(report.pack)),
-                    ("version".to_string(), json!(report.version)),
+                    ("from".to_string(), json!(migration.from)),
+                    ("to".to_string(), json!(migration.to)),
+                    ("description".to_string(), json!(migration.description)),
+                    (
+                        "compatibilityFindings".to_string(),
+                        json!(migration_plan.findings),
+                    ),
                 ]),
-            },
-        ],
+            });
+        }
+    }
+
+    let delta = GraphDelta {
+        create_nodes,
+        update_nodes,
         ..GraphDelta::default()
     };
 
@@ -3637,6 +3700,89 @@ edgeTypes:
             .values()
             .any(|node| node.node_type == "OntologyPack"
                 && node.attributes.get("signatureAlgorithm") == Some(&json!("unsigned-dev"))));
+    }
+
+    #[test]
+    fn install_ontology_pack_upgrade_records_migration_plan() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let v1_path = tmp.path().join("ddd-v1.yaml");
+        fs::write(
+            &v1_path,
+            r#"
+name: ddd-backend
+version: 0.1.0
+source:
+  kind: local
+  uri: ddd-v1.yaml
+signature:
+  algorithm: unsigned-dev
+  value: unsigned-dev
+  signedBy: local-dev
+extends:
+  - core@0.1.0
+nodeTypes:
+  - Aggregate
+edgeTypes:
+  - OWNS_AGGREGATE
+"#,
+        )
+        .unwrap();
+        install_ontology_pack(tmp.path(), &v1_path, "test".to_string(), "main".to_string())
+            .unwrap();
+
+        let v2_path = tmp.path().join("ddd-v2.yaml");
+        fs::write(
+            &v2_path,
+            r#"
+name: ddd-backend
+version: 0.2.0
+source:
+  kind: local
+  uri: ddd-v2.yaml
+signature:
+  algorithm: unsigned-dev
+  value: unsigned-dev
+  signedBy: local-dev
+extends:
+  - core@0.1.0
+nodeTypes:
+  - Aggregate
+  - DomainEvent
+edgeTypes:
+  - OWNS_AGGREGATE
+migrations:
+  - from: 0.1.0
+    to: 0.2.0
+    description: Add domain event facts.
+"#,
+        )
+        .unwrap();
+        install_ontology_pack(tmp.path(), &v2_path, "test".to_string(), "main".to_string())
+            .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert_eq!(replay.events_replayed, 3);
+        assert!(replay.graph.nodes.values().any(|node| {
+            node.node_type == "OntologyPack"
+                && node.attributes.get("version") == Some(&json!("0.2.0"))
+                && node.attributes.get("previousVersion") == Some(&json!("0.1.0"))
+                && node.attributes.get("migrationAction") == Some(&json!("Upgrade"))
+        }));
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "OntologyMigration"));
     }
 
     #[test]

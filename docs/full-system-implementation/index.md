@@ -19,8 +19,8 @@ This directory breaks the full SpecGraph OS system into one Markdown file per **
 | Status | Count |
 |---|---:|
 | ✅ Fully implemented | 0 |
-| 🟡 Partly implemented | 41 |
-| ⬜ Not implemented | 11 |
+| 🟡 Partly implemented | 42 |
+| ⬜ Not implemented | 10 |
 | **Total** | **52** |
 
 ## Source Markdown Read
@@ -85,7 +85,7 @@ Use the full-system phase-gated roadmap in [phase-gated-implementation-plan.md](
 | 39 | [Impact Analysis](areas/39-impact-analysis.md) | 🟡 Partly implemented |
 | 40 | [Existing Repository Adoption](areas/40-existing-repository-adoption.md) | 🟡 Partly implemented |
 | 41 | [IssueGraph](areas/41-issuegraph.md) | ⬜ Not implemented |
-| 42 | [Ontology Evolution Loop](areas/42-ontology-evolution-loop.md) | ⬜ Not implemented |
+| 42 | [Ontology Evolution Loop](areas/42-ontology-evolution-loop.md) | 🟡 Partly implemented |
 | 43 | [LLM Proposal Runtime](areas/43-llm-proposal-runtime.md) | 🟡 Partly implemented |
 | 44 | [Patch Sandbox](areas/44-patch-sandbox.md) | ⬜ Not implemented |
 | 45 | [Security Boundaries](areas/45-security-boundaries.md) | 🟡 Partly implemented |

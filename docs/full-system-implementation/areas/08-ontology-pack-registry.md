@@ -2,7 +2,7 @@
 
 **System area:** Ontology Pack Registry  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code audit plus Phase 2.3 pack registry hardening implementation slice.
+**Status basis:** code audit plus Phase 2.3 pack registry hardening and Phase 2.4 migration-plan implementation slices.
 
 ## Purpose
 
@@ -17,11 +17,13 @@ Support local and remote ontology, architecture, language, and security packs wi
 - Pack manifests validate `source` provenance metadata for local, remote, and future registry sources
 - Pack manifests validate signature metadata, require signed remote/registry sources, and reject unsigned remote packs
 - Ontology lockfiles record installed pack source and signature metadata for provenance
+- Pack upgrades produce deterministic migration plans with compatibility findings before install acceptance
+- Upgrade installs record `OntologyMigration` graph facts for matching migration entries
 
 ### Partly Implemented
 
 - DDD backend pack example/foundation exists with local development source/signature metadata
-- Remote registry publishing and migration workflows are future
+- Remote registry publishing workflow and full migration execution are future
 
 ### Not Implemented / Remaining
 
@@ -51,6 +53,14 @@ Pack schema, dependency compatibility, signature/trust checks, migration availab
 - Pack manifests may declare `signature.algorithm` (`unsigned-dev`, `sha256`, `sigstore`, or `minisign`), `signature.value`, and `signature.signedBy`.
 - Remote and registry sources require signature metadata and cannot use `unsigned-dev`; local development packs may use `unsigned-dev` while still recording provenance in the lockfile.
 - Installed pack graph facts include source/signature attributes so future policy and registry checks can inspect pack trust boundaries.
+
+
+### Migration Planning
+
+- `plan_pack_migration` compares the currently installed pack version with the target manifest and returns an install/noop/upgrade/downgrade/replace action.
+- Upgrades require a matching `migrations[].from` / `migrations[].to` entry before install is accepted.
+- Compatibility findings warn when upgraded packs remove node or edge types, so later migration execution can inspect affected graph facts.
+- `install_ontology_pack` records successful upgrade migration entries as `OntologyMigration` graph facts and updates the installed `OntologyPack` fact instead of duplicating its stable key.
 
 ### 4. Implementation Work Items
 
