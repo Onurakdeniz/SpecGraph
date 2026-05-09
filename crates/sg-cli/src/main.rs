@@ -5,12 +5,12 @@ use sg_core::{
     analyze_impact, built_in_non_waivable_policies, built_in_operations, built_in_validators,
     detect_merge_conflicts, diff_graphs, evaluate_policies, evaluate_policies_with_manifests,
     index_source_file, load_pack, load_policy_manifest, observations_to_delta, scan_repository,
-    validate_commit_binding, validate_pack, validate_trace_links, ActionLifecycleOptions,
-    AdoptionMode, AppendOperationOptions, BindBranchOptions, CodeIndexObservation,
-    CommitValidationInput, CreateWaiverOptions, Edge, Finding, FindingSeverity,
-    GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions, LinksManifest,
-    Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal, QueryContext,
-    QueryLimits, QueryTarget, RecordApprovalOptions, RecordCommitOptions,
+    validate_commit_binding, validate_pack, validate_required_tests_pass, validate_trace_links,
+    ActionLifecycleOptions, AdoptionMode, AppendOperationOptions, BindBranchOptions,
+    CodeIndexObservation, CommitValidationInput, CreateWaiverOptions, Edge, Finding,
+    FindingSeverity, GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions,
+    LinksManifest, Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal,
+    QueryContext, QueryLimits, QueryTarget, RecordApprovalOptions, RecordCommitOptions,
     RecordPolicyReportOptions, ReplayOptions, Snapshot, SpecGraphStore, SpecProjection,
     TestCaseResult, TestLink, TestRunRecord, TestStatus, TextItem, TransitionSpecOptions,
     TrustState, UpsertActorOptions,
@@ -1345,6 +1345,10 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
                 println!("trace: ok");
                 checks.push("trace".to_string());
             }
+            let test_findings = validate_required_tests_pass(&replay.graph);
+            print_findings(&test_findings);
+            fail_on_errors(&test_findings, "test evidence validation")?;
+            checks.push("test".to_string());
             if !args.skip_git && root.join(".git").exists() {
                 validate_git_range(store, root, args.base, "HEAD")?;
                 checks.push("git".to_string());

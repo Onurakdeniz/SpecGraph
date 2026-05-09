@@ -270,6 +270,7 @@ Related areas:
 - [x] Add test runner result model.
 - [x] Add `sg test run --record`.
 - [x] Add `TestRun` evidence links to `ValidationRun`.
+- [x] CI validates required linked test evidence.
 - [x] Add route/API drift detector.
 - [x] Add migration/DataGraph drift detector.
 - [x] Add spec-code-test-data-architecture drift report with blocker count.
