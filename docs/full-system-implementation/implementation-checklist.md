@@ -306,12 +306,12 @@ Related areas:
 
 ### Implementation Checklist
 
-- [~] Define graph conflict report schema.
+- [x] Define graph conflict report schema.
 - [~] Add graph branch metadata.
 - [x] Add graph branch base snapshot tracking.
-- [~] Implement three-way graph diff: base / ours / theirs.
+- [x] Implement three-way graph diff: base / ours / theirs.
 - [ ] Implement dry-run graph merge.
-- [ ] Add conflict checks for type, cardinality, policy, migration, traceability, and ontology version.
+- [x] Add conflict checks for type, cardinality, policy, migration, traceability, and ontology version.
 - [ ] Add graph rebase dry-run.
 - [~] Add impact-carrying edge metadata to ontology.
 - [ ] Add invalidation rules.
@@ -328,7 +328,7 @@ Related areas:
 
 ### Gate Checks
 
-- [ ] Unresolved graph conflict blocks merge.
+- [x] Unresolved graph conflict blocks merge.
 - [ ] Graph merge records a merge event and validates post-merge state.
 - [ ] Rebase detects invalidated actions and requires replan.
 - [~] Impact analysis produces deterministic direct and indirect impacts.

@@ -14,15 +14,16 @@ Compare graph states and detect semantic conflicts before merge.
 
 - Graph diff/conflict primitives are documented
 - Conflict types and pipelines are documented
+- Semantic conflict reports are implemented for type, cardinality, policy, migration, traceability, and ontology dimensions
 
 ### Partly Implemented
 
 - Primitive commands exist
+- Three-way semantic conflict detection now produces blocking findings with validator identity
 - Auto-resolution and merge event recording are incomplete
 
 ### Not Implemented / Remaining
 
-- Three-way semantic merge engine
 - Conflict resolution operations
 - PR integration
 - Ontology-version migration flow
@@ -39,12 +40,11 @@ sg graph diff, graph conflicts, future graph merge/rebase
 
 ### 3. Validation and Policy Gates
 
-Base/ours/theirs conflicts are deterministic; unresolved conflicts block merge
+Base/ours/theirs conflicts are deterministic; unresolved type/cardinality/policy/migration/traceability/ontology conflicts block merge
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Three-way semantic merge engine.
 - Implement or finish: Conflict resolution operations.
 - Implement or finish: PR integration.
 - Implement or finish: Ontology-version migration flow.
@@ -69,3 +69,9 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
 
+
+### Phase 5.1 Semantic Conflict Reports
+
+- `detect_semantic_conflicts(base, ours, theirs)` returns a deterministic `SemanticConflictReport`.
+- Each conflict carries semantic dimensions, blocking status, remediation-rich findings, and `validator.graph_merge` metadata.
+- Duplicate stable keys are reported as cardinality conflicts; blocking `PolicyDecision` facts are policy conflicts; migration and ontology changes get dedicated dimensions; traceability edge divergence is reported separately.
