@@ -188,6 +188,10 @@ cargo run -p sg-cli -- ontology install-pack docs/ontology-packs/ddd-backend.yam
 cargo run -p sg-cli -- ontology list-packs
 cargo run -p sg-cli -- operation list
 cargo run -p sg-cli -- policy check --operation Merge --changed-file src/lib.rs
+cargo run -p sg-cli -- policy check --operation Merge \
+  --changed-file .github/workflows/ci.yml \
+  --policy-file docs/policies/specgraph-policy.yaml \
+  --approval platform
 cargo run -p sg-cli -- adopt scan --mode observe
 cargo run -p sg-cli -- impact analyze --node node_spec_auth_001 --depth 2
 cargo run -p sg-cli -- proposal create --id PROP-001 --title "Draft graph delta"
@@ -203,7 +207,7 @@ Run the local proof scenario to verify the core idea end to end:
 cargo run -p sg-cli -- proof run
 ```
 
-The proof creates a temporary SpecGraph store, creates a spec, rejects an invalid operation delta through the operation ABI gate, binds the spec to a branch, generates an ActionGraph, indexes source symbols, checks traceability failure before links exist, imports a test link, validates commit binding, rejects a secret-file policy violation, and replays the graph with hash checks.
+The proof creates a temporary SpecGraph store, creates a spec, rejects an invalid operation delta through the operation ABI gate, binds the spec to a branch, generates an ActionGraph, indexes source symbols, checks traceability failure before links exist, imports a test link, validates commit binding, rejects a secret-file policy violation, verifies a policy manifest approval rule, and replays the graph with hash checks.
 
 ## Validation
 

@@ -2,13 +2,14 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_core::{
-    analyze_impact, built_in_operations, diff_graphs, evaluate_policies, index_source_file,
-    load_pack, observations_to_delta, scan_repository, validate_commit_binding, validate_pack,
+    analyze_impact, built_in_operations, diff_graphs, evaluate_policies,
+    evaluate_policies_with_manifests, index_source_file, load_pack, load_policy_manifest,
+    observations_to_delta, scan_repository, validate_commit_binding, validate_pack,
     validate_trace_links, AdoptionMode, AppendOperationOptions, BindBranchOptions,
     CodeIndexObservation, CommitValidationInput, Edge, Finding, FindingSeverity,
     GenerateActionGraphOptions, Graph, GraphDelta, InitOptions, LinksManifest, Node,
-    PolicyCheckInput, Proposal, RecordCommitOptions, ReplayOptions, Snapshot, SpecGraphStore,
-    SpecProjection, TestLink, TextItem, TrustState,
+    PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal, RecordCommitOptions,
+    ReplayOptions, Snapshot, SpecGraphStore, SpecProjection, TestLink, TextItem, TrustState,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -187,6 +188,9 @@ struct PolicyCheckArgs {
     /// Waiver in POLICY:REASON:APPROVED_BY form.
     #[arg(long = "waiver", value_name = "POLICY:REASON:APPROVED_BY")]
     waivers: Vec<String>,
+    /// Optional YAML/JSON declarative policy manifest.
+    #[arg(long = "policy-file", value_name = "FILE")]
+    policy_files: Vec<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -589,16 +593,26 @@ fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()>
     match args.command {
         PolicyCommand::Check(args) => {
             let replay = store.replay(ReplayOptions { check_hashes: true })?;
-            let report = evaluate_policies(
-                &replay.graph,
-                &PolicyCheckInput {
-                    operation: args.operation,
-                    changed_files: args.changed_files,
-                    actor_roles: args.roles,
-                    approvals: args.approvals,
-                    waivers: parse_waivers(&args.waivers)?,
-                },
-            );
+            let input = PolicyCheckInput {
+                operation: args.operation,
+                changed_files: args.changed_files,
+                actor_roles: args.roles,
+                approvals: args.approvals,
+                waivers: parse_waivers(&args.waivers)?,
+            };
+            let manifests = args
+                .policy_files
+                .iter()
+                .map(|file| {
+                    let path = resolve_existing_input_path(store.root(), file.clone());
+                    load_policy_manifest(&path).map_err(anyhow::Error::msg)
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            let report = if manifests.is_empty() {
+                evaluate_policies(&replay.graph, &input)
+            } else {
+                evaluate_policies_with_manifests(&replay.graph, &input, &manifests)
+            };
             for decision in report.decisions {
                 println!(
                     "{:?} {}: {}",
@@ -1008,6 +1022,47 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         bail!("proof expected secret policy to fail");
     }
     println!("proof:negative-policy ok");
+
+    let policy_manifest = PolicyManifest {
+        policies: vec![PolicyRule {
+            id: "policy.proof.platform_approval".to_string(),
+            description: Some("Proof infrastructure changes need platform approval.".to_string()),
+            effect: PolicyEffect::RequireApproval,
+            message: None,
+            operations: vec!["Merge".to_string()],
+            changed_file_globs: vec![".github/**".to_string()],
+            required_approvals: vec!["platform".to_string()],
+            required_roles: vec![],
+            waivable: true,
+        }],
+    };
+    let policy_dsl_denied = evaluate_policies_with_manifests(
+        &replay.graph,
+        &PolicyCheckInput {
+            operation: "Merge".to_string(),
+            changed_files: vec![".github/workflows/ci.yml".to_string()],
+            actor_roles: vec![],
+            approvals: vec![],
+            waivers: vec![],
+        },
+        &[policy_manifest.clone()],
+    );
+    if policy_dsl_denied.findings.is_empty() {
+        bail!("proof expected policy manifest to require approval");
+    }
+    let policy_dsl_allowed = evaluate_policies_with_manifests(
+        &replay.graph,
+        &PolicyCheckInput {
+            operation: "Merge".to_string(),
+            changed_files: vec![".github/workflows/ci.yml".to_string()],
+            actor_roles: vec![],
+            approvals: vec!["platform".to_string()],
+            waivers: vec![],
+        },
+        &[policy_manifest],
+    );
+    fail_on_errors(&policy_dsl_allowed.findings, "proof policy manifest")?;
+    println!("proof:policy-dsl ok");
 
     let spec_report = store.validate_specs()?;
     fail_on_errors(&spec_report.findings, "proof spec validation")?;

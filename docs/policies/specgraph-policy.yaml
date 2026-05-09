@@ -1,0 +1,22 @@
+policies:
+  - id: policy.local.infra_approval
+    description: Infrastructure changes require platform approval.
+    effect: RequireApproval
+    operations:
+      - Merge
+    changedFileGlobs:
+      - .github/**
+      - infra/**
+      - terraform/**
+    requiredApprovals:
+      - platform
+    waivable: true
+
+  - id: policy.local.docs_review
+    description: Documentation changes should be reviewed with product context.
+    effect: Warn
+    operations:
+      - Merge
+    changedFileGlobs:
+      - docs/**
+      - "**/*.md"
