@@ -6,7 +6,9 @@ use crate::model::{
 };
 use crate::ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
 use crate::ontology_pack::{load_pack, validate_pack, OntologyPackManifest};
-use crate::operation_abi::validate_operation_request;
+use crate::operation_abi::{
+    validate_operation_postconditions, validate_operation_preconditions, validate_operation_request,
+};
 use crate::spec::SpecProjection;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -327,6 +329,28 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         .count();
     if operation_error_count > 0 {
         return Err(StoreError::OperationValidationFailed(operation_error_count));
+    }
+
+    let precondition_findings = validate_operation_preconditions(&empty, &delta);
+    let precondition_error_count = precondition_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if precondition_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(
+            precondition_error_count,
+        ));
+    }
+
+    let postcondition_findings = validate_operation_postconditions(&graph, &delta);
+    let postcondition_error_count = postcondition_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if postcondition_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(
+            postcondition_error_count,
+        ));
     }
 
     let event = Event {
@@ -812,7 +836,29 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         return Err(StoreError::OperationValidationFailed(operation_error_count));
     }
 
+    let precondition_findings = validate_operation_preconditions(&graph, &options.delta);
+    let precondition_error_count = precondition_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if precondition_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(
+            precondition_error_count,
+        ));
+    }
+
     graph.apply_delta(&options.delta);
+
+    let postcondition_findings = validate_operation_postconditions(&graph, &options.delta);
+    let postcondition_error_count = postcondition_findings
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Error)
+        .count();
+    if postcondition_error_count > 0 {
+        return Err(StoreError::OperationValidationFailed(
+            postcondition_error_count,
+        ));
+    }
 
     let integrity_findings = active_ontology(root)?.validate_integrity(&graph);
     let error_count = integrity_findings
@@ -1825,6 +1871,46 @@ acceptanceCriteria:
         .unwrap_err();
 
         assert!(matches!(error, StoreError::OntologyValidationFailed(1)));
+    }
+
+    #[test]
+    fn append_operation_rejects_precondition_failure() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    update_nodes: vec![Node {
+                        id: "node_spec_auth_001".to_string(),
+                        stable_key: "spec:AUTH-001".to_string(),
+                        node_type: "Spec".to_string(),
+                        attributes: BTreeMap::from([
+                            ("spec".to_string(), json!("AUTH-001")),
+                            ("title".to_string(), json!("Password reset")),
+                        ]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, StoreError::OperationValidationFailed(1)));
     }
 
     #[test]

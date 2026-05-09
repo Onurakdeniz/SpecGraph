@@ -30,7 +30,8 @@ pub use hashing::state_hash;
 pub use model::*;
 pub use ontology::{MvpOntology, CORE_ONTOLOGY_VERSION};
 pub use operation_abi::{
-    built_in_operations, find_operation, validate_operation_request, OperationDefinition,
+    built_in_operations, find_operation, validate_operation_postconditions,
+    validate_operation_preconditions, validate_operation_request, OperationDefinition,
 };
 pub use spec::{SpecProjection, TextItem};
 pub use stable_key::{validate_stable_key, StableKeyError};
