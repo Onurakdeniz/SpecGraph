@@ -2,10 +2,10 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_core::{
-    analyze_impact, built_in_operations, detect_merge_conflicts, diff_graphs, evaluate_policies,
-    evaluate_policies_with_manifests, index_source_file, load_pack, load_policy_manifest,
-    observations_to_delta, scan_repository, validate_commit_binding, validate_pack,
-    validate_trace_links, AdoptionMode, AppendOperationOptions, BindBranchOptions,
+    analyze_impact, built_in_operations, built_in_validators, detect_merge_conflicts, diff_graphs,
+    evaluate_policies, evaluate_policies_with_manifests, index_source_file, load_pack,
+    load_policy_manifest, observations_to_delta, scan_repository, validate_commit_binding,
+    validate_pack, validate_trace_links, AdoptionMode, AppendOperationOptions, BindBranchOptions,
     CodeIndexObservation, CommitValidationInput, CreateWaiverOptions, Edge, Finding,
     FindingSeverity, GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions,
     LinksManifest, Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal,
@@ -164,6 +164,8 @@ struct OperationArgs {
 enum OperationCommand {
     /// List built-in operation ABI definitions.
     List,
+    /// List built-in validator definitions.
+    Validators,
 }
 
 #[derive(Debug, Args)]
@@ -714,6 +716,14 @@ fn handle_operation(args: OperationArgs) {
                     operation.name,
                     operation.category,
                     operation.required_input_fields.join(",")
+                );
+            }
+        }
+        OperationCommand::Validators => {
+            for validator in built_in_validators() {
+                println!(
+                    "{} version={} area={} description={}",
+                    validator.id, validator.version, validator.system_area, validator.description
                 );
             }
         }

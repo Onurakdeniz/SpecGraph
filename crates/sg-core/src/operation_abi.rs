@@ -1,5 +1,6 @@
 use crate::model::{Finding, FindingSeverity, Graph, GraphDelta, OperationRequest};
 use crate::stable_key::validate_stable_key;
+use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_OPERATION_ABI};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -466,13 +467,8 @@ fn validate_delta_edge_types(
 }
 
 fn finding(code: &str, message: String) -> Finding {
-    Finding {
-        code: code.to_string(),
-        severity: FindingSeverity::Error,
-        message,
-        related_nodes: vec![],
-        related_edges: vec![],
-    }
+    Finding::new(code, FindingSeverity::Error, message)
+        .with_validator(VALIDATOR_OPERATION_ABI, CORE_VALIDATOR_VERSION)
 }
 
 #[cfg(test)]

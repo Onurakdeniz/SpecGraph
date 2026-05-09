@@ -22,6 +22,7 @@ pub mod spec;
 pub mod stable_key;
 pub mod store;
 pub mod trace;
+pub mod validation;
 pub use git::{
     parse_commit_trailers, validate_changed_files_against_action_group, validate_commit_binding,
     CommitTrailers, CommitValidationInput,
@@ -65,3 +66,8 @@ pub use proposal::{Proposal, TrustState};
 pub use query::{GraphQuery, QueryDirection, QueryLimitExceeded, QueryLimits};
 
 pub use trace::{validate_trace_links, LinksManifest, TestLink};
+pub use validation::{
+    built_in_validators, find_validator, ValidatorDefinition, CORE_VALIDATOR_VERSION,
+    VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING, VALIDATOR_ONTOLOGY, VALIDATOR_ONTOLOGY_PACK,
+    VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT, VALIDATOR_TRACE_LINKS,
+};

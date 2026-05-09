@@ -1,5 +1,6 @@
-use crate::model::Finding;
+use crate::model::{Finding, FindingSeverity};
 use crate::ontology::MvpOntology;
+use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_ONTOLOGY_PACK};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
@@ -64,151 +65,125 @@ pub fn validate_pack(pack: &OntologyPackManifest) -> OntologyPackValidationRepor
     let mut findings = Vec::new();
 
     if pack.name.trim().is_empty() {
-        findings.push(crate::model::Finding {
-            code: "ontology_pack.name_required".to_string(),
-            severity: crate::model::FindingSeverity::Error,
-            message: "Ontology pack name is required".to_string(),
-            related_nodes: vec![],
-            related_edges: vec![],
-        });
+        findings.push(finding(
+            "ontology_pack.name_required",
+            FindingSeverity::Error,
+            "Ontology pack name is required".to_string(),
+        ));
     }
 
     if pack.version.trim().is_empty() {
-        findings.push(crate::model::Finding {
-            code: "ontology_pack.version_required".to_string(),
-            severity: crate::model::FindingSeverity::Error,
-            message: "Ontology pack version is required".to_string(),
-            related_nodes: vec![],
-            related_edges: vec![],
-        });
+        findings.push(finding(
+            "ontology_pack.version_required",
+            FindingSeverity::Error,
+            "Ontology pack version is required".to_string(),
+        ));
     } else if !is_simple_semver(&pack.version) {
-        findings.push(crate::model::Finding {
-            code: "ontology_pack.version_invalid".to_string(),
-            severity: crate::model::FindingSeverity::Error,
-            message: format!(
+        findings.push(finding(
+            "ontology_pack.version_invalid",
+            FindingSeverity::Error,
+            format!(
                 "Ontology pack version `{}` must use `MAJOR.MINOR.PATCH` semantic version format",
                 pack.version
             ),
-            related_nodes: vec![],
-            related_edges: vec![],
-        });
+        ));
     }
 
     let mut node_type_names = BTreeSet::new();
     for node_type in &pack.node_types {
         if !node_type_names.insert(node_type) {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.duplicate_node_type".to_string(),
-                severity: crate::model::FindingSeverity::Error,
-                message: format!("Pack declares node type `{node_type}` more than once"),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            findings.push(finding(
+                "ontology_pack.duplicate_node_type",
+                FindingSeverity::Error,
+                format!("Pack declares node type `{node_type}` more than once"),
+            ));
         }
 
         if !is_node_type_name(node_type) {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.invalid_node_type_name".to_string(),
-                severity: crate::model::FindingSeverity::Error,
-                message: format!(
+            findings.push(finding(
+                "ontology_pack.invalid_node_type_name",
+                FindingSeverity::Error,
+                format!(
                     "Node type `{node_type}` is invalid; use non-empty PascalCase ASCII identifier names"
                 ),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            ));
         }
 
         if ontology.is_node_type(node_type) {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.duplicate_core_node_type".to_string(),
-                severity: crate::model::FindingSeverity::Warning,
-                message: format!("Pack redefines core node type `{node_type}`"),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            findings.push(finding(
+                "ontology_pack.duplicate_core_node_type",
+                FindingSeverity::Warning,
+                format!("Pack redefines core node type `{node_type}`"),
+            ));
         }
     }
 
     let mut edge_type_names = BTreeSet::new();
     for edge_type in &pack.edge_types {
         if !edge_type_names.insert(edge_type) {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.duplicate_edge_type".to_string(),
-                severity: crate::model::FindingSeverity::Error,
-                message: format!("Pack declares edge type `{edge_type}` more than once"),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            findings.push(finding(
+                "ontology_pack.duplicate_edge_type",
+                FindingSeverity::Error,
+                format!("Pack declares edge type `{edge_type}` more than once"),
+            ));
         }
 
         if !is_edge_type_name(edge_type) {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.invalid_edge_type_name".to_string(),
-                severity: crate::model::FindingSeverity::Error,
-                message: format!(
+            findings.push(finding(
+                "ontology_pack.invalid_edge_type_name",
+                FindingSeverity::Error,
+                format!(
                     "Edge type `{edge_type}` is invalid; use non-empty SCREAMING_SNAKE_CASE ASCII names"
                 ),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            ));
         }
 
         if ontology.is_edge_type(edge_type) {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.duplicate_core_edge_type".to_string(),
-                severity: crate::model::FindingSeverity::Warning,
-                message: format!("Pack redefines core edge type `{edge_type}`"),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            findings.push(finding(
+                "ontology_pack.duplicate_core_edge_type",
+                FindingSeverity::Warning,
+                format!("Pack redefines core edge type `{edge_type}`"),
+            ));
         }
     }
 
     for migration in &pack.migrations {
         if migration.from.trim().is_empty() {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.migration_from_required".to_string(),
-                severity: crate::model::FindingSeverity::Error,
-                message: "Ontology migration `from` version is required".to_string(),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            findings.push(finding(
+                "ontology_pack.migration_from_required",
+                FindingSeverity::Error,
+                "Ontology migration `from` version is required".to_string(),
+            ));
         }
         if migration.to.trim().is_empty() {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.migration_to_required".to_string(),
-                severity: crate::model::FindingSeverity::Error,
-                message: "Ontology migration `to` version is required".to_string(),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            findings.push(finding(
+                "ontology_pack.migration_to_required",
+                FindingSeverity::Error,
+                "Ontology migration `to` version is required".to_string(),
+            ));
         }
         if migration.description.trim().is_empty() {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.migration_description_required".to_string(),
-                severity: crate::model::FindingSeverity::Error,
-                message: format!(
+            findings.push(finding(
+                "ontology_pack.migration_description_required",
+                FindingSeverity::Error,
+                format!(
                     "Ontology migration {} -> {} requires a description",
                     migration.from, migration.to
                 ),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            ));
         }
         if !migration.from.trim().is_empty()
             && !migration.to.trim().is_empty()
             && migration.from == migration.to
         {
-            findings.push(crate::model::Finding {
-                code: "ontology_pack.migration_noop".to_string(),
-                severity: crate::model::FindingSeverity::Error,
-                message: format!(
+            findings.push(finding(
+                "ontology_pack.migration_noop",
+                FindingSeverity::Error,
+                format!(
                     "Ontology migration cannot migrate from `{}` to itself",
                     migration.from
                 ),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+            ));
         }
     }
 
@@ -225,6 +200,11 @@ fn is_simple_semver(value: &str) -> bool {
         && parts
             .iter()
             .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
+}
+
+fn finding(code: &str, severity: FindingSeverity, message: String) -> Finding {
+    Finding::new(code, severity, message)
+        .with_validator(VALIDATOR_ONTOLOGY_PACK, CORE_VALIDATOR_VERSION)
 }
 
 fn is_node_type_name(value: &str) -> bool {
