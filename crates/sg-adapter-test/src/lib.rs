@@ -1,7 +1,3 @@
-//! Boundary crate for `sg-adapter-test` in the SpecGraph OS modular workspace.
-//!
-//! This crate is intentionally a narrow public facade during the workspace split.
-//! Implementation still lives behind `sg-core` until the next extraction pass moves
-//! code module-by-module without changing public behavior.
+//! Adapter boundary re-exports for `sg-adapter-test`.
 
-pub use sg_core::{TestCaseResult, TestRunRecord, TestStatus};
+pub use sg_testgraph::{TestCaseResult, TestRunRecord, TestStatus};

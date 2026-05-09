@@ -43,6 +43,18 @@ repository = "https://github.com/Onurakdeniz/SpecGraph"
 version = "0.1.0"
 
 [workspace.dependencies]
+sg-testgraph = { path = "crates/sg-testgraph" }
+sg-module-graph = { path = "crates/sg-module-graph" }
+sg-gitgraph = { path = "crates/sg-gitgraph" }
+sg-data = { path = "crates/sg-data" }
+sg-codegraph = { path = "crates/sg-codegraph" }
+sg-adoption = { path = "crates/sg-adoption" }
+sg-adapter-llm = { path = "crates/sg-adapter-llm" }
+sg-adapter-hosting = { path = "crates/sg-adapter-hosting" }
+sg-adapter-ci = { path = "crates/sg-adapter-ci" }
+sg-adapter-test = { path = "crates/sg-adapter-test" }
+sg-adapter-git = { path = "crates/sg-adapter-git" }
+sg-adapter-code = { path = "crates/sg-adapter-code" }
 sg-adapter-api = { path = "crates/sg-adapter-api" }
 sg-impact = { path = "crates/sg-impact" }
 sg-issue = { path = "crates/sg-issue" }

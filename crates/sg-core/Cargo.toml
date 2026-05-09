@@ -6,6 +6,13 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+sg-testgraph.workspace = true
+sg-module-graph.workspace = true
+sg-gitgraph.workspace = true
+sg-data.workspace = true
+sg-codegraph.workspace = true
+sg-adoption.workspace = true
+sg-adapter-code.workspace = true
 sg-validation.workspace = true
 sg-spec.workspace = true
 sg-proposal.workspace = true

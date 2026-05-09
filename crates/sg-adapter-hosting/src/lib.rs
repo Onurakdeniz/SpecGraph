@@ -1,7 +1,3 @@
-//! Boundary crate for `sg-adapter-hosting` in the SpecGraph OS modular workspace.
-//!
-//! This crate is intentionally a narrow public facade during the workspace split.
-//! Implementation still lives behind `sg-core` until the next extraction pass moves
-//! code module-by-module without changing public behavior.
+//! Adapter boundary re-exports for `sg-adapter-hosting`.
 
-pub use sg_core::{pull_request_node_id, PullRequestFact};
+pub use sg_gitgraph::{pull_request_node_id, PullRequestFact};

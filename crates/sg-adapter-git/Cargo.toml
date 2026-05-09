@@ -6,4 +6,4 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-sg-core = { path = "../sg-core" }
+sg-gitgraph.workspace = true

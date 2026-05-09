@@ -564,49 +564,57 @@ dependencies = [
 name = "sg-adapter-ci"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "sg-validation",
 ]
 
 [[package]]
 name = "sg-adapter-code"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-adapter-api",
+ "sg-codegraph",
+ "sg-model",
+ "sg-validation",
 ]
 
 [[package]]
 name = "sg-adapter-git"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "sg-gitgraph",
 ]
 
 [[package]]
 name = "sg-adapter-hosting"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "sg-gitgraph",
 ]
 
 [[package]]
 name = "sg-adapter-llm"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "sg-proposal",
 ]
 
 [[package]]
 name = "sg-adapter-test"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "sg-testgraph",
 ]
 
 [[package]]
 name = "sg-adoption"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-adapter-api",
+ "sg-model",
 ]
 
 [[package]]
@@ -642,7 +650,10 @@ dependencies = [
 name = "sg-codegraph"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-model",
+ "sg-validation",
 ]
 
 [[package]]
@@ -655,17 +666,24 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sg-adapter-api",
+ "sg-adapter-code",
+ "sg-adoption",
  "sg-canonical",
+ "sg-codegraph",
+ "sg-data",
+ "sg-gitgraph",
  "sg-impact",
  "sg-issue",
  "sg-merge",
  "sg-model",
+ "sg-module-graph",
  "sg-operation",
  "sg-policy",
  "sg-project",
  "sg-proposal",
  "sg-query",
  "sg-spec",
+ "sg-testgraph",
  "sg-validation",
  "sha2",
  "tempfile",
@@ -678,14 +696,21 @@ dependencies = [
 name = "sg-data"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-model",
+ "sg-validation",
 ]
 
 [[package]]
 name = "sg-gitgraph"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "globset",
+ "serde",
+ "serde_json",
+ "sg-model",
+ "sg-validation",
 ]
 
 [[package]]
@@ -729,7 +754,8 @@ dependencies = [
 name = "sg-module-graph"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde_json",
+ "sg-model",
 ]
 
 [[package]]
@@ -820,7 +846,10 @@ dependencies = [
 name = "sg-testgraph"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-model",
+ "sg-validation",
 ]
 
 [[package]]
