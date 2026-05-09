@@ -93,6 +93,7 @@ Store untrusted proposals without accepting them as trusted graph facts:
 
 ```bash
 sg proposal create --id PROP-001 --title "Draft password reset patch"
+sg proposal transition --id PROP-001 --state Validated --reason "Checks passed"
 ```
 
 Proposal trust states are modeled as:
@@ -127,7 +128,7 @@ Run a deterministic local scenario that exercises positive and negative enforcem
 sg proof run
 ```
 
-The scenario verifies init, spec creation, operation ABI rejection, branch binding, ActionGraph generation, source symbol indexing, traceability failure/success, commit binding, built-in policy denial, policy manifest approval rules, validation evidence recording, and graph replay hash checks.
+The scenario verifies init, spec creation, operation ABI rejection, branch binding, ActionGraph generation, source symbol indexing, traceability failure/success, commit binding, built-in policy denial, policy manifest approval rules, proposal lifecycle transitions, validation evidence recording, and graph replay hash checks.
 
 ## Validation Evidence
 

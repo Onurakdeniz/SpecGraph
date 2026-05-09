@@ -245,6 +245,8 @@ struct ProposalArgs {
 enum ProposalCommand {
     /// Store an untrusted proposal node without accepting it as trusted graph facts.
     Create(ProposalCreateArgs),
+    /// Move a proposal through the trust-state lifecycle.
+    Transition(ProposalTransitionArgs),
 }
 
 #[derive(Debug, Args)]
@@ -253,6 +255,20 @@ struct ProposalCreateArgs {
     id: String,
     #[arg(long)]
     title: String,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ProposalTransitionArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long)]
+    state: String,
+    #[arg(long)]
+    reason: Option<String>,
     #[arg(long, default_value = "local:user")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -713,6 +729,21 @@ fn handle_proposal(store: &SpecGraphStore, args: ProposalArgs) -> anyhow::Result
             println!("trustState: Proposed");
             println!("operationId: {}", receipt.operation_id);
         }
+        ProposalCommand::Transition(args) => {
+            let state = parse_trust_state(&args.state)?;
+            let receipt = transition_proposal(
+                store,
+                &args.id,
+                state,
+                args.reason,
+                args.actor,
+                args.graph_branch,
+            )?;
+            println!("proposalTransitioned: {}", args.id);
+            println!("trustState: {}", trust_state_label(state));
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
     }
     Ok(())
 }
@@ -1112,6 +1143,39 @@ fn run_proof_scenario() -> anyhow::Result<()> {
     fail_on_errors(&policy_dsl_allowed.findings, "proof policy manifest")?;
     println!("proof:policy-dsl ok");
 
+    let proof_proposal = Proposal::new(
+        "PROP-001".to_string(),
+        "Proof proposal lifecycle".to_string(),
+    );
+    store.append_operation(AppendOperationOptions {
+        operation: "Proposal.Create".to_string(),
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+        input: json!({"proposal": proof_proposal.id.clone()}),
+        delta: GraphDelta {
+            create_nodes: vec![Node {
+                id: node_id("proposal", "PROP-001"),
+                stable_key: "proposal:PROP-001".to_string(),
+                node_type: "Proposal".to_string(),
+                attributes: BTreeMap::from([
+                    ("id".to_string(), json!("PROP-001")),
+                    ("title".to_string(), json!(proof_proposal.title.clone())),
+                    ("trustState".to_string(), json!(TrustState::Proposed)),
+                ]),
+            }],
+            ..GraphDelta::default()
+        },
+    })?;
+    transition_proposal(
+        &store,
+        "PROP-001",
+        TrustState::Validated,
+        Some("proof checks passed".to_string()),
+        "proof".to_string(),
+        "main".to_string(),
+    )?;
+    println!("proof:proposal-lifecycle ok");
+
     let spec_report = store.validate_specs()?;
     fail_on_errors(&spec_report.findings, "proof spec validation")?;
     let run_id = validation_run_id("proof");
@@ -1123,6 +1187,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         "trace".to_string(),
         "commit".to_string(),
         "policy".to_string(),
+        "proposal".to_string(),
     ];
     let proof_replay = store.replay(ReplayOptions { check_hashes: true })?;
     store.append_operation(AppendOperationOptions {
@@ -1441,6 +1506,115 @@ fn validation_run_id(prefix: &str) -> String {
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     format!("{prefix}-{nonce}")
+}
+
+fn transition_proposal(
+    store: &SpecGraphStore,
+    id: &str,
+    target: TrustState,
+    reason: Option<String>,
+    actor: String,
+    graph_branch: String,
+) -> anyhow::Result<sg_core::OperationReceipt> {
+    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let proposal = replay
+        .graph
+        .nodes
+        .values()
+        .find(|node| {
+            node.node_type == "Proposal"
+                && node
+                    .attributes
+                    .get("id")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|value| value == id)
+        })
+        .with_context(|| format!("proposal not found: {id}"))?;
+    let current = proposal
+        .attributes
+        .get("trustState")
+        .and_then(|value| value.as_str())
+        .and_then(parse_trust_state_value)
+        .unwrap_or(TrustState::Proposed);
+    if !valid_trust_transition(current, target) {
+        bail!(
+            "invalid proposal trust transition {} -> {}",
+            trust_state_label(current),
+            trust_state_label(target)
+        );
+    }
+
+    let mut updated = proposal.clone();
+    updated
+        .attributes
+        .insert("trustState".to_string(), json!(target));
+    updated
+        .attributes
+        .insert("updatedBy".to_string(), json!(actor.clone()));
+    if let Some(reason) = &reason {
+        updated
+            .attributes
+            .insert("transitionReason".to_string(), json!(reason));
+    }
+
+    store
+        .append_operation(AppendOperationOptions {
+            operation: "Proposal.Transition".to_string(),
+            actor,
+            graph_branch,
+            input: json!({
+                "proposal": id,
+                "state": trust_state_label(target),
+                "reason": reason,
+            }),
+            delta: GraphDelta {
+                update_nodes: vec![updated],
+                ..GraphDelta::default()
+            },
+        })
+        .map_err(Into::into)
+}
+
+fn parse_trust_state(value: &str) -> anyhow::Result<TrustState> {
+    parse_trust_state_value(value)
+        .with_context(|| format!("unknown trust state `{value}`; expected Observed, Proposed, Validated, Accepted, Trusted, or Rejected"))
+}
+
+fn parse_trust_state_value(value: &str) -> Option<TrustState> {
+    match value.to_ascii_lowercase().as_str() {
+        "observed" => Some(TrustState::Observed),
+        "proposed" => Some(TrustState::Proposed),
+        "validated" => Some(TrustState::Validated),
+        "accepted" => Some(TrustState::Accepted),
+        "trusted" => Some(TrustState::Trusted),
+        "rejected" => Some(TrustState::Rejected),
+        _ => None,
+    }
+}
+
+fn valid_trust_transition(current: TrustState, target: TrustState) -> bool {
+    matches!(
+        (current, target),
+        (TrustState::Observed, TrustState::Proposed)
+            | (TrustState::Observed, TrustState::Rejected)
+            | (TrustState::Proposed, TrustState::Validated)
+            | (TrustState::Proposed, TrustState::Rejected)
+            | (TrustState::Validated, TrustState::Accepted)
+            | (TrustState::Validated, TrustState::Rejected)
+            | (TrustState::Accepted, TrustState::Trusted)
+            | (TrustState::Accepted, TrustState::Rejected)
+    )
+}
+
+fn trust_state_label(state: TrustState) -> &'static str {
+    match state {
+        TrustState::Observed => "Observed",
+        TrustState::Proposed => "Proposed",
+        TrustState::Validated => "Validated",
+        TrustState::Accepted => "Accepted",
+        TrustState::Trusted => "Trusted",
+        TrustState::Rejected => "Rejected",
+    }
 }
 
 fn has_acceptance_criteria(report: &sg_core::ReplayReport) -> bool {

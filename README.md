@@ -198,6 +198,7 @@ cargo run -p sg-cli -- policy check --operation Merge \
 cargo run -p sg-cli -- adopt scan --mode observe
 cargo run -p sg-cli -- impact analyze --node node_spec_auth_001 --depth 2
 cargo run -p sg-cli -- proposal create --id PROP-001 --title "Draft graph delta"
+cargo run -p sg-cli -- proposal transition --id PROP-001 --state Validated --reason "Checks passed"
 ```
 
 See [`docs/full-system-foundation.md`](docs/full-system-foundation.md).
@@ -210,7 +211,7 @@ Run the local proof scenario to verify the core idea end to end:
 cargo run -p sg-cli -- proof run
 ```
 
-The proof creates a temporary SpecGraph store, creates a spec, rejects an invalid operation delta through the operation ABI gate, binds the spec to a branch, generates an ActionGraph, indexes source symbols, checks traceability failure before links exist, imports a test link, validates commit binding, rejects a secret-file policy violation, verifies a policy manifest approval rule, records a `ValidationRun`, and replays the graph with hash checks.
+The proof creates a temporary SpecGraph store, creates a spec, rejects an invalid operation delta through the operation ABI gate, binds the spec to a branch, generates an ActionGraph, indexes source symbols, checks traceability failure before links exist, imports a test link, validates commit binding, rejects a secret-file policy violation, verifies a policy manifest approval rule, exercises proposal trust-state transition, records a `ValidationRun`, and replays the graph with hash checks.
 
 ## Validation
 

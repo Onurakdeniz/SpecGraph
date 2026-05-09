@@ -123,6 +123,14 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             allowed_create_edge_types: &[],
         },
         OperationDefinition {
+            name: "Proposal.Transition",
+            category: "proposal",
+            description: "Move a proposal through the trust-state lifecycle.",
+            required_input_fields: &["proposal", "state"],
+            allowed_create_node_types: &["Proposal"],
+            allowed_create_edge_types: &[],
+        },
+        OperationDefinition {
             name: "OntologyPack.Install",
             category: "ontology",
             description: "Install and lock an ontology pack manifest.",
