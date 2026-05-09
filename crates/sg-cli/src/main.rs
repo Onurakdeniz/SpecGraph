@@ -423,7 +423,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_init(store: &SpecGraphStore, root: &PathBuf, args: InitArgs) -> anyhow::Result<()> {
+fn handle_init(store: &SpecGraphStore, root: &Path, args: InitArgs) -> anyhow::Result<()> {
     let project_name = match args.project_name {
         Some(value) => value,
         None => default_project_name(root)?,
@@ -481,7 +481,7 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
                 graph_branch: args.graph_branch,
             })?;
             println!("specBound: {}", args.spec);
-            println!("branch: {}", branch);
+            println!("branch: {branch}");
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
         }
@@ -548,7 +548,7 @@ fn handle_adopt(store: &SpecGraphStore, root: &Path, args: AdoptArgs) -> anyhow:
                 input: json!({"mode": args.mode}),
                 delta,
             })?;
-            println!("adoptionMode: {:?}", mode);
+            println!("adoptionMode: {mode:?}");
             println!("codeFilesAdopted: {count}");
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);

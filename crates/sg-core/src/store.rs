@@ -465,7 +465,7 @@ pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<Op
         &action_group_ref,
         &commit_plan_ref,
     )
-    .ok_or_else(|| StoreError::CommitValidationFailed(1))?;
+    .ok_or(StoreError::CommitValidationFailed(1))?;
 
     let commit_id = node_id("git_commit", &options.input.commit);
     let mut create_nodes = vec![Node {
