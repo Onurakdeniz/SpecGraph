@@ -5,6 +5,8 @@
 **Primary goal:** turn the original concept note into a complete, implementable open-source project document.
 
 ---
+> Reference-only design input. The canonical implementation source of truth is `docs/full-system-implementation/phase-gated-implementation-plan.md`; this document does not override that plan.
+
 
 ## 1. Executive Summary
 

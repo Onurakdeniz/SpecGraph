@@ -2,6 +2,8 @@
 
 This directory breaks the full SpecGraph OS system into one Markdown file per **System Area**. Each file documents what is fully implemented, partly implemented, not implemented, and what must be built to complete the full system rather than only the MVP.
 
+**Canonical source of truth:** [phase-gated-implementation-plan.md](phase-gated-implementation-plan.md) is the only implementation roadmap. This index, checklist, and area files are derived from it and must be updated to match it.
+
 **Status basis:** statuses combine the original Markdown-source matrix with the current implementation checklist/code audit. Use `[x]`, `[~]`, and `[ ]` in `implementation-checklist.md` for the current executable status.
 
 ## Status Legend

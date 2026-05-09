@@ -1,5 +1,7 @@
 # Full-System Foundation
 
+> Reference-only foundation notes. The canonical full-system implementation roadmap is `docs/full-system-implementation/phase-gated-implementation-plan.md`; update that plan first if scope/order changes.
+
 This document describes the non-MVP foundations now implemented on top of the enforcement loop.
 
 ## Ontology Packs

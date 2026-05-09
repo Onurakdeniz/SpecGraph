@@ -4,6 +4,20 @@ This is the **full-system** implementation plan, not an MVP plan. The MVP backlo
 
 The order is still core-to-edge: build the trusted center first, then move outward to workflow, integrations, UI, SDK, examples, performance, and release. A later phase must not bypass an incomplete inner phase.
 
+## Single Source of Truth
+
+This file is the **canonical source of truth** for full-system implementation scope, order, phase gates, and slice boundaries.
+
+When documents disagree, use this precedence order:
+
+1. `docs/full-system-implementation/phase-gated-implementation-plan.md` — canonical full-system plan and phase order.
+2. `docs/full-system-implementation/implementation-checklist.md` — derived execution/status tracker. Update it to match this plan when status changes.
+3. `docs/full-system-implementation/areas/*.md` — derived per-area detail files. Update the affected area files when a slice changes area status.
+4. `docs/full-system-implementation/index.md` — derived navigation/status summary. Update counts and links only after the plan/checklist/areas are updated.
+5. `SpecGraph_OS_Project_Documentation.md`, `SpecGraph_OS_Review_and_Gap_Analysis.md`, `SpecGraph_OS_MVP_Backlog.md`, `docs/full-system-foundation.md`, examples, and README files — historical/reference inputs only. They do **not** override this plan.
+
+Change rule: if a new idea, gap, or source document appears later, first add or adjust a slice in this file, then update the checklist and affected area files. Do not create a second implementation roadmap.
+
 ## Reference Documents
 
 This plan is derived from:

@@ -14,10 +14,12 @@ Split concept/backlog/review documents into implementation references by concept
 
 - Review lists missing docs
 - This matrix creates per-system-area implementation docs
+- Canonical full-system implementation plan is established as the single implementation source of truth
+- Historical/reference documents are marked so they do not override the canonical plan
 
 ### Partly Implemented
 
-- High-level docs exist but are mixed
+- High-level docs still need formal extraction into generated/reference docs
 - Formal references still need extraction
 
 ### Not Implemented / Remaining
