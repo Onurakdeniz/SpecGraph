@@ -50,6 +50,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "approval:APPROVAL-001",
     },
     StableKeyFamily {
+        prefix: "adapter",
+        description: "Architecture adapter fact implementing a port",
+        example: "adapter:postgres-user-repository",
+    },
+    StableKeyFamily {
         prefix: "architecture-style",
         description: "Project architecture style profile fact",
         example: "architecture-style:hexagonal",
@@ -83,6 +88,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "edge",
         description: "Stable graph edge identity",
         example: "edge:node_spec_auth_001:HAS_REQUIREMENT:node_req_auth_001",
+    },
+    StableKeyFamily {
+        prefix: "dependency-boundary",
+        description: "Architecture dependency boundary rule",
+        example: "dependency-boundary:interface->infrastructure",
     },
     StableKeyFamily {
         prefix: "finding",
@@ -148,6 +158,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "permission",
         description: "Permission assigned to a role",
         example: "permission:policy.approve",
+    },
+    StableKeyFamily {
+        prefix: "port",
+        description: "Architecture port fact",
+        example: "port:user-repository",
     },
     StableKeyFamily {
         prefix: "policy-decision",
@@ -388,6 +403,9 @@ mod tests {
             "package",
             "capability",
             "public-interface",
+            "port",
+            "adapter",
+            "dependency-boundary",
             "spec",
             "requirement",
             "acceptance-criterion",

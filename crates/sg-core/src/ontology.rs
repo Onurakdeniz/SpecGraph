@@ -56,6 +56,10 @@ impl MvpOntology {
                 "Package",
                 "Capability",
                 "PublicInterface",
+                "Port",
+                "Adapter",
+                "DependencyBoundary",
+                "ArchitectureConstraint",
                 "Spec",
                 "Requirement",
                 "AcceptanceCriterion",
@@ -109,6 +113,14 @@ impl MvpOntology {
                 "PACKAGE_IN_MODULE",
                 "HAS_CAPABILITY",
                 "EXPOSES_INTERFACE",
+                "HAS_PORT",
+                "HAS_ADAPTER",
+                "USES_PORT",
+                "IMPLEMENTS",
+                "CALLS",
+                "FORBIDS_DEPENDENCY_ON",
+                "HAS_DEPENDENCY_BOUNDARY",
+                "HAS_ARCHITECTURE_CONSTRAINT",
                 "TOUCHES_MODULE",
                 "HAS_REQUIREMENT",
                 "HAS_ACCEPTANCE_CRITERION",
@@ -311,6 +323,7 @@ impl MvpOntology {
         let mut findings = self.validate_integrity(graph);
         self.validate_project_profile(graph, &mut findings);
         self.validate_module_graph(graph, &mut findings);
+        self.validate_architecture_graph(graph, &mut findings);
         self.validate_spec_completeness(graph, &mut findings);
         findings
     }
@@ -402,6 +415,83 @@ impl MvpOntology {
                     .with_remediation("Add an EXPOSES_INTERFACE edge from the owning Module.")
                     .with_related_nodes([interface.id.clone()]),
                 );
+            }
+        }
+    }
+
+    fn validate_architecture_graph(&self, graph: &Graph, findings: &mut Vec<Finding>) {
+        for port in graph.nodes.values().filter(|node| node.node_type == "Port") {
+            match port.attributes.get("direction").and_then(Value::as_str) {
+                Some("inbound" | "outbound") => {}
+                Some(value) => findings.push(
+                    finding(
+                        "architecture.port_direction_invalid",
+                        format!(
+                            "Port `{}` has invalid direction `{}`. Remediation: use `inbound` or `outbound`.",
+                            port.id, value
+                        ),
+                    )
+                    .with_remediation("Set port direction to `inbound` or `outbound`.")
+                    .with_related_nodes([port.id.clone()]),
+                ),
+                None => findings.push(
+                    finding(
+                        "architecture.port_direction_required",
+                        format!(
+                            "Port `{}` must declare direction. Remediation: set `direction` to `inbound` or `outbound`.",
+                            port.id
+                        ),
+                    )
+                    .with_remediation("Set port direction to `inbound` or `outbound`.")
+                    .with_related_nodes([port.id.clone()]),
+                ),
+            }
+        }
+
+        for call in graph
+            .edges
+            .values()
+            .filter(|edge| edge.edge_type == "CALLS")
+        {
+            let source_layers = module_layers(graph, &call.from);
+            let target_layers = module_layers(graph, &call.to);
+
+            for source_layer in &source_layers {
+                for target_layer in &target_layers {
+                    let forbidden_edges: Vec<_> = graph
+                        .edges
+                        .values()
+                        .filter(|edge| {
+                            edge.edge_type == "FORBIDS_DEPENDENCY_ON"
+                                && edge.from == *source_layer
+                                && edge.to == *target_layer
+                        })
+                        .collect();
+                    if !forbidden_edges.is_empty() {
+                        findings.push(
+                            finding(
+                                "architecture.forbidden_dependency",
+                                format!(
+                                    "CALLS edge `{}` violates architecture boundary `{}` -> `{}`. Remediation: depend on a port, move the dependency, or update the boundary through Operation Runtime.",
+                                    call.id, source_layer, target_layer
+                                ),
+                            )
+                            .with_remediation(
+                                "Depend on a port, move the dependency, or update the boundary through Operation Runtime.",
+                            )
+                            .with_related_nodes([
+                                call.from.clone(),
+                                call.to.clone(),
+                                source_layer.clone(),
+                                target_layer.clone(),
+                            ])
+                            .with_related_edges(
+                                std::iter::once(call.id.clone())
+                                    .chain(forbidden_edges.iter().map(|edge| edge.id.clone())),
+                            ),
+                        );
+                    }
+                }
             }
         }
     }
@@ -862,6 +952,17 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "PACKAGE_IN_MODULE" => Some((&["Module"], &["Package"])),
         "HAS_CAPABILITY" => Some((&["Module"], &["Capability"])),
         "EXPOSES_INTERFACE" => Some((&["Module"], &["PublicInterface"])),
+        "HAS_PORT" => Some((&["Project", "Module"], &["Port"])),
+        "HAS_ADAPTER" => Some((&["Project", "Module"], &["Adapter"])),
+        "USES_PORT" => Some((&["Module", "Adapter"], &["Port"])),
+        "IMPLEMENTS" => Some((&["Adapter", "Module"], &["Port", "PublicInterface"])),
+        "CALLS" => Some((
+            &["Module", "PublicInterface", "CodeSymbol"],
+            &["Module", "PublicInterface", "CodeSymbol"],
+        )),
+        "FORBIDS_DEPENDENCY_ON" => Some((&["Layer"], &["Layer"])),
+        "HAS_DEPENDENCY_BOUNDARY" => Some((&["Project"], &["DependencyBoundary"])),
+        "HAS_ARCHITECTURE_CONSTRAINT" => Some((&["Project"], &["ArchitectureConstraint"])),
         "TOUCHES_MODULE" => Some((&["Spec"], &["Module"])),
         "HAS_REQUIREMENT" => Some((&["Spec"], &["Requirement"])),
         "HAS_ACCEPTANCE_CRITERION" => Some((&["Spec"], &["AcceptanceCriterion"])),
@@ -891,6 +992,15 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "HAS_WAIVER" => Some((&["Actor"], &["Waiver"])),
         _ => None,
     }
+}
+
+fn module_layers(graph: &Graph, module_id: &str) -> Vec<String> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == module_id && edge.edge_type == "IN_LAYER")
+        .map(|edge| edge.to.clone())
+        .collect()
 }
 
 #[cfg(test)]
@@ -1120,5 +1230,70 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "module_graph.interface_owner_required"));
+    }
+
+    #[test]
+    fn architecture_forbidden_dependency_is_validated() {
+        let mut graph = Graph::default();
+        for (id, stable_key, node_type) in [
+            ("module_ui", "module:ui", "Module"),
+            ("module_db", "module:database", "Module"),
+            ("layer_ui", "layer:ui", "Layer"),
+            ("layer_infra", "layer:infrastructure", "Layer"),
+        ] {
+            graph.nodes.insert(
+                id.to_string(),
+                Node {
+                    id: id.to_string(),
+                    stable_key: stable_key.to_string(),
+                    node_type: node_type.to_string(),
+                    attributes: BTreeMap::new(),
+                },
+            );
+        }
+        for (id, edge_type, from, to) in [
+            ("ui_layer", "IN_LAYER", "module_ui", "layer_ui"),
+            ("db_layer", "IN_LAYER", "module_db", "layer_infra"),
+            ("forbid", "FORBIDS_DEPENDENCY_ON", "layer_ui", "layer_infra"),
+            ("call", "CALLS", "module_ui", "module_db"),
+        ] {
+            graph.edges.insert(
+                id.to_string(),
+                Edge {
+                    id: id.to_string(),
+                    stable_key: format!("edge:{from}:{edge_type}:{to}"),
+                    edge_type: edge_type.to_string(),
+                    from: from.to_string(),
+                    to: to.to_string(),
+                    attributes: BTreeMap::new(),
+                },
+            );
+        }
+
+        let findings = MvpOntology::new().validate_graph(&graph);
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "architecture.forbidden_dependency"));
+    }
+
+    #[test]
+    fn architecture_port_direction_is_validated() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "port".to_string(),
+            Node {
+                id: "port".to_string(),
+                stable_key: "port:user-repository".to_string(),
+                node_type: "Port".to_string(),
+                attributes: BTreeMap::from([("direction".to_string(), json!("sideways"))]),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_graph(&graph);
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "architecture.port_direction_invalid"));
     }
 }
