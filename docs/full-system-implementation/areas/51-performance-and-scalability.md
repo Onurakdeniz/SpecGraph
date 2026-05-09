@@ -14,15 +14,17 @@ Keep replay, indexing, validation, and queries usable as repositories and event 
 
 - Docs identify snapshots, incremental indexing, changed-file validation, query cost limits
 - README says caches are rebuildable
+- Phase 0 performance budget skeleton exists at `docs/performance/budgets.md`
+- Machine-readable benchmark placeholders exist at `tests/performance/budget-placeholders.json` and are checked by `scripts/check_benchmark_budgets.py`
 
 ### Partly Implemented
 
 - Snapshots/changed-file foundations exist
-- Benchmarks and cost model are not complete
+- Numeric budgets, executable benchmark fixtures, and the final cost model are not complete
 
 ### Not Implemented / Remaining
 
-- Benchmark suite
+- Executable benchmark suite with non-placeholder thresholds
 - Incremental rebuilds
 - Query cost model
 - Multi-writer/server design
@@ -35,15 +37,16 @@ Snapshots, indexes, event sequences, query costs, incremental observations, vali
 
 ### 2. Commands / APIs
 
-Replay, snapshot, code index, impact analyze, ci validate, future maintenance commands
+Replay, snapshot, code index, impact analyze, ci validate, proof run, benchmark budget checks, future maintenance commands
 
 ### 3. Validation and Policy Gates
 
-Snapshots match replay hashes; indexes rebuild; query costs bounded; changed-file validation limits work
+Snapshots match replay hashes; indexes rebuild; query costs bounded; changed-file validation limits work; benchmark placeholder ids remain stable and complete
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
+- Keep `docs/performance/budgets.md`, `tests/performance/budget-placeholders.json`, and `scripts/check_benchmark_budgets.py` aligned as benchmark scenarios mature.
 - Implement or finish: Benchmark suite.
 - Implement or finish: Incremental rebuilds.
 - Implement or finish: Query cost model.
@@ -56,6 +59,7 @@ Snapshots match replay hashes; indexes rebuild; query costs bounded; changed-fil
 - The documented commands/APIs work for the happy path and at least one intentional failure path.
 - Validation findings identify the graph object, file or command involved, and remediation.
 - The area can be exercised from CLI/CI without relying on untrusted direct mutation.
+- Replay, query, validation, indexing, adoption, and CI benchmark placeholders are present and validated in CI.
 
 ## Source Notes
 

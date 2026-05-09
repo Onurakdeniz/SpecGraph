@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "specgraph.performance-budgets/v1",
+  "status": "placeholder",
+  "benchmarks": [
+    {
+      "id": "replay.small-event-log",
+      "area": "replay",
+      "description": "Replay a deterministic small JSONL event log and verify the resulting state hash.",
+      "command": "cargo run -p sg-cli -- graph replay --check",
+      "budget": { "metric": "wallMs", "max": null },
+      "phaseClosure": "7.10"
+    },
+    {
+      "id": "query.stable-neighborhood",
+      "area": "query",
+      "description": "Run stable ordered graph queries with explicit limits and verify deterministic result order.",
+      "command": "future: sg graph query --benchmark --limit <N>",
+      "budget": { "metric": "wallMs", "max": null },
+      "phaseClosure": "1.5, 7.10"
+    },
+    {
+      "id": "validation.aggregate-ci",
+      "area": "validation",
+      "description": "Run ontology, traceability, policy, snapshot, Git binding, and validation-record checks as an aggregate validation pass.",
+      "command": "cargo run -p sg-cli -- ci validate",
+      "budget": { "metric": "wallMs", "max": null },
+      "phaseClosure": "2.8, 4.7, 7.10"
+    },
+    {
+      "id": "indexing.changed-files",
+      "area": "indexing",
+      "description": "Index a bounded changed-file set and produce trust-labeled CodeGraph observations.",
+      "command": "cargo run -p sg-cli -- code index --changed-file <FILE>",
+      "budget": { "metric": "filesPerSecond", "min": null },
+      "phaseClosure": "4.2, 7.10"
+    },
+    {
+      "id": "adoption.scan-observe",
+      "area": "adoption",
+      "description": "Scan an existing repository in observe mode and produce a deterministic adoption report.",
+      "command": "cargo run -p sg-cli -- adopt scan --mode observe",
+      "budget": { "metric": "filesPerSecond", "min": null },
+      "phaseClosure": "5.4, 7.10"
+    },
+    {
+      "id": "ci.full-proof-path",
+      "area": "ci",
+      "description": "Run the full local proof path used as the CI performance guardrail baseline.",
+      "command": "cargo run -p sg-cli -- proof run",
+      "budget": { "metric": "wallMs", "max": null },
+      "phaseClosure": "7.10"
+    }
+  ]
+}

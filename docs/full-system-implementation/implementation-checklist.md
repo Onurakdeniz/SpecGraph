@@ -87,7 +87,7 @@ Related areas:
 - [x] Add architecture check or documentation test for dependency rules.
 - [x] Define CLI UX contract with planned command inventory, output modes, and exit codes in [`docs/cli/ux-contract.md`](../cli/ux-contract.md).
 - [x] Add docs source-of-truth check for canonical plan, derived trackers, area files, and reference docs.
-- [ ] Add benchmark placeholders for replay, validation, indexing, and query performance.
+- [x] Add benchmark placeholders for replay, query, validation, indexing, adoption, and CI performance in [`tests/performance/budget-placeholders.json`](../../tests/performance/budget-placeholders.json).
 - [~] Keep `docs/full-system-implementation/index.md` updated when areas change status.
 
 ### Gate Checks
