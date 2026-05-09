@@ -505,6 +505,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Impact.Revalidate",
+            category: "impact",
+            description: "Record impact-driven revalidation queue facts and replan invalidated actions.",
+            required_input_fields: &["roots", "queue"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["ImpactAnalysis", "RevalidationQueue"],
+            allowed_create_edge_types: &["HAS_IMPACT_ANALYSIS", "IMPACTS"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "GraphMerge.DryRun",
             category: "graph",
             description: "Record graph merge or rebase dry-run evidence, conflicts, blockers, and post-merge validation intent.",

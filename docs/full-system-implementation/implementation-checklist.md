@@ -313,10 +313,10 @@ Related areas:
 - [x] Implement dry-run graph merge.
 - [x] Add conflict checks for type, cardinality, policy, migration, traceability, and ontology version.
 - [x] Add graph rebase dry-run.
-- [~] Add impact-carrying edge metadata to ontology.
-- [ ] Add invalidation rules.
-- [ ] Add `RevalidationQueue` model.
-- [ ] Add action replan trigger from impact analysis.
+- [x] Add impact-carrying edge metadata to ontology.
+- [x] Add invalidation rules.
+- [x] Add `RevalidationQueue` model.
+- [x] Add action replan trigger from impact analysis.
 - [~] Finish `sg init --adopt` flow.
 - [ ] Add adoption module inference.
 - [~] Add adoption reports for observe/warn/enforce-new-work/strict.
@@ -330,8 +330,8 @@ Related areas:
 
 - [x] Unresolved graph conflict blocks merge.
 - [x] Graph merge records a merge dry-run event plan and validates post-merge state.
-- [ ] Rebase detects invalidated actions and requires replan.
-- [~] Impact analysis produces deterministic direct and indirect impacts.
+- [x] Rebase detects invalidated actions and requires replan.
+- [x] Impact analysis produces deterministic direct and indirect impacts.
 - [~] Existing repo observe mode never blocks legacy code.
 - [~] enforce-new-work mode blocks only new governed work.
 - [ ] Reproducible bug fix cannot close without required regression evidence.

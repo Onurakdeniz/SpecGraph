@@ -18,14 +18,13 @@ Compute what specs, actions, tests, code, data, and policies need revalidation a
 ### Partly Implemented
 
 - Basic traversal exists
-- Invalidation rules, queue, and replan integration are future
+- Direct and indirect traversal is deterministic
+- Impact invalidation rules create graph-native `RevalidationQueue` entries for validations, test runs, findings, commit plans, and actions
+- Invalidated actions can produce a replan delta before continuation
 
 ### Not Implemented / Remaining
 
-- Impact edge metadata
-- RevalidationQueue operations
-- Action replan triggers
-- CI integration
+- CI integration beyond current queue facts and replan delta
 
 ## Implementation Parts
 
@@ -44,9 +43,6 @@ Changed nodes expand through impact edges; ontology invalidation rules create re
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Impact edge metadata.
-- Implement or finish: RevalidationQueue operations.
-- Implement or finish: Action replan triggers.
 - Implement or finish: CI integration.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
@@ -69,3 +65,10 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
 
+
+### Phase 5.3 Revalidation Queue
+
+- `build_revalidation_queue` expands an `ImpactAnalysis` into deterministic invalidation entries.
+- Validation runs, validator executions, findings, test runs, commit plans, and action nodes are queue targets.
+- Queued actions and commit plans set `replanRequired`; `replan_delta_from_queue` marks affected ActionNodes `Replanned` with impact provenance.
+- `Impact.Revalidate` is registered in the Operation ABI for recording queue facts through the runtime.

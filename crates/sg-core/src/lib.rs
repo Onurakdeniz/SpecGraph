@@ -118,7 +118,11 @@ pub use graph_merge::{
     dry_run_graph_rebase, GraphDiff, GraphIntegrationDryRun, GraphIntegrationMode,
     GraphIntegrationStatus, MergeConflict, SemanticConflictDimension, SemanticConflictReport,
 };
-pub use impact::{analyze_impact, ImpactAnalysis};
+pub use impact::{
+    analyze_impact, build_revalidation_queue, build_revalidation_queue_with_reason,
+    replan_delta_from_queue, revalidation_queue_delta, ImpactAnalysis, ImpactInvalidationReason,
+    RevalidationQueue, RevalidationQueueEntry, RevalidationTargetKind,
+};
 pub use ontology_pack::{
     load_pack, plan_pack_migration, validate_pack, OntologyMigration, OntologyMigrationAction,
     OntologyMigrationPlan, OntologyPackManifest, OntologyPackSignature, OntologyPackSource,
