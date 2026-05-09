@@ -159,6 +159,8 @@ Related areas:
 - [x] Add postcondition checks.
 - [x] Add ontology cardinality checks.
 - [x] Add ontology state-machine support.
+- [x] Add ontology pack source metadata validation.
+- [x] Add ontology pack signature metadata validation for local and future remote sources.
 - [~] Add pack migration planning model.
 - [~] Add policy result model persistence or receipt inclusion.
 - [~] Add actor identity resolution.

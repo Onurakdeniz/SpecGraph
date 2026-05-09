@@ -1,5 +1,12 @@
 name: ddd-backend
 version: 0.1.0
+source:
+  kind: local
+  uri: docs/ontology-packs/ddd-backend.yaml
+signature:
+  algorithm: unsigned-dev
+  value: unsigned-dev
+  signedBy: local-dev
 extends:
   - core@0.1.0
 nodeTypes:

@@ -22,12 +22,12 @@ Protect trusted core from malicious LLMs, hook bypass, event tampering, secret l
 - Hashing, policies, locks, proposal states are foundations
 - Dependency and trust-promotion checks are now automated for the current compact Rust workspace
 - Event replay now rejects sequence gaps, previous-event chain breaks, and pre/post hash tampering
-- Signatures/capabilities/sandboxing remain
+- Ontology pack source/signature metadata is validated and locked; event signatures, capability enforcement, and sandboxing remain
 
 ### Not Implemented / Remaining
 
 - Capability model
-- Signed events/packs
+- Cryptographic signed events/packs verification beyond pack metadata hardening
 - Secret prevention at tool level
 - Security review workflows
 
@@ -45,12 +45,19 @@ Policy checks and `python3 scripts/check_architecture_boundaries.py` now; future
 
 CI repeats checks, event hash/previous-event chain validation, architecture boundary checks, deny secrets/production by default, migrations require approval, packs are locked/signed/sandboxed
 
+
+### Pack Supply-Chain Boundary
+
+- Ontology packs now distinguish local development sources from remote/registry sources.
+- Remote and registry pack sources must be HTTPS and must include non-`unsigned-dev` signature metadata before install can proceed.
+- Lockfiles retain source and signature metadata so later policy, registry, and cryptographic verification work has an auditable trusted input.
+
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep trusted-core dependency/import deny lists current as new security-sensitive layers or providers are introduced.
 - Implement or finish: Capability model.
-- Implement or finish: Signed events/packs.
+- Implement or finish: Cryptographic signed events/packs verification beyond pack metadata hardening.
 - Implement or finish: Secret prevention at tool level.
 - Implement or finish: Security review workflows.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
