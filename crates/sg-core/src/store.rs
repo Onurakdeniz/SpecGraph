@@ -10,6 +10,7 @@ use crate::operation_abi::{
     validate_operation_postconditions, validate_operation_preconditions, validate_operation_request,
 };
 use crate::spec::SpecProjection;
+use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_SNAPSHOT};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -1348,19 +1349,22 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
         snapshots_checked += 1;
 
         if snapshot.event_sequence > full_replay.last_sequence {
-            findings.push(Finding {
-                code: "snapshot.event_sequence_ahead".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
+            findings.push(
+                snapshot_finding(
+                    "snapshot.event_sequence_ahead",
+                    format!(
                     "Snapshot `{}` references event sequence {} but event log ends at {}. Remediation: delete and rebuild stale snapshot `{}`.",
                     snapshot.snapshot_id,
                     snapshot.event_sequence,
                     full_replay.last_sequence,
                     file.display()
-                ),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+                    ),
+                )
+                .with_remediation(format!(
+                    "Delete and rebuild stale snapshot `{}`.",
+                    file.display()
+                )),
+            );
             continue;
         }
 
@@ -1370,20 +1374,23 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
             Some(snapshot.event_sequence),
         )?;
         if replay_at_sequence.state_hash != snapshot.state_hash {
-            findings.push(Finding {
-                code: "snapshot.replay_hash_mismatch".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
+            findings.push(
+                snapshot_finding(
+                    "snapshot.replay_hash_mismatch",
+                    format!(
                     "Snapshot `{}` stateHash `{}` does not match replay hash `{}` at event sequence {}. Remediation: delete and rebuild snapshot `{}` from the event log.",
                     snapshot.snapshot_id,
                     snapshot.state_hash,
                     replay_at_sequence.state_hash,
                     snapshot.event_sequence,
                     file.display()
-                ),
-                related_nodes: vec![],
-                related_edges: vec![],
-            });
+                    ),
+                )
+                .with_remediation(format!(
+                    "Delete and rebuild snapshot `{}` from the event log.",
+                    file.display()
+                )),
+            );
         }
 
         let snapshot_graph = Graph {
@@ -1402,18 +1409,23 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
         };
         let embedded_hash = state_hash(&snapshot_graph, CORE_ONTOLOGY_VERSION);
         if embedded_hash != snapshot.state_hash {
-            findings.push(Finding {
-                code: "snapshot.embedded_graph_hash_mismatch".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
+            findings.push(
+                snapshot_finding(
+                    "snapshot.embedded_graph_hash_mismatch",
+                    format!(
                     "Snapshot `{}` embedded graph hashes to `{embedded_hash}` but declares `{}`. Remediation: delete and rebuild snapshot `{}` from the event log.",
                     snapshot.snapshot_id,
                     snapshot.state_hash,
                     file.display()
-                ),
-                related_nodes: snapshot.nodes.iter().map(|node| node.id.clone()).collect(),
-                related_edges: snapshot.edges.iter().map(|edge| edge.id.clone()).collect(),
-            });
+                    ),
+                )
+                .with_remediation(format!(
+                    "Delete and rebuild snapshot `{}` from the event log.",
+                    file.display()
+                ))
+                .with_related_nodes(snapshot.nodes.iter().map(|node| node.id.clone()))
+                .with_related_edges(snapshot.edges.iter().map(|edge| edge.id.clone())),
+            );
         }
     }
 
@@ -1421,6 +1433,11 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
         snapshots_checked,
         findings,
     })
+}
+
+fn snapshot_finding(code: &str, message: String) -> Finding {
+    Finding::new(code, FindingSeverity::Error, message)
+        .with_validator(VALIDATOR_SNAPSHOT, CORE_VALIDATOR_VERSION)
 }
 
 fn active_ontology(root: &Path) -> Result<MvpOntology> {

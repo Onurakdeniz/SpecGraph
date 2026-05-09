@@ -1,4 +1,5 @@
 use crate::model::{Finding, FindingSeverity, Graph};
+use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_POLICY};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -526,13 +527,7 @@ fn looks_like_secret_path(path: &str) -> bool {
 }
 
 fn finding(code: &str, severity: FindingSeverity, message: String) -> Finding {
-    Finding {
-        code: code.to_string(),
-        severity,
-        message,
-        related_nodes: vec![],
-        related_edges: vec![],
-    }
+    Finding::new(code, severity, message).with_validator(VALIDATOR_POLICY, CORE_VALIDATOR_VERSION)
 }
 
 #[cfg(test)]

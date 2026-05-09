@@ -165,10 +165,137 @@ pub struct Finding {
     pub code: String,
     pub severity: FindingSeverity,
     pub message: String,
+    /// Stable id of the validator that produced this finding.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub validator: String,
+    /// Version of the validator logic that produced this finding.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub validator_version: String,
+    /// Precise graph, file, command, or policy locations related to this finding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<FindingLocation>,
+    /// Actionable remediation text separate from the human-readable message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remediation: Option<String>,
     #[serde(default)]
     pub related_nodes: Vec<NodeId>,
     #[serde(default)]
     pub related_edges: Vec<EdgeId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FindingLocation {
+    #[serde(rename = "type")]
+    pub location_type: String,
+    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
+}
+
+impl Finding {
+    pub fn new(
+        code: impl Into<String>,
+        severity: FindingSeverity,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            severity,
+            message: message.into(),
+            validator: String::new(),
+            validator_version: String::new(),
+            locations: Vec::new(),
+            remediation: None,
+            related_nodes: Vec::new(),
+            related_edges: Vec::new(),
+        }
+    }
+
+    pub fn with_validator(
+        mut self,
+        validator: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
+        self.validator = validator.into();
+        self.validator_version = version.into();
+        self
+    }
+
+    pub fn with_remediation(mut self, remediation: impl Into<String>) -> Self {
+        self.remediation = Some(remediation.into());
+        self
+    }
+
+    pub fn with_location(mut self, location: FindingLocation) -> Self {
+        self.locations.push(location);
+        self
+    }
+
+    pub fn with_related_nodes<I, S>(mut self, nodes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<NodeId>,
+    {
+        self.related_nodes = nodes.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn with_related_edges<I, S>(mut self, edges: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<EdgeId>,
+    {
+        self.related_edges = edges.into_iter().map(Into::into).collect();
+        self
+    }
+}
+
+impl FindingLocation {
+    pub fn graph_node(node_id: impl Into<String>) -> Self {
+        Self {
+            location_type: "graph-node".to_string(),
+            target: node_id.into(),
+            path: None,
+            line: None,
+            column: None,
+        }
+    }
+
+    pub fn graph_edge(edge_id: impl Into<String>) -> Self {
+        Self {
+            location_type: "graph-edge".to_string(),
+            target: edge_id.into(),
+            path: None,
+            line: None,
+            column: None,
+        }
+    }
+
+    pub fn file(path: impl Into<String>) -> Self {
+        let path = path.into();
+        Self {
+            location_type: "file".to_string(),
+            target: path.clone(),
+            path: Some(path),
+            line: None,
+            column: None,
+        }
+    }
+
+    pub fn command(command: impl Into<String>) -> Self {
+        Self {
+            location_type: "command".to_string(),
+            target: command.into(),
+            path: None,
+            line: None,
+            column: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,4 +304,41 @@ pub enum FindingSeverity {
     Info,
     Warning,
     Error,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn finding_schema_supports_validator_locations_and_remediation() {
+        let finding = Finding::new("validator.demo", FindingSeverity::Error, "Demo failed")
+            .with_validator("validator.demo", "1.2.3")
+            .with_location(FindingLocation::file("src/lib.rs"))
+            .with_remediation("Fix the demo failure")
+            .with_related_nodes(["node_demo"]);
+
+        assert_eq!(finding.validator, "validator.demo");
+        assert_eq!(finding.validator_version, "1.2.3");
+        assert_eq!(finding.locations[0].location_type, "file");
+        assert_eq!(finding.locations[0].path.as_deref(), Some("src/lib.rs"));
+        assert_eq!(finding.remediation.as_deref(), Some("Fix the demo failure"));
+        assert_eq!(finding.related_nodes, vec!["node_demo".to_string()]);
+    }
+
+    #[test]
+    fn legacy_finding_json_deserializes_with_schema_defaults() {
+        let finding: Finding = serde_json::from_value(json!({
+            "code": "legacy.demo",
+            "severity": "Warning",
+            "message": "legacy finding"
+        }))
+        .unwrap();
+
+        assert_eq!(finding.validator, "");
+        assert_eq!(finding.validator_version, "");
+        assert!(finding.locations.is_empty());
+        assert!(finding.remediation.is_none());
+    }
 }

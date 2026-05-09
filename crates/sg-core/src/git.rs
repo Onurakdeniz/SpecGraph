@@ -1,4 +1,5 @@
-use crate::model::{Finding, FindingSeverity, Graph};
+use crate::model::{Finding, FindingLocation, FindingSeverity, Graph};
+use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING};
 use globset::{Glob, GlobSetBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -223,12 +224,26 @@ fn require_trailer(
 }
 
 fn finding(code: &str, message: String) -> Finding {
-    Finding {
-        code: code.to_string(),
-        severity: FindingSeverity::Error,
-        message,
-        related_nodes: vec![],
-        related_edges: vec![],
+    let validator = if code.starts_with("code_scope.") {
+        VALIDATOR_CODE_SCOPE
+    } else {
+        VALIDATOR_GIT_BINDING
+    };
+    let file_location = if code == "code_scope.out_of_scope_file" {
+        message.split('`').nth(1).map(FindingLocation::file)
+    } else {
+        None
+    };
+    let finding = Finding::new(code, FindingSeverity::Error, message)
+        .with_validator(validator, CORE_VALIDATOR_VERSION);
+    if code == "code_scope.out_of_scope_file" {
+        // Keep the compatibility message while also adding a structured file location.
+        match file_location {
+            Some(location) => finding.with_location(location),
+            None => finding,
+        }
+    } else {
+        finding
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::model::{Edge, Finding, FindingSeverity, Graph, Node};
 use crate::stable_key::validate_stable_key;
+use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_ONTOLOGY};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const CORE_ONTOLOGY_VERSION: &str = "core@0.1.0";
@@ -154,54 +155,56 @@ impl MvpOntology {
 
     fn validate_node(&self, node: &Node, findings: &mut Vec<Finding>) {
         if !self.is_node_type(&node.node_type) {
-            findings.push(Finding {
-                code: "ontology.invalid_node_type".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!("Unknown node type `{}`", node.node_type),
-                related_nodes: vec![node.id.clone()],
-                related_edges: vec![],
-            });
+            findings.push(
+                finding(
+                    "ontology.invalid_node_type",
+                    format!("Unknown node type `{}`", node.node_type),
+                )
+                .with_related_nodes([node.id.clone()]),
+            );
         }
     }
 
     fn validate_edge(&self, edge: &Edge, graph: &Graph, findings: &mut Vec<Finding>) {
         if !self.is_edge_type(&edge.edge_type) {
-            findings.push(Finding {
-                code: "ontology.invalid_edge_type".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!("Unknown edge type `{}`", edge.edge_type),
-                related_nodes: vec![],
-                related_edges: vec![edge.id.clone()],
-            });
+            findings.push(
+                finding(
+                    "ontology.invalid_edge_type",
+                    format!("Unknown edge type `{}`", edge.edge_type),
+                )
+                .with_related_edges([edge.id.clone()]),
+            );
         }
 
         let from = graph.nodes.get(&edge.from);
         let to = graph.nodes.get(&edge.to);
 
         if from.is_none() {
-            findings.push(Finding {
-                code: "ontology.missing_edge_from".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
-                    "Edge `{}` references missing source node `{}`",
-                    edge.id, edge.from
-                ),
-                related_nodes: vec![edge.from.clone()],
-                related_edges: vec![edge.id.clone()],
-            });
+            findings.push(
+                finding(
+                    "ontology.missing_edge_from",
+                    format!(
+                        "Edge `{}` references missing source node `{}`",
+                        edge.id, edge.from
+                    ),
+                )
+                .with_related_nodes([edge.from.clone()])
+                .with_related_edges([edge.id.clone()]),
+            );
         }
 
         if to.is_none() {
-            findings.push(Finding {
-                code: "ontology.missing_edge_to".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
-                    "Edge `{}` references missing target node `{}`",
-                    edge.id, edge.to
-                ),
-                related_nodes: vec![edge.to.clone()],
-                related_edges: vec![edge.id.clone()],
-            });
+            findings.push(
+                finding(
+                    "ontology.missing_edge_to",
+                    format!(
+                        "Edge `{}` references missing target node `{}`",
+                        edge.id, edge.to
+                    ),
+                )
+                .with_related_nodes([edge.to.clone()])
+                .with_related_edges([edge.id.clone()]),
+            );
         }
 
         if let (Some(from), Some(to), Some((allowed_from, allowed_to))) =
@@ -210,16 +213,17 @@ impl MvpOntology {
             if !allowed_from.contains(&from.node_type.as_str())
                 || !allowed_to.contains(&to.node_type.as_str())
             {
-                findings.push(Finding {
-                    code: "ontology.invalid_edge_endpoint_type".to_string(),
-                    severity: FindingSeverity::Error,
-                    message: format!(
-                        "Edge `{}` of type `{}` cannot connect `{}` to `{}`",
-                        edge.id, edge.edge_type, from.node_type, to.node_type
-                    ),
-                    related_nodes: vec![edge.from.clone(), edge.to.clone()],
-                    related_edges: vec![edge.id.clone()],
-                });
+                findings.push(
+                    finding(
+                        "ontology.invalid_edge_endpoint_type",
+                        format!(
+                            "Edge `{}` of type `{}` cannot connect `{}` to `{}`",
+                            edge.id, edge.edge_type, from.node_type, to.node_type
+                        ),
+                    )
+                    .with_related_nodes([edge.from.clone(), edge.to.clone()])
+                    .with_related_edges([edge.id.clone()]),
+                );
             }
         }
     }
@@ -231,13 +235,13 @@ impl MvpOntology {
                 .values()
                 .any(|edge| edge.from == spec.id && edge.edge_type == "HAS_REQUIREMENT");
             if !has_requirement {
-                findings.push(Finding {
-                    code: "spec.has_requirement".to_string(),
-                    severity: FindingSeverity::Error,
-                    message: format!("Spec `{}` must have at least one requirement", spec.id),
-                    related_nodes: vec![spec.id.clone()],
-                    related_edges: vec![],
-                });
+                findings.push(
+                    finding(
+                        "spec.has_requirement",
+                        format!("Spec `{}` must have at least one requirement", spec.id),
+                    )
+                    .with_related_nodes([spec.id.clone()]),
+                );
             }
 
             let has_acceptance_criterion = graph
@@ -245,16 +249,16 @@ impl MvpOntology {
                 .values()
                 .any(|edge| edge.from == spec.id && edge.edge_type == "HAS_ACCEPTANCE_CRITERION");
             if !has_acceptance_criterion {
-                findings.push(Finding {
-                    code: "spec.has_acceptance_criterion".to_string(),
-                    severity: FindingSeverity::Error,
-                    message: format!(
-                        "Spec `{}` must have at least one acceptance criterion",
-                        spec.id
-                    ),
-                    related_nodes: vec![spec.id.clone()],
-                    related_edges: vec![],
-                });
+                findings.push(
+                    finding(
+                        "spec.has_acceptance_criterion",
+                        format!(
+                            "Spec `{}` must have at least one acceptance criterion",
+                            spec.id
+                        ),
+                    )
+                    .with_related_nodes([spec.id.clone()]),
+                );
             }
 
             let branch_edges: Vec<_> = graph
@@ -263,13 +267,14 @@ impl MvpOntology {
                 .filter(|edge| edge.from == spec.id && edge.edge_type == "BOUND_TO_BRANCH")
                 .collect();
             if branch_edges.len() > 1 {
-                findings.push(Finding {
-                    code: "spec.bound_to_branch_cardinality".to_string(),
-                    severity: FindingSeverity::Error,
-                    message: format!("Spec `{}` can be bound to at most one Git branch", spec.id),
-                    related_nodes: vec![spec.id.clone()],
-                    related_edges: branch_edges.iter().map(|edge| edge.id.clone()).collect(),
-                });
+                findings.push(
+                    finding(
+                        "spec.bound_to_branch_cardinality",
+                        format!("Spec `{}` can be bound to at most one Git branch", spec.id),
+                    )
+                    .with_related_nodes([spec.id.clone()])
+                    .with_related_edges(branch_edges.iter().map(|edge| edge.id.clone())),
+                );
             }
 
             let action_graph_edges: Vec<_> = graph
@@ -278,16 +283,14 @@ impl MvpOntology {
                 .filter(|edge| edge.from == spec.id && edge.edge_type == "HAS_ACTION_GRAPH")
                 .collect();
             if action_graph_edges.len() > 1 {
-                findings.push(Finding {
-                    code: "action_graph.cardinality".to_string(),
-                    severity: FindingSeverity::Error,
-                    message: format!("Spec `{}` can have at most one ActionGraph", spec.id),
-                    related_nodes: vec![spec.id.clone()],
-                    related_edges: action_graph_edges
-                        .iter()
-                        .map(|edge| edge.id.clone())
-                        .collect(),
-                });
+                findings.push(
+                    finding(
+                        "action_graph.cardinality",
+                        format!("Spec `{}` can have at most one ActionGraph", spec.id),
+                    )
+                    .with_related_nodes([spec.id.clone()])
+                    .with_related_edges(action_graph_edges.iter().map(|edge| edge.id.clone())),
+                );
             }
 
             for action_graph_edge in action_graph_edges {
@@ -308,17 +311,21 @@ fn validate_graph_stable_keys(graph: &Graph, findings: &mut Vec<Finding>) {
                     .0
                     .push(node.id.clone());
             }
-            Err(error) => findings.push(Finding {
-                code: "stable_key.invalid".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
+            Err(error) => findings.push(
+                finding(
+                    "stable_key.invalid",
+                    format!(
                     "{} Remediation: set node `{}` stableKey to a stable `<family>:<identifier>` value.",
                     error.message(&node.stable_key),
                     node.id
-                ),
-                related_nodes: vec![node.id.clone()],
-                related_edges: vec![],
-            }),
+                    ),
+                )
+                .with_remediation(format!(
+                    "Set node `{}` stableKey to a stable `<family>:<identifier>` value.",
+                    node.id
+                ))
+                .with_related_nodes([node.id.clone()]),
+            ),
         }
     }
 
@@ -330,31 +337,37 @@ fn validate_graph_stable_keys(graph: &Graph, findings: &mut Vec<Finding>) {
                     .1
                     .push(edge.id.clone());
             }
-            Err(error) => findings.push(Finding {
-                code: "stable_key.invalid".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
+            Err(error) => findings.push(
+                finding(
+                    "stable_key.invalid",
+                    format!(
                     "{} Remediation: set edge `{}` stableKey to a stable `<family>:<identifier>` value.",
                     error.message(&edge.stable_key),
                     edge.id
-                ),
-                related_nodes: vec![],
-                related_edges: vec![edge.id.clone()],
-            }),
+                    ),
+                )
+                .with_remediation(format!(
+                    "Set edge `{}` stableKey to a stable `<family>:<identifier>` value.",
+                    edge.id
+                ))
+                .with_related_edges([edge.id.clone()]),
+            ),
         }
     }
 
     for (stable_key, (node_ids, edge_ids)) in seen {
         if node_ids.len() + edge_ids.len() > 1 {
-            findings.push(Finding {
-                code: "stable_key.duplicate".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
+            findings.push(
+                finding(
+                    "stable_key.duplicate",
+                    format!(
                     "Stable key `{stable_key}` is used by more than one graph fact. Remediation: assign each node and edge a unique stableKey."
-                ),
-                related_nodes: node_ids,
-                related_edges: edge_ids,
-            });
+                    ),
+                )
+                .with_remediation("Assign each node and edge a unique stableKey.")
+                .with_related_nodes(node_ids)
+                .with_related_edges(edge_ids),
+            );
         }
     }
 }
@@ -367,13 +380,13 @@ fn validate_action_graph(graph: &Graph, action_graph_id: &str, findings: &mut Ve
         .collect();
 
     if group_edges.is_empty() {
-        findings.push(Finding {
-            code: "action_graph.has_action_group".to_string(),
-            severity: FindingSeverity::Error,
-            message: format!("ActionGraph `{action_graph_id}` must have at least one ActionGroup"),
-            related_nodes: vec![action_graph_id.to_string()],
-            related_edges: vec![],
-        });
+        findings.push(
+            finding(
+                "action_graph.has_action_group",
+                format!("ActionGraph `{action_graph_id}` must have at least one ActionGroup"),
+            )
+            .with_related_nodes([action_graph_id.to_string()]),
+        );
     }
 
     for group_edge in group_edges {
@@ -382,16 +395,16 @@ fn validate_action_graph(graph: &Graph, action_graph_id: &str, findings: &mut Ve
             .values()
             .any(|edge| edge.from == group_edge.to && edge.edge_type == "HAS_ACTION");
         if !has_action {
-            findings.push(Finding {
-                code: "action_group.has_action".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
-                    "ActionGroup `{}` must have at least one ActionNode",
-                    group_edge.to
-                ),
-                related_nodes: vec![group_edge.to.clone()],
-                related_edges: vec![],
-            });
+            findings.push(
+                finding(
+                    "action_group.has_action",
+                    format!(
+                        "ActionGroup `{}` must have at least one ActionNode",
+                        group_edge.to
+                    ),
+                )
+                .with_related_nodes([group_edge.to.clone()]),
+            );
         }
 
         let has_commit_plan = graph
@@ -399,18 +412,23 @@ fn validate_action_graph(graph: &Graph, action_graph_id: &str, findings: &mut Ve
             .values()
             .any(|edge| edge.from == group_edge.to && edge.edge_type == "HAS_COMMIT_PLAN");
         if !has_commit_plan {
-            findings.push(Finding {
-                code: "commit_plan.required_for_action_group".to_string(),
-                severity: FindingSeverity::Error,
-                message: format!(
-                    "ActionGroup `{}` must have at least one CommitPlan",
-                    group_edge.to
-                ),
-                related_nodes: vec![group_edge.to.clone()],
-                related_edges: vec![],
-            });
+            findings.push(
+                finding(
+                    "commit_plan.required_for_action_group",
+                    format!(
+                        "ActionGroup `{}` must have at least one CommitPlan",
+                        group_edge.to
+                    ),
+                )
+                .with_related_nodes([group_edge.to.clone()]),
+            );
         }
     }
+}
+
+fn finding(code: &str, message: String) -> Finding {
+    Finding::new(code, FindingSeverity::Error, message)
+        .with_validator(VALIDATOR_ONTOLOGY, CORE_VALIDATOR_VERSION)
 }
 
 fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {

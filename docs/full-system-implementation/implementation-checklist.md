@@ -23,7 +23,7 @@ Before any slice is considered complete:
 - [ ] New graph facts use stable keys.
 - [ ] New graph facts validate against the active ontology.
 - [ ] Policy checks run before acceptance.
-- [ ] Validation findings include severity, validator id, related graph/file location, and remediation.
+- [~] Validation findings include severity, validator id, related graph/file location, and remediation.
 - [ ] Event replay remains deterministic.
 - [ ] Docs and examples are updated.
 - [ ] At least one happy-path test and one failure-path test exist.
@@ -154,8 +154,8 @@ Related areas:
 - [~] Add graph-native `Approval` and `Waiver` nodes.
 - [~] Add waiver expiration and scope validation.
 - [ ] Add non-waivable policy list.
-- [ ] Add common `Finding` schema across validators.
-- [ ] Add validator registry and validator versioning.
+- [~] Add common `Finding` schema across validators.
+- [~] Add validator registry and validator versioning.
 
 ### Gate Checks
 

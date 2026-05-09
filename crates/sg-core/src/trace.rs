@@ -1,4 +1,5 @@
 use crate::model::{Finding, FindingSeverity, Graph};
+use crate::validation::{CORE_VALIDATOR_VERSION, VALIDATOR_TRACE_LINKS};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -69,13 +70,8 @@ pub fn validate_trace_links(graph: &Graph, manifest: &LinksManifest) -> Vec<Find
 }
 
 fn finding(code: &str, message: String) -> Finding {
-    Finding {
-        code: code.to_string(),
-        severity: FindingSeverity::Error,
-        message,
-        related_nodes: vec![],
-        related_edges: vec![],
-    }
+    Finding::new(code, FindingSeverity::Error, message)
+        .with_validator(VALIDATOR_TRACE_LINKS, CORE_VALIDATOR_VERSION)
 }
 
 #[cfg(test)]
