@@ -15,15 +15,19 @@ Expand the repository from an MVP Rust workspace into the full SpecGraph OS runt
 - Rust trusted-core direction is documented
 - MVP workspace with sg-core and sg-cli is described
 - Full target structure is specified in the project documentation
+- Phase 0 boundary map now defines trusted core, CLI, adapters, ontology packs, policies, examples, future server/SDK/Studio, and release/distribution boundaries in `docs/architecture/boundaries.md`
+- Current repository files are assigned to architecture boundaries in `docs/architecture/boundaries.md`
 
 ### Partly Implemented
 
 - Current repo is not yet the final crate/package split
+- Some adapter-facing and filesystem-facing foundations still live inside `sg-core` until later crate/package splits enforce the documented boundaries
 - Examples exist only for a narrow backend API path
 
 ### Not Implemented / Remaining
 
 - Dedicated crates for graph store, operation runtime, policy, validation, action graph, git, code index, impact, runtime, server
+- Automated architecture boundary checks from the documented dependency rules
 - TypeScript SDK and Studio package
 - Complete packs and example catalog
 
@@ -31,7 +35,7 @@ Expand the repository from an MVP Rust workspace into the full SpecGraph OS runt
 
 ### 1. Graph Model / Runtime Objects
 
-Runtime boundaries: Graph Kernel, OntologyGraph, Operation Runtime, Policy Engine, Validation Runtime, ActionGraph, GitGraph, CodeGraph, Impact, CLI, Server, SDK, Studio, Packs
+Runtime boundaries: Graph Kernel, OntologyGraph, Operation Runtime, Policy Engine, Validation Runtime, ActionGraph, GitGraph, CodeGraph, Impact, CLI, Server, SDK, Studio, Packs. The boundary map in `docs/architecture/boundaries.md` is the current Phase 0 source for what belongs in each layer and which current files map to each boundary.
 
 ### 2. Commands / APIs
 
@@ -44,6 +48,7 @@ CI must ensure core crates do not depend on adapters and every crate/package/exa
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
+- Keep `docs/architecture/boundaries.md` aligned with any crate/package split.
 - Implement or finish: Dedicated crates for graph store, operation runtime, policy, validation, action graph, git, code index, impact, runtime, server.
 - Implement or finish: TypeScript SDK and Studio package.
 - Implement or finish: Complete packs and example catalog.
@@ -55,6 +60,7 @@ CI must ensure core crates do not depend on adapters and every crate/package/exa
 - The documented commands/APIs work for the happy path and at least one intentional failure path.
 - Validation findings identify the graph object, file or command involved, and remediation.
 - The area can be exercised from CLI/CI without relying on untrusted direct mutation.
+- New crates/packages follow the dependency direction rules in `docs/architecture/boundaries.md`.
 
 ## Source Notes
 
