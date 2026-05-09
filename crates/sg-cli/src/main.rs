@@ -1,19 +1,37 @@
 use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
-use sg_core::{
-    analyze_impact, built_in_non_waivable_policies, built_in_operations, built_in_validators,
-    detect_merge_conflicts, diff_graphs, evaluate_policies, evaluate_policies_with_manifests,
-    index_source_file, load_pack, load_policy_manifest, observations_to_delta, scan_repository,
-    validate_commit_binding, validate_pack, validate_required_tests_pass, validate_trace_links,
-    ActionLifecycleOptions, AdoptionMode, AppendOperationOptions, BindBranchOptions,
-    CodeIndexObservation, CommitValidationInput, CreateWaiverOptions, Edge, Finding,
-    FindingSeverity, GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions,
-    LinksManifest, Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal,
-    QueryContext, QueryLimits, QueryTarget, RecordApprovalOptions, RecordCommitOptions,
-    RecordPolicyReportOptions, ReplayOptions, Snapshot, SpecGraphStore, SpecProjection,
-    TestCaseResult, TestLink, TestRunRecord, TestStatus, TextItem, TransitionSpecOptions,
-    TrustState, UpsertActorOptions,
+use sg_adapter_code::{index_source_file, observations_to_delta, CodeIndexObservation};
+use sg_adoption::{scan_repository, AdoptionMode};
+use sg_gitgraph::{validate_commit_binding, CommitValidationInput};
+use sg_impact::analyze_impact;
+use sg_merge::{detect_merge_conflicts, diff_graphs};
+use sg_model::{
+    Edge, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt, Snapshot,
+};
+use sg_ontology::{load_pack, validate_pack};
+use sg_operation::built_in_operations;
+use sg_policy::{
+    built_in_non_waivable_policies, evaluate_policies, evaluate_policies_with_manifests,
+    load_policy_manifest, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Waiver,
+};
+use sg_proposal::{Proposal, TrustState};
+use sg_query::{GraphQuery, QueryContext, QueryLimits, QueryTarget};
+use sg_spec::{SpecProjection, TextItem};
+use sg_store::{
+    ActionLifecycleOptions, AppendOperationOptions, BindBranchOptions, CreateWaiverOptions,
+    GenerateActionGraphOptions, GrantRoleOptions, InitOptions, RecordApprovalOptions,
+    RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions, ReplayReport, SpecGraphStore,
+    TransitionSpecOptions, UpsertActorOptions,
+};
+use sg_testgraph::{
+    validate_required_tests_pass, validate_trace_links, LinksManifest, TestCaseResult, TestLink,
+    TestRunRecord, TestStatus,
+};
+use sg_validation::{
+    built_in_validators, CORE_VALIDATOR_VERSION, VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING,
+    VALIDATOR_ONTOLOGY, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT,
+    VALIDATOR_TRACE_LINKS,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -1719,7 +1737,7 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
                 let snapshot_errors = snapshot_report
                     .findings
                     .iter()
-                    .filter(|finding| finding.severity == sg_core::FindingSeverity::Error)
+                    .filter(|finding| finding.severity == FindingSeverity::Error)
                     .count();
                 if snapshot_errors > 0 {
                     for finding in &snapshot_report.findings {
@@ -1732,7 +1750,7 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
                 let branch_errors = branch_report
                     .findings
                     .iter()
-                    .filter(|finding| finding.severity == sg_core::FindingSeverity::Error)
+                    .filter(|finding| finding.severity == FindingSeverity::Error)
                     .count();
                 if branch_errors > 0 {
                     for finding in &branch_report.findings {
@@ -1788,7 +1806,7 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
                 require_permission: false,
             };
             let report = store.query_graph(context)?;
-            let query = sg_core::GraphQuery::with_context(&report.graph, report.context.clone());
+            let query = GraphQuery::with_context(&report.graph, report.context.clone());
             let nodes = if let Some(stable_key) = args.stable_key {
                 query
                     .get_node_by_stable_key(&stable_key)
@@ -1961,10 +1979,7 @@ fn read_links_manifest(root: &Path, path: &Path) -> anyhow::Result<LinksManifest
     serde_yaml::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))
 }
 
-fn trace_manifest_delta(
-    graph: &sg_core::Graph,
-    manifest: &LinksManifest,
-) -> anyhow::Result<GraphDelta> {
+fn trace_manifest_delta(graph: &Graph, manifest: &LinksManifest) -> anyhow::Result<GraphDelta> {
     let mut create_nodes = Vec::new();
     let mut create_edges = Vec::new();
 
@@ -2032,7 +2047,7 @@ fn ensure_test_node(create_nodes: &mut Vec<Node>, test: &str) -> String {
 }
 
 fn find_node_by_key<'a>(
-    graph: &'a sg_core::Graph,
+    graph: &'a Graph,
     node_type: &str,
     family: &str,
     key: &str,
@@ -2117,7 +2132,7 @@ fn validation_run_delta(
                 ("validator".to_string(), json!(validator_id)),
                 (
                     "validatorVersion".to_string(),
-                    json!(sg_core::CORE_VALIDATOR_VERSION),
+                    json!(CORE_VALIDATOR_VERSION),
                 ),
                 ("status".to_string(), json!(status)),
                 ("findingCount".to_string(), json!(finding_count)),
@@ -2160,13 +2175,13 @@ fn validation_run_delta(
 
 fn validator_id_for_check(check: &str) -> &'static str {
     match check {
-        "operation-abi" => sg_core::VALIDATOR_OPERATION_ABI,
-        "spec" => sg_core::VALIDATOR_ONTOLOGY,
-        "trace" => sg_core::VALIDATOR_TRACE_LINKS,
-        "commit" | "git" => sg_core::VALIDATOR_GIT_BINDING,
-        "code-index" => sg_core::VALIDATOR_CODE_SCOPE,
-        "policy" => sg_core::VALIDATOR_POLICY,
-        "replay" => sg_core::VALIDATOR_SNAPSHOT,
+        "operation-abi" => VALIDATOR_OPERATION_ABI,
+        "spec" => VALIDATOR_ONTOLOGY,
+        "trace" => VALIDATOR_TRACE_LINKS,
+        "commit" | "git" => VALIDATOR_GIT_BINDING,
+        "code-index" => VALIDATOR_CODE_SCOPE,
+        "policy" => VALIDATOR_POLICY,
+        "replay" => VALIDATOR_SNAPSHOT,
         _ => "validator.runtime",
     }
 }
@@ -2190,7 +2205,7 @@ fn transition_proposal(
     reason: Option<String>,
     actor: String,
     graph_branch: String,
-) -> anyhow::Result<sg_core::OperationReceipt> {
+) -> anyhow::Result<OperationReceipt> {
     let replay = store.replay(ReplayOptions { check_hashes: true })?;
     let proposal = replay
         .graph
@@ -2293,7 +2308,7 @@ fn trust_state_label(state: TrustState) -> &'static str {
     }
 }
 
-fn has_acceptance_criteria(report: &sg_core::ReplayReport) -> bool {
+fn has_acceptance_criteria(report: &ReplayReport) -> bool {
     report
         .graph
         .nodes
@@ -2321,7 +2336,7 @@ fn fail_on_errors(findings: &[Finding], label: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_waivers(values: &[String]) -> anyhow::Result<Vec<sg_core::Waiver>> {
+fn parse_waivers(values: &[String]) -> anyhow::Result<Vec<Waiver>> {
     values
         .iter()
         .map(|value| {
@@ -2332,7 +2347,7 @@ fn parse_waivers(values: &[String]) -> anyhow::Result<Vec<sg_core::Waiver>> {
             if policy.is_empty() || reason.is_empty() || approved_by.is_empty() {
                 bail!("expected waiver in POLICY:REASON:APPROVED_BY form, got `{value}`");
             }
-            Ok(sg_core::Waiver {
+            Ok(Waiver {
                 policy: policy.to_string(),
                 reason: reason.to_string(),
                 approved_by: approved_by.to_string(),

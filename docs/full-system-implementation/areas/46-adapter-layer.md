@@ -17,11 +17,12 @@ Connect Git, filesystem, code indexers, test runners, CI, LLMs, package managers
 - Phase 0 architecture boundary doc states that adapters emit observations/proposals/operation inputs only and cannot promote their own output to trusted facts
 - Unified adapter descriptor foundation declares adapter ids, kinds, and capabilities
 - Adapter delta validation enforces observed trust state, source trust, and observedBy provenance
-- `scripts/check_architecture_boundaries.py` now checks transitional adapter-facing core modules for direct `Accepted`/`Trusted` promotion
+- `sg-adapter-api`, `sg-adapter-code`, `sg-adapter-git`, `sg-adapter-test`, `sg-adapter-ci`, `sg-adapter-hosting`, `sg-adapter-llm`, and `sg-adoption` exist as adapter/observation boundary crates
+- `scripts/check_architecture_boundaries.py` now checks adapter-facing crates for direct `Accepted`/`Trusted` promotion
 
 ### Partly Implemented
 
-- Git/filesystem/code/CI foundations exist
+- Git/filesystem/code/CI foundations exist in owning crates instead of inside `sg-core`
 - Capability and provenance rules are now enforced for current code-index and adoption observation deltas
 - The automated boundary check prevents obvious trust-promotion regressions; provider-specific adapter runtimes remain future work
 - Package/test/DB/LLM adapters incomplete

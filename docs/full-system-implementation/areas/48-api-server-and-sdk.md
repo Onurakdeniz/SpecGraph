@@ -1,8 +1,8 @@
 # 48. API Server and SDK
 
-**System area:** API Server and SDK  
-**Implementation status:** ⬜ Not implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**System area:** API Server and SDK
+**Implementation status:** 🟡 Partly implemented
+**Status basis:** code audit plus modular workspace refactor.
 
 ## Purpose
 
@@ -14,15 +14,18 @@ Expose operations, queries, validation reports, and state to Studio, CI integrat
 
 - Repository structure recommends sg-server and packages/sdk
 - Technology strategy recommends TypeScript SDK
+- Rust `sg-server` and `sg-sdk` boundary crates exist
+- `sg-server` and `sg-sdk` depend on owning runtime/schema crates directly instead of the `sg-core` compatibility facade
 
 ### Partly Implemented
 
-- No server/SDK implementation is documented
+- Rust boundary crates expose minimal type/API surfaces for future server and SDK work
+- No HTTP server or generated SDK package implementation is documented
 
 ### Not Implemented / Remaining
 
 - HTTP/API schema
-- SDK package
+- TypeScript SDK package implementation
 - Auth/authz
 - ABI versioning compatibility
 
@@ -66,4 +69,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

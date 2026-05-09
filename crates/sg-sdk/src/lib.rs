@@ -1,7 +1,3 @@
-//! Boundary crate for `sg-sdk` in the SpecGraph OS modular workspace.
-//!
-//! This crate is intentionally a narrow public facade during the workspace split.
-//! Implementation still lives behind `sg-core` until the next extraction pass moves
-//! code module-by-module without changing public behavior.
+//! Rust SDK schema facade for generated client bindings.
 
-pub use sg_core::{Finding, GraphDelta, OperationReceipt, OperationRequest};
+pub use sg_model::{Finding, GraphDelta, OperationReceipt, OperationRequest};

@@ -6,15 +6,26 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-globset.workspace = true
-hex.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-serde_yaml.workspace = true
-sha2.workspace = true
-thiserror.workspace = true
-time.workspace = true
-uuid.workspace = true
-
-[dev-dependencies]
-tempfile = "3.10"
+sg-store.workspace = true
+sg-ontology.workspace = true
+sg-architecture.workspace = true
+sg-testgraph.workspace = true
+sg-module-graph.workspace = true
+sg-gitgraph.workspace = true
+sg-data.workspace = true
+sg-codegraph.workspace = true
+sg-adoption.workspace = true
+sg-adapter-code.workspace = true
+sg-validation.workspace = true
+sg-spec.workspace = true
+sg-proposal.workspace = true
+sg-project.workspace = true
+sg-policy.workspace = true
+sg-merge.workspace = true
+sg-issue.workspace = true
+sg-impact.workspace = true
+sg-adapter-api.workspace = true
+sg-canonical.workspace = true
+sg-model.workspace = true
+sg-operation.workspace = true
+sg-query.workspace = true

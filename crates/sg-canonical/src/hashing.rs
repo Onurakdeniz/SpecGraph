@@ -1,6 +1,6 @@
 use crate::canonical::to_canonical_json;
-use crate::model::Graph;
 use serde::Serialize;
+use sg_model::Graph;
 use sha2::{Digest, Sha256};
 
 pub const HASH_SCHEMA_VERSION: &str = "specgraph.state-hash/v1";
@@ -29,7 +29,7 @@ pub fn state_hash(graph: &Graph, ontology_version: &str) -> String {
 mod tests {
     use super::*;
     use crate::canonical::to_canonical_json;
-    use crate::model::Graph;
+    use sg_model::Graph;
 
     #[test]
     fn state_hash_payload_schema_is_versioned() {

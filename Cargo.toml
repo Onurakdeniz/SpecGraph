@@ -43,6 +43,37 @@ repository = "https://github.com/Onurakdeniz/SpecGraph"
 version = "0.1.0"
 
 [workspace.dependencies]
+sg-sdk = { path = "crates/sg-sdk" }
+sg-server = { path = "crates/sg-server" }
+sg-store = { path = "crates/sg-store" }
+sg-ontology = { path = "crates/sg-ontology" }
+sg-architecture = { path = "crates/sg-architecture" }
+sg-action = { path = "crates/sg-action" }
+sg-testgraph = { path = "crates/sg-testgraph" }
+sg-module-graph = { path = "crates/sg-module-graph" }
+sg-gitgraph = { path = "crates/sg-gitgraph" }
+sg-data = { path = "crates/sg-data" }
+sg-codegraph = { path = "crates/sg-codegraph" }
+sg-adoption = { path = "crates/sg-adoption" }
+sg-adapter-llm = { path = "crates/sg-adapter-llm" }
+sg-adapter-hosting = { path = "crates/sg-adapter-hosting" }
+sg-adapter-ci = { path = "crates/sg-adapter-ci" }
+sg-adapter-test = { path = "crates/sg-adapter-test" }
+sg-adapter-git = { path = "crates/sg-adapter-git" }
+sg-adapter-code = { path = "crates/sg-adapter-code" }
+sg-adapter-api = { path = "crates/sg-adapter-api" }
+sg-impact = { path = "crates/sg-impact" }
+sg-issue = { path = "crates/sg-issue" }
+sg-merge = { path = "crates/sg-merge" }
+sg-policy = { path = "crates/sg-policy" }
+sg-project = { path = "crates/sg-project" }
+sg-proposal = { path = "crates/sg-proposal" }
+sg-spec = { path = "crates/sg-spec" }
+sg-validation = { path = "crates/sg-validation" }
+sg-canonical = { path = "crates/sg-canonical" }
+sg-model = { path = "crates/sg-model" }
+sg-operation = { path = "crates/sg-operation" }
+sg-query = { path = "crates/sg-query" }
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 globset = "0.4"
