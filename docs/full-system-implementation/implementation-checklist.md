@@ -123,6 +123,7 @@ Related areas:
 - [x] Add deterministic query API with stable ordering.
 - [x] Add query context targets for current/branch/snapshot plus query cost/limit checks and `sg graph query`.
 - [x] Add `sg graph rebuild` command to rebuild derived snapshots/indexes from canonical JSONL events.
+- [x] Add graph branch base metadata and validation against replayed base snapshot/state.
 
 ### Gate Checks
 

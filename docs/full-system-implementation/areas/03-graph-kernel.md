@@ -15,6 +15,7 @@ Implement the trusted graph core for nodes, edges, deltas, snapshots, determinis
 - Graph types, receipts, JSONL replay, canonical hashing, and MVP ontology validation are described as existing
 - Node, Edge, GraphDelta, Event, Snapshot are MVP deliverables
 - Node, Edge, GraphDelta, Event, Snapshot, and state-hash schema versions are defined and tested in `sg-core`
+- Branch binding records base snapshot/state metadata on GitBranch and GraphSnapshot facts
 
 ### Partly Implemented
 
@@ -23,7 +24,7 @@ Implement the trusted graph core for nodes, edges, deltas, snapshots, determinis
 
 ### Not Implemented / Remaining
 
-- Complete graph branch lifecycle
+- Complete graph branch lifecycle beyond base metadata
 - GraphMerge and GraphRebase events
 - Conflict resolution workflow
 - Signed event support
@@ -36,11 +37,11 @@ Node, Edge, GraphDelta, GraphSnapshot, GraphBranch, GraphMerge, IDs, stable keys
 
 ### 2. Commands / APIs
 
-sg graph replay --check, status, snapshot, branch list, diff, conflicts, future merge
+`sg graph replay --check`, status, rebuild, query, snapshot, branch list, diff, conflicts, future merge
 
 ### 3. Validation and Policy Gates
 
-Replay determinism, versioned valid schemas, canonical hashes, ontology-compatible deltas, branch base snapshot correctness
+Replay determinism, versioned valid schemas, canonical hashes, ontology-compatible deltas, branch base snapshot correctness, branch metadata replay validation
 
 ### 4. Implementation Work Items
 
