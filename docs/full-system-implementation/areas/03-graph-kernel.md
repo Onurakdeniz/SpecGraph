@@ -14,6 +14,7 @@ Implement the trusted graph core for nodes, edges, deltas, snapshots, determinis
 
 - Graph types, receipts, JSONL replay, canonical hashing, and MVP ontology validation are described as existing
 - Node, Edge, GraphDelta, Event, Snapshot are MVP deliverables
+- Node, Edge, GraphDelta, Event, Snapshot, and state-hash schema versions are defined and tested in `sg-core`
 
 ### Partly Implemented
 
@@ -31,7 +32,7 @@ Implement the trusted graph core for nodes, edges, deltas, snapshots, determinis
 
 ### 1. Graph Model / Runtime Objects
 
-Node, Edge, GraphDelta, GraphSnapshot, GraphBranch, GraphMerge, IDs, stable keys, provenance, ontology versions, stateHash
+Node, Edge, GraphDelta, GraphSnapshot, GraphBranch, GraphMerge, IDs, stable keys, provenance, ontology versions, schema versions, stateHash
 
 ### 2. Commands / APIs
 
@@ -39,7 +40,7 @@ sg graph replay --check, status, snapshot, branch list, diff, conflicts, future 
 
 ### 3. Validation and Policy Gates
 
-Replay determinism, valid schemas, canonical hashes, ontology-compatible deltas, branch base snapshot correctness
+Replay determinism, versioned valid schemas, canonical hashes, ontology-compatible deltas, branch base snapshot correctness
 
 ### 4. Implementation Work Items
 

@@ -113,8 +113,8 @@ Related areas:
 
 ### Implementation Checklist
 
-- [~] Finalize `Node`, `Edge`, `GraphDelta`, `GraphSnapshot`, and graph hash model.
-- [~] Finalize canonical event JSON schema.
+- [x] Version `Node`, `Edge`, `GraphDelta`, `GraphSnapshot`, and graph hash schema contracts.
+- [x] Version canonical event JSON schema and preserve legacy deserialization defaults.
 - [x] Add strict event schema validation during replay.
 - [~] Add event chain hash continuity checks.
 - [x] Add snapshot verification against replayed state hash.

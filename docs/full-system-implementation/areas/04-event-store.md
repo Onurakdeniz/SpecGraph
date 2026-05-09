@@ -14,6 +14,8 @@ Use append-only JSONL events as canonical graph history while snapshots and inde
 
 - JSONL event log is documented as canonical for v0.1
 - README states replay and canonical hashing exist
+- Event and snapshot JSON now include schema-version fields with legacy defaults
+- State-hash payload schema version is defined and tested
 
 ### Partly Implemented
 
@@ -31,7 +33,7 @@ Use append-only JSONL events as canonical graph history while snapshots and inde
 
 ### 1. Graph Model / Runtime Objects
 
-EventId, sequence, operationId, actor, ontologyVersion, graphBranch, pre/post hashes, delta, signatures, snapshots
+schemaVersion, EventId, sequence, operationId, actor, ontologyVersion, graphBranch, pre/post hashes, delta, signatures, snapshots
 
 ### 2. Commands / APIs
 
@@ -39,7 +41,7 @@ sg graph replay --check, sg graph status, sg ci validate, future maintenance/sna
 
 ### 3. Validation and Policy Gates
 
-Canonical JSON, stable ordering, schema validation, hash continuity, snapshot hash verification
+Canonical JSON, stable ordering, versioned schema validation, hash continuity, snapshot hash verification
 
 ### 4. Implementation Work Items
 
