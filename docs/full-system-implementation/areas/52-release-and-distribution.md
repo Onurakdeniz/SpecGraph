@@ -1,7 +1,7 @@
 # 52. Release and Distribution
 
 **System area:** Release and Distribution  
-**Implementation status:** ⬜ Not implemented  
+**Implementation status:** 🟡 Partly implemented
 **Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
 
 ## Purpose
@@ -13,17 +13,19 @@ Ship SpecGraph OS as reliable open-source binaries, hooks, GitHub Action, packs,
 ### Fully Implemented
 
 - v1.0 deliverables are documented
+- Phase 0 release/distribution baseline exists at `docs/release/distribution.md`
+- Required artifact families are named: CLI binaries, Rust crates, GitHub Action, ontology packs, policy packs, docs bundle, examples, future server/SDK/Studio artifacts, and release evidence
 
 ### Partly Implemented
 
-- No release/distribution implementation is described beyond local CLI
+- Release/distribution requirements and evidence gates are documented, but publishing workflows and signed artifacts are not implemented
 
 ### Not Implemented / Remaining
 
-- Binary releases
-- Official GitHub Action package
-- Installer channels
-- Signed artifacts and pack publishing
+- Binary release workflow and produced archives
+- Official GitHub Action package and marketplace/repo publishing
+- Installer/package channels
+- Signed artifacts, checksums, release evidence bundle, and pack publishing
 
 ## Implementation Parts
 
@@ -33,14 +35,15 @@ Release, Tag, GraphSnapshot, PackVersion, ValidationRun, Signature
 
 ### 2. Commands / APIs
 
-Future release workflow for CLI, Action, packs, tags
+Future release workflow for CLI binaries, Rust crates, GitHub Action, ontology/policy packs, docs bundle, examples, server/SDK/Studio artifacts, tags, and release evidence
 
 ### 3. Validation and Policy Gates
 
-Release requires tests, proof, docs/examples validation, signatures if enabled, compatibility checks, changelog
+Release requires tests, proof, architecture checks, docs source-of-truth checks, benchmark budget checks, docs/examples validation, signatures if enabled, compatibility checks, changelog, source commit, graph snapshot/state hash, and artifact checksums
 
 ### 4. Implementation Work Items
 
+- Keep `docs/release/distribution.md` aligned with future release workflow implementation.
 - Implement or finish: Binary releases.
 - Implement or finish: Official GitHub Action package.
 - Implement or finish: Installer channels.
@@ -53,6 +56,7 @@ Release requires tests, proof, docs/examples validation, signatures if enabled, 
 - The documented commands/APIs work for the happy path and at least one intentional failure path.
 - Validation findings identify the graph object, file or command involved, and remediation.
 - The area can be exercised from CLI/CI without relying on untrusted direct mutation.
+- Release/distribution requirements name binary, action, pack, docs, examples, future API/SDK/Studio, and evidence artifacts before release workflow implementation begins.
 
 ## Source Notes
 

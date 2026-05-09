@@ -19,8 +19,8 @@ This directory breaks the full SpecGraph OS system into one Markdown file per **
 | Status | Count |
 |---|---:|
 | ✅ Fully implemented | 0 |
-| 🟡 Partly implemented | 40 |
-| ⬜ Not implemented | 12 |
+| 🟡 Partly implemented | 41 |
+| ⬜ Not implemented | 11 |
 | **Total** | **52** |
 
 ## Source Markdown Read
@@ -95,7 +95,7 @@ Use the full-system phase-gated roadmap in [phase-gated-implementation-plan.md](
 | 49 | [Examples and Proof](areas/49-examples-and-proof.md) | 🟡 Partly implemented |
 | 50 | [Documentation Set](areas/50-documentation-set.md) | 🟡 Partly implemented |
 | 51 | [Performance and Scalability](areas/51-performance-and-scalability.md) | 🟡 Partly implemented |
-| 52 | [Release and Distribution](areas/52-release-and-distribution.md) | ⬜ Not implemented |
+| 52 | [Release and Distribution](areas/52-release-and-distribution.md) | 🟡 Partly implemented |
 
 ## How to Use This Matrix
 

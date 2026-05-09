@@ -18,6 +18,7 @@ Split concept/backlog/review documents into implementation references by concept
 - Historical/reference documents are marked so they do not override the canonical plan
 - Phase 0 architecture boundary doc exists at `docs/architecture/boundaries.md`
 - Phase 0 CLI UX contract exists at `docs/cli/ux-contract.md`
+- Phase 0 release/distribution requirements exist at `docs/release/distribution.md`
 - `scripts/check_docs_source_of_truth.py` verifies that the canonical plan, derived trackers, area files, and reference docs keep the full-system source-of-truth markers
 
 ### Partly Implemented
@@ -38,7 +39,7 @@ Split concept/backlog/review documents into implementation references by concept
 
 ### 1. Graph Model / Runtime Objects
 
-Docs map graph domains, operations, policies, validators, commands, tests, and architecture boundaries. `docs/architecture/boundaries.md` is the Phase 0 guardrail for trusted core, CLI, adapters, packs, policies, examples, future server/SDK/Studio, and release/distribution. `docs/cli/ux-contract.md` is the Phase 0 guardrail for CLI command inventory, output modes, and exit codes.
+Docs map graph domains, operations, policies, validators, commands, tests, and architecture boundaries. `docs/architecture/boundaries.md` is the Phase 0 guardrail for trusted core, CLI, adapters, packs, policies, examples, future server/SDK/Studio, and release/distribution. `docs/cli/ux-contract.md` is the Phase 0 guardrail for CLI command inventory, output modes, and exit codes. `docs/release/distribution.md` is the Phase 0 guardrail for release artifacts, channels, and evidence requirements.
 
 ### 2. Commands / APIs
 
