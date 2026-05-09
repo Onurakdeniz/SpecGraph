@@ -1,7 +1,37 @@
-//! Boundary crate for `sg-proposal` in the SpecGraph OS modular workspace.
-//!
-//! This crate is intentionally a narrow public facade during the workspace split.
-//! Implementation still lives behind `sg-core` until the next extraction pass moves
-//! code module-by-module without changing public behavior.
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-pub use sg_core::{Proposal, TrustState};
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum TrustState {
+    Observed,
+    Proposed,
+    Validated,
+    Accepted,
+    Trusted,
+    Rejected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Proposal {
+    pub id: String,
+    pub title: String,
+    pub trust_state: TrustState,
+    #[serde(default)]
+    pub proposed_graph_delta: Option<Value>,
+    #[serde(default)]
+    pub proposed_code_patch: Option<String>,
+}
+
+impl Proposal {
+    pub fn new(id: String, title: String) -> Self {
+        Self {
+            id,
+            title,
+            trust_state: TrustState::Proposed,
+            proposed_graph_delta: None,
+            proposed_code_patch: None,
+        }
+    }
+}

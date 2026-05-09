@@ -554,7 +554,10 @@ dependencies = [
 name = "sg-adapter-api"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-model",
+ "sg-validation",
 ]
 
 [[package]]
@@ -651,10 +654,19 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sg-adapter-api",
  "sg-canonical",
+ "sg-impact",
+ "sg-issue",
+ "sg-merge",
  "sg-model",
  "sg-operation",
+ "sg-policy",
+ "sg-project",
+ "sg-proposal",
  "sg-query",
+ "sg-spec",
+ "sg-validation",
  "sha2",
  "tempfile",
  "thiserror",
@@ -680,21 +692,29 @@ dependencies = [
 name = "sg-impact"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-model",
 ]
 
 [[package]]
 name = "sg-issue"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-model",
+ "sg-validation",
 ]
 
 [[package]]
 name = "sg-merge"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-model",
+ "sg-validation",
 ]
 
 [[package]]
@@ -733,21 +753,29 @@ dependencies = [
 name = "sg-policy"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "globset",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sg-model",
+ "sg-validation",
+ "time",
 ]
 
 [[package]]
 name = "sg-project"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde_json",
+ "sg-model",
 ]
 
 [[package]]
 name = "sg-proposal"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -776,7 +804,9 @@ dependencies = [
 name = "sg-spec"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-model",
 ]
 
 [[package]]
@@ -797,7 +827,9 @@ dependencies = [
 name = "sg-validation"
 version = "0.1.0"
 dependencies = [
- "sg-core",
+ "serde",
+ "serde_json",
+ "sg-model",
 ]
 
 [[package]]

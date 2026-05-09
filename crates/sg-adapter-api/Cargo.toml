@@ -6,4 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-sg-core = { path = "../sg-core" }
+serde_json.workspace = true
+serde.workspace = true
+sg-model.workspace = true
+sg-validation.workspace = true

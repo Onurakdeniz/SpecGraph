@@ -6,6 +6,15 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+sg-validation.workspace = true
+sg-spec.workspace = true
+sg-proposal.workspace = true
+sg-project.workspace = true
+sg-policy.workspace = true
+sg-merge.workspace = true
+sg-issue.workspace = true
+sg-impact.workspace = true
+sg-adapter-api.workspace = true
 sg-canonical.workspace = true
 sg-model.workspace = true
 sg-operation.workspace = true
