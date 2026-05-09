@@ -18,11 +18,13 @@ Model controlled exceptions with scope, reason, approver, expiration, related po
 - Approval and waiver evidence is linked to registered `Actor` approvers
 - Policy evaluation can use linked graph-native approvals and waivers
 - Expired graph-native waivers do not satisfy policies
+- Non-waivable policies reject waiver attempts with explicit findings
 
 ### Partly Implemented
 
 - CLI-level inputs exist
 - Waiver expiration validation exists
+- Built-in and manifest non-waivable enforcement exists
 - Reviewer/Role/Permission foundation exists through the identity model
 - Scope is recorded but not fully enforced against changed-file/path targets yet
 - Approver authority checks and signatures are incomplete

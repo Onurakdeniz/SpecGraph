@@ -2,7 +2,7 @@
 
 **System area:** Policy Engine  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code audit plus policy waiver, actor identity, and policy-decision persistence implementation slices.
+**Status basis:** code audit plus policy waiver, actor identity, policy-decision persistence, and non-waivable enforcement implementation slices.
 
 ## Purpose
 
@@ -17,11 +17,13 @@ Implement deterministic policy decisions with built-in rules and declarative man
 - Manifest required-role checks can resolve roles from graph-native Actor/Role facts
 - Linked graph-native Approval and Waiver evidence can satisfy policy checks
 - Policy decisions can be persisted as graph-native `PolicyDecision` facts linked from the Project
+- Built-in non-waivable security policies are listed and invalid waiver attempts are reported
 
 ### Partly Implemented
 
 - Built-in and manifest checks exist at foundation level
 - Waiver validity checks exist for reason, approver, expiration, and non-waivable rules
+- Manifest non-waivable rules reject matching waiver attempts
 - Approval/waiver scope is recorded but not fully matched against changed paths or operations yet
 - Policy decision persistence records decisions and blocking finding counts; full operation receipt policy gating remains
 
@@ -31,6 +33,7 @@ Implement deterministic policy decisions with built-in rules and declarative man
 - Policy checks automatically blocking every mutating operation
 - Hosting-provider approval sync
 - Policy pack test harness
+- Pack-provided non-waivable policy registry beyond the built-in list
 
 ## Implementation Parts
 
@@ -40,7 +43,7 @@ Policy, PolicyDecision, Approval, Waiver, Actor, Role, requiredApproval, severit
 
 ### 2. Commands / APIs
 
-sg policy check with operation, changed-file, policy-file, approval, waiver, and optional `--record`; operation/CI integration
+sg policy check with operation, changed-file, policy-file, approval, waiver, and optional `--record`; sg policy non-waivable; operation/CI integration
 
 ### 3. Validation and Policy Gates
 
@@ -53,6 +56,7 @@ Determinism, non-waivable rules, scoped approvals, expiration, denial of secrets
 - Implement or finish: Role/permission lookup.
 - Implement or finish: Hosting-provider approval sync.
 - Implement or finish: Policy pack test harness.
+- Implement or finish: Pack-provided non-waivable policy registry beyond the built-in list.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 

@@ -86,6 +86,18 @@ pub struct PolicyRule {
     pub waivable: bool,
 }
 
+pub const BUILT_IN_NON_WAIVABLE_POLICIES: &[&str] = &[
+    "policy.security.no_secret_files",
+    "policy.security.event_hash_chain",
+    "policy.security.protected_mode_unsigned_event",
+    "policy.security.production_access_denied",
+    "policy.git.commit_unknown_spec",
+];
+
+pub fn built_in_non_waivable_policies() -> &'static [&'static str] {
+    BUILT_IN_NON_WAIVABLE_POLICIES
+}
+
 pub fn load_policy_manifest(path: &Path) -> Result<PolicyManifest, String> {
     let bytes =
         fs::read(path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
@@ -238,6 +250,10 @@ fn evaluate_policy_manifest_inner(
             continue;
         }
 
+        if !rule.waivable && has_valid_waiver_for_waivability_check(input, &rule.id, now) {
+            report.findings.push(non_waivable_finding(&rule.id));
+        }
+
         let actor_roles = effective_actor_roles(graph, input);
         let missing_approvals = missing_values(&rule.required_approvals, &input.approvals);
         let missing_roles = missing_values(&rule.required_roles, &actor_roles);
@@ -368,6 +384,9 @@ fn has_actor_evidence_edge(graph: &Graph, evidence_node_id: &str, edge_type: &st
 fn validate_waivers(input: &PolicyCheckInput, now: OffsetDateTime) -> Vec<Finding> {
     let mut findings = Vec::new();
     for waiver in &input.waivers {
+        if is_non_waivable_policy(&waiver.policy) {
+            findings.push(non_waivable_finding(&waiver.policy));
+        }
         if waiver.policy.trim().is_empty() {
             findings.push(finding(
                 "policy.waiver.policy_required",
@@ -415,11 +434,34 @@ fn validate_waivers(input: &PolicyCheckInput, now: OffsetDateTime) -> Vec<Findin
 }
 
 fn has_valid_waiver(input: &PolicyCheckInput, policy: &str, now: OffsetDateTime) -> bool {
+    if is_non_waivable_policy(policy) {
+        return false;
+    }
+    has_valid_waiver_for_waivability_check(input, policy, now)
+}
+
+fn has_valid_waiver_for_waivability_check(
+    input: &PolicyCheckInput,
+    policy: &str,
+    now: OffsetDateTime,
+) -> bool {
     input.waivers.iter().any(|waiver| {
         waiver.policy == policy
             && waiver_has_required_fields(waiver)
             && waiver_is_unexpired(waiver, now)
     })
+}
+
+fn is_non_waivable_policy(policy: &str) -> bool {
+    BUILT_IN_NON_WAIVABLE_POLICIES.contains(&policy)
+}
+
+fn non_waivable_finding(policy: &str) -> Finding {
+    finding(
+        "policy.waiver.non_waivable",
+        FindingSeverity::Error,
+        format!("Policy `{policy}` is non-waivable; remove the waiver and satisfy the policy"),
+    )
 }
 
 fn waiver_has_required_fields(waiver: &Waiver) -> bool {
@@ -554,6 +596,38 @@ mod tests {
             .decisions
             .iter()
             .any(|decision| decision.effect == PolicyEffect::Deny));
+    }
+
+    #[test]
+    fn built_in_secret_policy_cannot_be_waived() {
+        let report = evaluate_policies(
+            &Graph::default(),
+            &PolicyCheckInput {
+                operation: "Merge".to_string(),
+                actor: None,
+                changed_files: vec![".env".to_string()],
+                actor_roles: vec![],
+                approvals: vec![],
+                waivers: vec![Waiver {
+                    policy: "policy.security.no_secret_files".to_string(),
+                    reason: "Emergency".to_string(),
+                    approved_by: "security".to_string(),
+                    expires_at: Some("2999-01-01T00:00:00Z".to_string()),
+                }],
+            },
+        );
+
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.waiver.non_waivable"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.security.no_secret_files"));
+        assert!(report.decisions.iter().any(|decision| decision.policy
+            == "policy.security.no_secret_files"
+            && decision.effect == PolicyEffect::Deny));
     }
 
     #[test]
@@ -885,5 +959,9 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding.code == "policy.custom.no-waive"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "policy.waiver.non_waivable"));
     }
 }

@@ -2,15 +2,16 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_core::{
-    analyze_impact, built_in_operations, built_in_validators, detect_merge_conflicts, diff_graphs,
-    evaluate_policies, evaluate_policies_with_manifests, index_source_file, load_pack,
-    load_policy_manifest, observations_to_delta, scan_repository, validate_commit_binding,
-    validate_pack, validate_trace_links, AdoptionMode, AppendOperationOptions, BindBranchOptions,
-    CodeIndexObservation, CommitValidationInput, CreateWaiverOptions, Edge, Finding,
-    FindingSeverity, GenerateActionGraphOptions, GrantRoleOptions, Graph, GraphDelta, InitOptions,
-    LinksManifest, Node, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Proposal,
-    RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions, Snapshot,
-    SpecGraphStore, SpecProjection, TestLink, TextItem, TrustState, UpsertActorOptions,
+    analyze_impact, built_in_non_waivable_policies, built_in_operations, built_in_validators,
+    detect_merge_conflicts, diff_graphs, evaluate_policies, evaluate_policies_with_manifests,
+    index_source_file, load_pack, load_policy_manifest, observations_to_delta, scan_repository,
+    validate_commit_binding, validate_pack, validate_trace_links, AdoptionMode,
+    AppendOperationOptions, BindBranchOptions, CodeIndexObservation, CommitValidationInput,
+    CreateWaiverOptions, Edge, Finding, FindingSeverity, GenerateActionGraphOptions,
+    GrantRoleOptions, Graph, GraphDelta, InitOptions, LinksManifest, Node, PolicyCheckInput,
+    PolicyEffect, PolicyManifest, PolicyRule, Proposal, RecordApprovalOptions, RecordCommitOptions,
+    RecordPolicyReportOptions, ReplayOptions, Snapshot, SpecGraphStore, SpecProjection, TestLink,
+    TextItem, TrustState, UpsertActorOptions,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -222,6 +223,8 @@ struct PolicyArgs {
 enum PolicyCommand {
     /// Run built-in policy checks for an operation.
     Check(PolicyCheckArgs),
+    /// List built-in policies that cannot be waived.
+    NonWaivable,
     /// Record approval evidence as graph facts.
     RecordApproval(PolicyRecordApprovalArgs),
     /// Create waiver evidence as graph facts.
@@ -816,6 +819,11 @@ fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()>
             }
             fail_on_errors(&report.findings, "policy check")?;
             println!("policy: ok");
+        }
+        PolicyCommand::NonWaivable => {
+            for policy in built_in_non_waivable_policies() {
+                println!("{policy}");
+            }
         }
         PolicyCommand::RecordApproval(args) => {
             let receipt = store.record_approval(RecordApprovalOptions {

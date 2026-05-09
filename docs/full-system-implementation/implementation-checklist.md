@@ -153,7 +153,7 @@ Related areas:
 - [~] Add role/permission model foundation.
 - [~] Add graph-native `Approval` and `Waiver` nodes.
 - [~] Add waiver expiration and scope validation.
-- [ ] Add non-waivable policy list.
+- [x] Add non-waivable policy list.
 - [~] Add common `Finding` schema across validators.
 - [~] Add validator registry and validator versioning.
 
@@ -165,7 +165,7 @@ Related areas:
 - [ ] Denied policy blocks the operation.
 - [~] Approval-required policy cannot pass without valid scoped approval.
 - [x] Expired waiver cannot satisfy a policy.
-- [ ] Secret/production-denied policies cannot be waived unless explicitly designed as waivable.
+- [x] Secret/production-denied policies cannot be waived unless explicitly designed as waivable.
 
 ---
 
