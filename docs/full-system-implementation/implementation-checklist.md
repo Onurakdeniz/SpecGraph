@@ -454,7 +454,7 @@ Related areas:
 - [x] Add `sg module import/declare/list/validate/link-capability` commands.
 - [x] Split spec intent into `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph delta.
 - [x] Add operation-specific semantic preconditions inside Operation Runtime.
-- [ ] Add agent/wizard detection and required-question planner.
+- [x] Add agent/wizard detection and required-question planner.
 
 ### Gate Checks
 
@@ -462,6 +462,7 @@ Related areas:
 - [x] `Spec.Create` and `Spec.Import` fail before append when ModuleGraph baseline is incomplete.
 - [x] Unknown touched modules and incomplete new module declarations fail before append.
 - [x] CLI, API, SDK, and Studio all receive the same runtime findings/receipts for these gates.
+- [x] Workflow planner keeps detected facts untrusted, asks required project/module/spec questions, and emits dry-run receipts before acceptance.
 
 ---
 

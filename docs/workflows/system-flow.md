@@ -61,7 +61,7 @@ sg project show
 sg project validate --gate spec-authoring
 ```
 
-`sg project profile upsert`, `sg project show`, and `sg project validate --gate spec-authoring` are implemented. Automatic `sg project detect --dry-run` remains a planned observation command; detected facts must still be accepted through `Project.ProfileUpsert` before they are trusted.
+`sg project profile upsert`, `sg project show`, and `sg project validate --gate spec-authoring` are implemented. `sg workflow plan` now detects project facts as untrusted observations, asks missing ProjectGraph questions, and emits Project.ProfileUpsert dry-run receipts; detected facts must still be accepted through `Project.ProfileUpsert` before they are trusted.
 
 Minimum trusted ProjectGraph profile before spec authoring:
 
@@ -80,7 +80,7 @@ sg module validate --gate spec-authoring
 sg module list
 ```
 
-`sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, and `sg module link-capability` are implemented. Automatic `sg module detect --dry-run` remains a planned observation command; detected module facts must still be accepted through `ModuleGraph.Upsert` before they are trusted.
+`sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, and `sg module link-capability` are implemented. `sg workflow plan` now detects module candidates as untrusted observations, asks missing ModuleGraph questions, and emits ModuleGraph.Upsert dry-run receipts; detected module facts must still be accepted through `ModuleGraph.Upsert` before they are trusted.
 
 Minimum trusted ModuleGraph baseline before spec authoring:
 
@@ -254,4 +254,4 @@ The canonical implementation plan tracks this as the post-Phase 7 final closure 
 2. Module baseline validator and `sg module` CLI. **Implemented for ModuleGraph baseline facts and the spec-authoring runtime gate.**
 3. Spec projection separation: `touchesModules`, `moduleChanges`, `plannedObjects`, intended graph delta. **Implemented with runtime rejection for unknown touched modules and incomplete new-module declarations.**
 4. Operation-specific semantic gates for spec, branch, action, commit, validation, and proposal acceptance. **Implemented for F.4 core gates.**
-5. Agent/wizard detection and required-question planner.
+5. Agent/wizard detection and required-question planner. **Implemented via `sg workflow plan`: observations stay untrusted, required ProjectGraph/ModuleGraph/SpecGraph questions are listed, optional suggestions are separated, and dry-run receipts are produced before acceptance.**

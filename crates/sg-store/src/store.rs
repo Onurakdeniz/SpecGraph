@@ -24,7 +24,9 @@ use sg_policy::{
 };
 use sg_project::{validate_project_baseline, ProjectBaselineReport, ProjectProfileInput};
 use sg_query::{QueryContext, QueryCost, QueryTarget};
-use sg_spec::{validate_spec_authoring_intent, SpecProjection};
+use sg_spec::{
+    validate_spec_authoring_intent, ModuleChange, PlannedObject, SpecProjection, TextItem,
+};
 use sg_validation::{CORE_VALIDATOR_VERSION, VALIDATOR_BRANCH_METADATA, VALIDATOR_SNAPSHOT};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -227,6 +229,79 @@ pub struct RecordCommitOptions {
     pub input: CommitValidationInput,
     pub actor: String,
     pub graph_branch: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorkflowPlanOptions {
+    pub spec: Option<String>,
+    pub title: Option<String>,
+    pub touches_modules: Vec<String>,
+    pub module_changes: Vec<ModuleChange>,
+    pub planned_objects: Vec<PlannedObject>,
+    pub requirements: Vec<TextItem>,
+    pub acceptance_criteria: Vec<TextItem>,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowPlan {
+    pub schema_version: String,
+    pub status: WorkflowPlanStatus,
+    pub state_hash: String,
+    pub observations: Vec<WorkflowObservation>,
+    pub required_questions: Vec<WorkflowQuestion>,
+    pub optional_suggestions: Vec<WorkflowSuggestion>,
+    pub dry_runs: Vec<WorkflowDryRun>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkflowPlanStatus {
+    Ready,
+    QuestionsRequired,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowObservation {
+    pub kind: String,
+    pub key: String,
+    pub values: Vec<String>,
+    pub source: String,
+    pub trust_state: String,
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowQuestion {
+    pub id: String,
+    pub area: String,
+    pub prompt: String,
+    pub reason: String,
+    pub suggested_values: Vec<String>,
+    pub blocks_operation: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowSuggestion {
+    pub id: String,
+    pub area: String,
+    pub text: String,
+    pub source_observations: Vec<String>,
+    pub acceptance_operation: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowDryRun {
+    pub operation: String,
+    pub status: String,
+    pub receipt: Option<OperationReceipt>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -460,6 +535,10 @@ impl SpecGraphStore {
 
     pub fn record_git_commit(&self, options: RecordCommitOptions) -> Result<OperationReceipt> {
         record_git_commit(self.root(), options)
+    }
+
+    pub fn plan_workflow(&self, options: WorkflowPlanOptions) -> Result<WorkflowPlan> {
+        plan_workflow(self.root(), options)
     }
 
     pub fn upsert_actor(&self, options: UpsertActorOptions) -> Result<OperationReceipt> {
@@ -799,6 +878,823 @@ pub fn list_modules(root: &Path) -> Result<Vec<ModuleSummary>> {
     let mut modules = linked_modules(&replay.graph, &project.id);
     modules.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(modules)
+}
+
+pub fn plan_workflow(root: &Path, options: WorkflowPlanOptions) -> Result<WorkflowPlan> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let observations = detect_workflow_observations(root, &options);
+    let project_report = validate_project_baseline(&replay.graph);
+    let module_report = validate_module_baseline(&replay.graph);
+    let mut required_questions = Vec::new();
+
+    add_project_workflow_questions(&project_report, &observations, &mut required_questions);
+    add_module_workflow_questions(&module_report, &observations, &mut required_questions);
+    add_spec_workflow_questions(&replay.graph, &options, &mut required_questions);
+
+    let optional_suggestions = workflow_suggestions(&project_report, &module_report, &observations);
+    let dry_runs = workflow_dry_runs(
+        root,
+        &replay.graph,
+        &observations,
+        &options,
+        !project_report.complete,
+        !module_report.complete,
+    );
+    let status = if required_questions.is_empty() {
+        WorkflowPlanStatus::Ready
+    } else {
+        WorkflowPlanStatus::QuestionsRequired
+    };
+
+    Ok(WorkflowPlan {
+        schema_version: "specgraph.workflow-plan/v1".to_string(),
+        status,
+        state_hash: replay.state_hash,
+        observations,
+        required_questions,
+        optional_suggestions,
+        dry_runs,
+    })
+}
+
+fn detect_workflow_observations(
+    root: &Path,
+    options: &WorkflowPlanOptions,
+) -> Vec<WorkflowObservation> {
+    let mut observations = Vec::new();
+    let project_name = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("project")
+        .to_string();
+    observations.push(workflow_observation(
+        "project",
+        "project.name",
+        vec![project_name],
+        "repository path",
+    ));
+
+    if root.join("Cargo.toml").exists() {
+        observations.push(workflow_observation(
+            "project",
+            "project.language",
+            vec!["rust".to_string()],
+            "Cargo.toml",
+        ));
+        observations.push(workflow_observation(
+            "project",
+            "project.packageManager",
+            vec!["cargo".to_string()],
+            "Cargo.toml",
+        ));
+        observations.push(workflow_observation(
+            "project",
+            "project.testRunner",
+            vec!["cargo-test".to_string()],
+            "Cargo.toml",
+        ));
+        if file_contains(root.join("Cargo.toml"), "[workspace]") {
+            observations.push(workflow_observation(
+                "project",
+                "project.architecture",
+                vec!["modular-workspace".to_string()],
+                "Cargo.toml workspace",
+            ));
+        }
+    }
+
+    if root.join("package.json").exists() {
+        observations.push(workflow_observation(
+            "project",
+            "project.language",
+            vec!["typescript".to_string(), "javascript".to_string()],
+            "package.json",
+        ));
+        observations.push(workflow_observation(
+            "project",
+            "project.packageManager",
+            vec![detect_node_package_manager(root)],
+            "package lockfile",
+        ));
+        if file_contains(root.join("package.json"), "\"test\"") {
+            observations.push(workflow_observation(
+                "project",
+                "project.testRunner",
+                vec!["npm-test".to_string()],
+                "package.json scripts",
+            ));
+        }
+    }
+
+    if root.join("pyproject.toml").exists() {
+        observations.push(workflow_observation(
+            "project",
+            "project.language",
+            vec!["python".to_string()],
+            "pyproject.toml",
+        ));
+        observations.push(workflow_observation(
+            "project",
+            "project.packageManager",
+            vec!["pip".to_string()],
+            "pyproject.toml",
+        ));
+        observations.push(workflow_observation(
+            "project",
+            "project.testRunner",
+            vec!["pytest".to_string()],
+            "pyproject.toml",
+        ));
+    }
+
+    if root.join("go.mod").exists() {
+        observations.push(workflow_observation(
+            "project",
+            "project.language",
+            vec!["go".to_string()],
+            "go.mod",
+        ));
+        observations.push(workflow_observation(
+            "project",
+            "project.packageManager",
+            vec!["go".to_string()],
+            "go.mod",
+        ));
+        observations.push(workflow_observation(
+            "project",
+            "project.testRunner",
+            vec!["go-test".to_string()],
+            "go.mod",
+        ));
+    }
+
+    if root.join(".github/workflows").exists() {
+        observations.push(workflow_observation(
+            "project",
+            "project.ciProvider",
+            vec!["github-actions".to_string()],
+            ".github/workflows",
+        ));
+    }
+
+    for (name, path) in detect_module_candidates(root) {
+        observations.push(workflow_observation(
+            "module",
+            "module.candidate",
+            vec![name, path],
+            "repository directories",
+        ));
+    }
+
+    if let Some(spec) = &options.spec {
+        observations.push(workflow_observation(
+            "spec",
+            "spec.id",
+            vec![spec.clone()],
+            "planner input",
+        ));
+    }
+    if let Some(title) = &options.title {
+        observations.push(workflow_observation(
+            "spec",
+            "spec.title",
+            vec![title.clone()],
+            "planner input",
+        ));
+    }
+    if !options.touches_modules.is_empty() {
+        observations.push(workflow_observation(
+            "spec",
+            "spec.touchesModules",
+            options.touches_modules.clone(),
+            "planner input",
+        ));
+    }
+    observations
+}
+
+fn add_project_workflow_questions(
+    report: &ProjectBaselineReport,
+    observations: &[WorkflowObservation],
+    questions: &mut Vec<WorkflowQuestion>,
+) {
+    if report.complete {
+        return;
+    }
+    for missing in &report.missing {
+        match missing.as_str() {
+            "Project" => questions.push(workflow_question(
+                "project.init",
+                "ProjectGraph",
+                "What is the project name for `sg init`?",
+                "Spec authoring is blocked until a Project node exists.",
+                observation_values(observations, "project.name"),
+                "Project.Init",
+            )),
+            "HAS_PROJECT_TYPE" => questions.push(workflow_question(
+                "project.type",
+                "ProjectGraph",
+                "What type of project is this?",
+                "ProjectGraph baseline requires a trusted project type.",
+                vec!["developer-tooling".to_string(), "web-service".to_string()],
+                "Project.ProfileUpsert",
+            )),
+            "USES_LANGUAGE" => questions.push(workflow_question(
+                "project.languages",
+                "ProjectGraph",
+                "Which implementation language(s) should be trusted for this project?",
+                "Detected languages are untrusted observations until accepted.",
+                observation_values(observations, "project.language"),
+                "Project.ProfileUpsert",
+            )),
+            "HAS_ARCHITECTURE_STYLE" => questions.push(workflow_question(
+                "project.architecture",
+                "ProjectGraph",
+                "Which architecture style should be trusted?",
+                "Module/spec planning needs a ProjectGraph architecture baseline.",
+                observation_values_or(
+                    observations,
+                    "project.architecture",
+                    vec!["modular-workspace".to_string()],
+                ),
+                "Project.ProfileUpsert",
+            )),
+            "USES_PACKAGE_MANAGER" => questions.push(workflow_question(
+                "project.packageManager",
+                "ProjectGraph",
+                "Which package manager should be trusted?",
+                "Validation and release planning need a package-manager fact.",
+                observation_values(observations, "project.packageManager"),
+                "Project.ProfileUpsert",
+            )),
+            "USES_TEST_RUNNER" => questions.push(workflow_question(
+                "project.testRunner",
+                "ProjectGraph",
+                "Which test runner should be trusted?",
+                "Commit and validation gates need a trusted test runner.",
+                observation_values(observations, "project.testRunner"),
+                "Project.ProfileUpsert",
+            )),
+            "USES_CI_PROVIDER" => questions.push(workflow_question(
+                "project.ciProvider",
+                "ProjectGraph",
+                "Which CI provider should be trusted?",
+                "Validation evidence needs a trusted CI provider.",
+                observation_values(observations, "project.ciProvider"),
+                "Project.ProfileUpsert",
+            )),
+            _ => {}
+        }
+    }
+}
+
+fn add_module_workflow_questions(
+    report: &ModuleBaselineReport,
+    observations: &[WorkflowObservation],
+    questions: &mut Vec<WorkflowQuestion>,
+) {
+    if report.complete {
+        return;
+    }
+    if report.missing.iter().any(|missing| missing == "HAS_MODULE") {
+        questions.push(workflow_question(
+            "module.name",
+            "ModuleGraph",
+            "Which module should be trusted first?",
+            "Spec authoring is blocked until at least one module is trusted.",
+            module_candidate_names(observations),
+            "ModuleGraph.Upsert",
+        ));
+        questions.push(workflow_question(
+            "module.purpose",
+            "ModuleGraph",
+            "What responsibility/purpose does that module own?",
+            "ModuleGraph baseline requires module purpose.",
+            Vec::new(),
+            "ModuleGraph.Upsert",
+        ));
+        questions.push(workflow_question(
+            "module.layer",
+            "ModuleGraph",
+            "Which layer does that module belong to?",
+            "ModuleGraph baseline requires module layer.",
+            vec![
+                "application".to_string(),
+                "domain".to_string(),
+                "adapter".to_string(),
+            ],
+            "ModuleGraph.Upsert",
+        ));
+        questions.push(workflow_question(
+            "module.package",
+            "ModuleGraph",
+            "Which package/path owns that module?",
+            "ModuleGraph baseline requires package ownership.",
+            module_candidate_paths(observations),
+            "ModuleGraph.Upsert",
+        ));
+        questions.push(workflow_question(
+            "module.capabilities",
+            "ModuleGraph",
+            "Which capability does that module expose?",
+            "ModuleGraph baseline requires at least one capability.",
+            Vec::new(),
+            "ModuleGraph.Upsert",
+        ));
+    }
+
+    for module in &report.modules {
+        if module.purpose.is_none() {
+            questions.push(workflow_question(
+                format!("module.{}.purpose", module.name),
+                "ModuleGraph",
+                format!("What purpose should module `{}` declare?", module.name),
+                "Trusted modules need purpose facts.",
+                Vec::new(),
+                "ModuleGraph.Upsert",
+            ));
+        }
+        if module.layer.is_none() {
+            questions.push(workflow_question(
+                format!("module.{}.layer", module.name),
+                "ModuleGraph",
+                format!("Which layer should module `{}` declare?", module.name),
+                "Trusted modules need layer facts.",
+                vec![
+                    "application".to_string(),
+                    "domain".to_string(),
+                    "adapter".to_string(),
+                ],
+                "ModuleGraph.Upsert",
+            ));
+        }
+        if module.package.is_none() {
+            questions.push(workflow_question(
+                format!("module.{}.package", module.name),
+                "ModuleGraph",
+                format!("Which package/path should module `{}` own?", module.name),
+                "Trusted modules need package ownership.",
+                module_candidate_paths(observations),
+                "ModuleGraph.Upsert",
+            ));
+        }
+        if module.capabilities.is_empty() {
+            questions.push(workflow_question(
+                format!("module.{}.capabilities", module.name),
+                "ModuleGraph",
+                format!("Which capability should module `{}` expose?", module.name),
+                "Trusted modules need capability facts.",
+                Vec::new(),
+                "ModuleGraph.Upsert",
+            ));
+        }
+    }
+}
+
+fn add_spec_workflow_questions(
+    graph: &Graph,
+    options: &WorkflowPlanOptions,
+    questions: &mut Vec<WorkflowQuestion>,
+) {
+    if options.spec.as_deref().is_none_or(str::is_empty) {
+        questions.push(workflow_question(
+            "spec.id",
+            "SpecGraph",
+            "What is the spec id?",
+            "Spec.Create requires a stable spec id.",
+            vec!["AUTH-001".to_string()],
+            "Spec.Create",
+        ));
+    }
+    if options.title.as_deref().is_none_or(str::is_empty) {
+        questions.push(workflow_question(
+            "spec.title",
+            "SpecGraph",
+            "What is the spec title?",
+            "Spec.Create requires a title.",
+            Vec::new(),
+            "Spec.Create",
+        ));
+    }
+    if options.requirements.is_empty() {
+        questions.push(workflow_question(
+            "spec.requirements",
+            "SpecGraph",
+            "What required behavior should this spec capture?",
+            "Spec validity requires at least one Requirement.",
+            Vec::new(),
+            "Spec.Create",
+        ));
+    }
+    if options.acceptance_criteria.is_empty() {
+        questions.push(workflow_question(
+            "spec.acceptanceCriteria",
+            "SpecGraph",
+            "What acceptance criterion proves the behavior?",
+            "Spec validity requires at least one AcceptanceCriterion.",
+            Vec::new(),
+            "Spec.Create",
+        ));
+    }
+    if options.touches_modules.is_empty() && options.module_changes.is_empty() {
+        questions.push(workflow_question(
+            "spec.intent",
+            "SpecGraph",
+            "Which existing module is touched, or which new module is being created?",
+            "F.3/F.5 flow requires module intent before spec append.",
+            trusted_module_names(graph),
+            "Spec.Create",
+        ));
+    }
+
+    let declared = options
+        .module_changes
+        .iter()
+        .map(|change| change.name.as_str())
+        .collect::<Vec<_>>();
+    for module in &options.touches_modules {
+        if module_definition_from_graph(graph, module).is_none()
+            && !declared.iter().any(|declared| declared == module)
+        {
+            questions.push(workflow_question(
+                format!("spec.intent.{module}"),
+                "SpecGraph",
+                format!(
+                    "Is `{module}` an existing trusted module or a new module with full declaration?"
+                ),
+                "Unknown touched modules are rejected before append.",
+                trusted_module_names(graph),
+                "Spec.Create",
+            ));
+        }
+    }
+}
+
+fn workflow_suggestions(
+    project_report: &ProjectBaselineReport,
+    module_report: &ModuleBaselineReport,
+    observations: &[WorkflowObservation],
+) -> Vec<WorkflowSuggestion> {
+    let mut suggestions = Vec::new();
+    if !project_report.complete {
+        suggestions.push(WorkflowSuggestion {
+            id: "accept.project-profile".to_string(),
+            area: "ProjectGraph".to_string(),
+            text: "Review detected project facts, answer required questions, then accept them with `sg project profile upsert`.".to_string(),
+            source_observations: observation_keys_for_area(observations, "project"),
+            acceptance_operation: "Project.ProfileUpsert".to_string(),
+        });
+    }
+    if !module_report.complete {
+        suggestions.push(WorkflowSuggestion {
+            id: "accept.module-baseline".to_string(),
+            area: "ModuleGraph".to_string(),
+            text: "Review untrusted module candidates, add purpose/layer/package/capabilities, then accept with `sg module import` or `sg module declare`.".to_string(),
+            source_observations: observation_keys_for_area(observations, "module"),
+            acceptance_operation: "ModuleGraph.Upsert".to_string(),
+        });
+    }
+    suggestions.push(WorkflowSuggestion {
+        id: "dry-run.spec-create".to_string(),
+        area: "SpecGraph".to_string(),
+        text: "Use the dry-run receipt to preview runtime gates before accepting Spec.Create."
+            .to_string(),
+        source_observations: observation_keys_for_area(observations, "spec"),
+        acceptance_operation: "Spec.Create".to_string(),
+    });
+    suggestions
+}
+
+fn workflow_dry_runs(
+    root: &Path,
+    graph: &Graph,
+    observations: &[WorkflowObservation],
+    options: &WorkflowPlanOptions,
+    project_missing: bool,
+    module_missing: bool,
+) -> Vec<WorkflowDryRun> {
+    let actor = if options.actor.trim().is_empty() {
+        "local:planner".to_string()
+    } else {
+        options.actor.clone()
+    };
+    let graph_branch = if options.graph_branch.trim().is_empty() {
+        "main".to_string()
+    } else {
+        options.graph_branch.clone()
+    };
+    let mut dry_runs = Vec::new();
+
+    if project_missing {
+        if let (Some(project), Some(profile)) = (
+            find_project_node(graph),
+            candidate_project_profile(root, observations),
+        ) {
+            let fallback_name = project
+                .attributes
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("project")
+                .to_string();
+            let profile_model = profile
+                .clone()
+                .into_profile(project.id.clone(), fallback_name);
+            dry_runs.push(run_workflow_dry_run(
+                root,
+                AppendOperationOptions {
+                    operation: "Project.ProfileUpsert".to_string(),
+                    actor: actor.clone(),
+                    graph_branch: graph_branch.clone(),
+                    input: json!({
+                        "project": profile_model.project_name,
+                        "profile": profile,
+                    }),
+                    delta: profile_model.to_upsert_delta(graph),
+                    dry_run: true,
+                },
+            ));
+        }
+    }
+
+    if module_missing {
+        if let (Some(project), Some(module)) = (
+            find_project_node(graph),
+            candidate_module_definition(observations),
+        ) {
+            let projection = ModuleGraphProjection {
+                project_node_id: project.id.clone(),
+                modules: vec![module.clone()],
+            };
+            dry_runs.push(run_workflow_dry_run(
+                root,
+                AppendOperationOptions {
+                    operation: "ModuleGraph.Upsert".to_string(),
+                    actor: actor.clone(),
+                    graph_branch: graph_branch.clone(),
+                    input: json!({
+                        "module": [module],
+                        "relationships": {
+                            "project": project.id,
+                        },
+                    }),
+                    delta: projection.to_upsert_delta(graph),
+                    dry_run: true,
+                },
+            ));
+        }
+    }
+
+    if let Some(projection) = candidate_spec_projection(options) {
+        dry_runs.push(run_workflow_dry_run(
+            root,
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor,
+                graph_branch,
+                input: projection.operation_input(),
+                delta: projection.to_delta(),
+                dry_run: true,
+            },
+        ));
+    }
+
+    dry_runs
+}
+
+fn run_workflow_dry_run(root: &Path, options: AppendOperationOptions) -> WorkflowDryRun {
+    let operation = options.operation.clone();
+    match append_operation(root, options) {
+        Ok(receipt) => WorkflowDryRun {
+            operation,
+            status: "accepted".to_string(),
+            receipt: Some(receipt),
+            error: None,
+        },
+        Err(error) => WorkflowDryRun {
+            operation,
+            status: "blocked".to_string(),
+            receipt: None,
+            error: Some(error.to_string()),
+        },
+    }
+}
+
+fn candidate_project_profile(
+    root: &Path,
+    observations: &[WorkflowObservation],
+) -> Option<ProjectProfileInput> {
+    let languages = observation_values(observations, "project.language");
+    let package_manager = observation_values(observations, "project.packageManager")
+        .into_iter()
+        .next()?;
+    let test_runner = observation_values(observations, "project.testRunner")
+        .into_iter()
+        .next()?;
+    let ci_provider = observation_values(observations, "project.ciProvider")
+        .into_iter()
+        .next()?;
+    Some(ProjectProfileInput {
+        project_name: observation_values(observations, "project.name")
+            .into_iter()
+            .next()
+            .or_else(|| {
+                root.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(ToOwned::to_owned)
+            }),
+        project_type: "developer-tooling".to_string(),
+        architecture: observation_values_or(
+            observations,
+            "project.architecture",
+            vec!["modular-workspace".to_string()],
+        )
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "modular-workspace".to_string()),
+        languages,
+        package_manager,
+        test_runner,
+        ci_provider,
+    })
+}
+
+fn candidate_module_definition(observations: &[WorkflowObservation]) -> Option<ModuleDefinition> {
+    let candidate = observations
+        .iter()
+        .find(|observation| observation.key == "module.candidate")?;
+    let name = candidate.values.first()?.clone();
+    let package = candidate
+        .values
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| name.clone());
+    Some(ModuleDefinition {
+        name: name.clone(),
+        purpose: format!("TODO: confirm purpose for {name}"),
+        layer: "application".to_string(),
+        package,
+        capabilities: vec![format!("{}-capability", stable_fragment(&name))],
+        interfaces: Vec::new(),
+    })
+}
+
+fn candidate_spec_projection(options: &WorkflowPlanOptions) -> Option<SpecProjection> {
+    Some(SpecProjection {
+        spec: options.spec.clone()?,
+        title: options.title.clone()?,
+        touches_modules: options.touches_modules.clone(),
+        module_changes: options.module_changes.clone(),
+        planned_objects: options.planned_objects.clone(),
+        requirements: options.requirements.clone(),
+        acceptance_criteria: options.acceptance_criteria.clone(),
+        ..SpecProjection::default()
+    })
+}
+
+fn workflow_observation(
+    kind: impl Into<String>,
+    key: impl Into<String>,
+    values: Vec<String>,
+    source: impl Into<String>,
+) -> WorkflowObservation {
+    WorkflowObservation {
+        kind: kind.into(),
+        key: key.into(),
+        values,
+        source: source.into(),
+        trust_state: "UntrustedObservation".to_string(),
+        accepted: false,
+    }
+}
+
+fn workflow_question(
+    id: impl Into<String>,
+    area: impl Into<String>,
+    prompt: impl Into<String>,
+    reason: impl Into<String>,
+    suggested_values: Vec<String>,
+    blocks_operation: impl Into<String>,
+) -> WorkflowQuestion {
+    WorkflowQuestion {
+        id: id.into(),
+        area: area.into(),
+        prompt: prompt.into(),
+        reason: reason.into(),
+        suggested_values,
+        blocks_operation: blocks_operation.into(),
+    }
+}
+
+fn observation_values(observations: &[WorkflowObservation], key: &str) -> Vec<String> {
+    let mut values = observations
+        .iter()
+        .filter(|observation| observation.key == key)
+        .flat_map(|observation| observation.values.clone())
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn observation_values_or(
+    observations: &[WorkflowObservation],
+    key: &str,
+    fallback: Vec<String>,
+) -> Vec<String> {
+    let values = observation_values(observations, key);
+    if values.is_empty() {
+        fallback
+    } else {
+        values
+    }
+}
+
+fn observation_keys_for_area(observations: &[WorkflowObservation], area: &str) -> Vec<String> {
+    let mut keys = observations
+        .iter()
+        .filter(|observation| observation.kind == area)
+        .map(|observation| observation.key.clone())
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn module_candidate_names(observations: &[WorkflowObservation]) -> Vec<String> {
+    observations
+        .iter()
+        .filter(|observation| observation.key == "module.candidate")
+        .filter_map(|observation| observation.values.first().cloned())
+        .collect()
+}
+
+fn module_candidate_paths(observations: &[WorkflowObservation]) -> Vec<String> {
+    observations
+        .iter()
+        .filter(|observation| observation.key == "module.candidate")
+        .filter_map(|observation| observation.values.get(1).cloned())
+        .collect()
+}
+
+fn trusted_module_names(graph: &Graph) -> Vec<String> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "Module")
+        .filter_map(|node| {
+            node.attributes
+                .get("name")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+fn detect_module_candidates(root: &Path) -> Vec<(String, String)> {
+    let mut candidates = Vec::new();
+    for parent in ["crates", "packages", "apps"] {
+        let path = root.join(parent);
+        if let Ok(entries) = fs::read_dir(&path) {
+            for entry in entries.flatten() {
+                let candidate_path = entry.path();
+                if candidate_path.is_dir() {
+                    if let Some(name) = candidate_path.file_name().and_then(|name| name.to_str()) {
+                        candidates.push((name.to_string(), format!("{parent}/{name}")));
+                    }
+                }
+            }
+        }
+    }
+    let src = root.join("src");
+    if let Ok(entries) = fs::read_dir(&src) {
+        for entry in entries.flatten() {
+            let candidate_path = entry.path();
+            if candidate_path.is_dir() {
+                if let Some(name) = candidate_path.file_name().and_then(|name| name.to_str()) {
+                    candidates.push((name.to_string(), format!("src/{name}")));
+                }
+            }
+        }
+    }
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
+fn detect_node_package_manager(root: &Path) -> String {
+    if root.join("pnpm-lock.yaml").exists() {
+        "pnpm".to_string()
+    } else if root.join("yarn.lock").exists() {
+        "yarn".to_string()
+    } else {
+        "npm".to_string()
+    }
+}
+
+fn file_contains(path: PathBuf, needle: &str) -> bool {
+    fs::read_to_string(path)
+        .map(|content| content.contains(needle))
+        .unwrap_or(false)
 }
 
 pub fn install_ontology_pack(
@@ -4847,6 +5743,119 @@ acceptanceCriteria:
                 count: 1,
             } if operation == "Proposal.Accept"
         ));
+    }
+
+    #[test]
+    fn workflow_plan_keeps_detection_untrusted_and_asks_required_questions() {
+        let tmp = tempdir().unwrap();
+        fs::write(tmp.path().join("Cargo.toml"), "[workspace]\n").unwrap();
+        fs::create_dir_all(tmp.path().join(".github/workflows")).unwrap();
+        fs::create_dir_all(tmp.path().join("crates/identity")).unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let before = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let plan = plan_workflow(
+            tmp.path(),
+            WorkflowPlanOptions {
+                spec: Some("AUTH-001".to_string()),
+                title: Some("Password reset".to_string()),
+                touches_modules: vec!["Identity".to_string()],
+                requirements: vec![sg_spec::TextItem {
+                    id: "REQ-001".to_string(),
+                    text: "User can request reset".to_string(),
+                }],
+                acceptance_criteria: vec![sg_spec::TextItem {
+                    id: "AC-001".to_string(),
+                    text: "Generic response".to_string(),
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..WorkflowPlanOptions::default()
+            },
+        )
+        .unwrap();
+        let after = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+
+        assert!(matches!(plan.status, WorkflowPlanStatus::QuestionsRequired));
+        assert_eq!(before.last_sequence, after.last_sequence);
+        assert!(plan
+            .observations
+            .iter()
+            .all(
+                |observation| observation.trust_state == "UntrustedObservation"
+                    && !observation.accepted
+            ));
+        assert!(plan
+            .required_questions
+            .iter()
+            .any(|question| question.id == "project.type"));
+        assert!(plan
+            .required_questions
+            .iter()
+            .any(|question| question.id == "module.name"));
+        assert!(plan
+            .required_questions
+            .iter()
+            .any(|question| question.id == "spec.intent.Identity"));
+        assert!(plan
+            .dry_runs
+            .iter()
+            .any(|dry_run| dry_run.operation == "Project.ProfileUpsert"));
+        assert!(plan
+            .dry_runs
+            .iter()
+            .any(|dry_run| dry_run.operation == "ModuleGraph.Upsert"));
+        assert!(plan
+            .dry_runs
+            .iter()
+            .any(|dry_run| dry_run.operation == "Spec.Create"));
+    }
+
+    #[test]
+    fn workflow_plan_can_be_ready_with_trusted_baselines_and_spec_intent() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let plan = plan_workflow(
+            tmp.path(),
+            WorkflowPlanOptions {
+                spec: Some("AUTH-002".to_string()),
+                title: Some("Change password".to_string()),
+                touches_modules: vec!["Identity".to_string()],
+                requirements: vec![sg_spec::TextItem {
+                    id: "REQ-001".to_string(),
+                    text: "User can change password".to_string(),
+                }],
+                acceptance_criteria: vec![sg_spec::TextItem {
+                    id: "AC-001".to_string(),
+                    text: "Password change is confirmed".to_string(),
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..WorkflowPlanOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(plan.status, WorkflowPlanStatus::Ready));
+        assert!(plan.required_questions.is_empty());
+        let spec_dry_run = plan
+            .dry_runs
+            .iter()
+            .find(|dry_run| dry_run.operation == "Spec.Create")
+            .expect("spec dry-run exists");
+        assert_eq!(spec_dry_run.status, "accepted");
+        assert!(spec_dry_run
+            .receipt
+            .as_ref()
+            .is_some_and(|receipt| receipt.dry_run));
     }
 
     #[test]

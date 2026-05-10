@@ -62,6 +62,7 @@ Phase 7 product surfaces now include:
 ```bash
 cargo run -p sg-cli -- --version
 cargo run -p sg-cli -- init --project-name demo
+cargo run -p sg-cli -- workflow plan --json
 cat > project-profile.yaml <<'YAML'
 project:
   name: demo
@@ -126,6 +127,10 @@ cargo run -p sg-cli -- graph replay --check
 ```
 
 For v0.1, JSONL events are the canonical history. Snapshots and indexes are derived, rebuildable state. Spec authoring is intentionally project-first and module-first: `Spec.Create` and `Spec.Import` are blocked until the ProjectGraph profile is accepted with `sg project profile upsert` and at least one complete ModuleGraph baseline is accepted with `sg module import` or `sg module declare`.
+
+## Project-first Workflow Planner
+
+`sg workflow plan` is the agent/wizard entry point for new work. It detects repository facts only as `UntrustedObservation`, lists required ProjectGraph/ModuleGraph/SpecGraph questions, separates optional suggestions, and emits dry-run receipts before any accepted graph mutation.
 
 ## YAML Spec Projection
 

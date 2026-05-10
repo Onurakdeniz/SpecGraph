@@ -37,7 +37,7 @@ use sg_store::{
     LinkModuleCapabilityOptions, ModuleDefinition, ModuleInterface, ProjectProfileInput,
     RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions,
     ReplayReport, SpecGraphStore, TransitionSpecOptions, UpsertActorOptions,
-    UpsertModuleGraphOptions, UpsertProjectProfileOptions,
+    UpsertModuleGraphOptions, UpsertProjectProfileOptions, WorkflowPlanOptions,
 };
 use sg_testgraph::{
     validate_required_tests_pass, validate_trace_links, LinksManifest, TestCaseResult, TestLink,
@@ -125,6 +125,8 @@ enum Commands {
     Policy(PolicyArgs),
     /// Existing repository adoption commands.
     Adopt(AdoptArgs),
+    /// Project-first agent/wizard workflow planner.
+    Workflow(WorkflowArgs),
     /// Impact analysis commands.
     Impact(ImpactArgs),
     /// Adapter catalog and capability commands.
@@ -568,6 +570,46 @@ struct AdoptScanArgs {
     #[arg(long, default_value = "observe")]
     mode: String,
     #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowArgs {
+    #[command(subcommand)]
+    command: WorkflowCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum WorkflowCommand {
+    /// Detect untrusted repo facts and plan required Project/Module/Spec questions.
+    Plan(WorkflowPlanArgs),
+}
+
+#[derive(Debug, Args)]
+struct WorkflowPlanArgs {
+    #[arg(long)]
+    spec: Option<String>,
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long = "touches-module")]
+    touches_modules: Vec<String>,
+    #[arg(
+        long = "module-change",
+        value_name = "ACTION:NAME:PURPOSE:LAYER:PACKAGE:CAP1,CAP2"
+    )]
+    module_changes: Vec<String>,
+    #[arg(
+        long = "planned-object",
+        value_name = "KIND:NAME:MODULE[:EXPECTED_FILE]"
+    )]
+    planned_objects: Vec<String>,
+    #[arg(long = "requirement", value_name = "ID:TEXT")]
+    requirements: Vec<String>,
+    #[arg(long = "acceptance-criterion", value_name = "ID:TEXT")]
+    acceptance_criteria: Vec<String>,
+    #[arg(long, default_value = "local:planner")]
     actor: String,
     #[arg(long, default_value = "main")]
     graph_branch: String,
@@ -1206,6 +1248,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Identity(args) => handle_identity(&store, args)?,
         Commands::Policy(args) => handle_policy(&store, args)?,
         Commands::Adopt(args) => handle_adopt(&store, &root, args)?,
+        Commands::Workflow(args) => handle_workflow(&store, args, output)?,
         Commands::Impact(args) => handle_impact(&store, args)?,
         Commands::Adapter(args) => handle_adapter(args)?,
         Commands::Api(args) => handle_api(&store, &root, args)?,
@@ -1747,6 +1790,75 @@ fn handle_adopt(store: &SpecGraphStore, root: &Path, args: AdoptArgs) -> anyhow:
             println!("codeFilesAdopted: {count}");
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
+        }
+    }
+    Ok(())
+}
+
+fn handle_workflow(
+    store: &SpecGraphStore,
+    args: WorkflowArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
+    match args.command {
+        WorkflowCommand::Plan(args) => {
+            let plan = store.plan_workflow(WorkflowPlanOptions {
+                spec: args.spec,
+                title: args.title,
+                touches_modules: args.touches_modules,
+                module_changes: args
+                    .module_changes
+                    .iter()
+                    .map(|change| parse_module_change(change))
+                    .collect::<anyhow::Result<Vec<_>>>()?,
+                planned_objects: args
+                    .planned_objects
+                    .iter()
+                    .map(|object| parse_planned_object(object))
+                    .collect::<anyhow::Result<Vec<_>>>()?,
+                requirements: parse_text_items(&args.requirements)?,
+                acceptance_criteria: parse_text_items(&args.acceptance_criteria)?,
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg workflow plan",
+                    "status": "ok",
+                    "workflowPlan": plan,
+                }))?;
+            } else if !output.quiet {
+                println!("workflowPlanStatus: {:?}", plan.status);
+                println!("stateHash: {}", plan.state_hash);
+                println!("observations: {}", plan.observations.len());
+                for observation in &plan.observations {
+                    println!(
+                        "observation: {} {} values={} trustState={} accepted={}",
+                        observation.kind,
+                        observation.key,
+                        observation.values.join("|"),
+                        observation.trust_state,
+                        observation.accepted
+                    );
+                }
+                println!("requiredQuestions: {}", plan.required_questions.len());
+                for question in &plan.required_questions {
+                    println!(
+                        "question: {} area={} blocks={} prompt={}",
+                        question.id, question.area, question.blocks_operation, question.prompt
+                    );
+                }
+                println!("dryRuns: {}", plan.dry_runs.len());
+                for dry_run in &plan.dry_runs {
+                    println!(
+                        "dryRun: {} status={} error={}",
+                        dry_run.operation,
+                        dry_run.status,
+                        dry_run.error.as_deref().unwrap_or("none")
+                    );
+                }
+            }
         }
     }
     Ok(())

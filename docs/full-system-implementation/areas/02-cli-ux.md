@@ -2,7 +2,7 @@
 
 **System area:** CLI UX  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code/docs audit after F.3 spec intent CLI implementation.
+**Status basis:** F.5 project-first workflow planner implementation.
 
 ## Purpose
 
@@ -23,18 +23,19 @@ Provide the complete sg command surface for project setup, ontology, specs, acti
 - `sg project profile upsert`, `sg project show`, and `sg project validate --gate spec-authoring` exist and support JSON envelopes.
 - `sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, and `sg module link-capability` exist and support JSON envelopes.
 - `sg spec create` accepts explicit spec-intent flags for `--touches-module`, `--module-change`, and `--planned-object`, and sends the full projection through Operation Runtime input.
+- `sg workflow plan` detects repository facts as untrusted observations, asks required ProjectGraph/ModuleGraph/SpecGraph questions, separates optional suggestions, and emits dry-run operation receipts before acceptance.
 
 ### Partly Implemented
 
 - Full CLI reference contains commands that are not all implemented
 - Legacy command groups keep their established human output while newly closed Phase 7 product-surface commands support JSON automation envelopes
-- Project profile commands exist, while automatic project detection and finer-grained profile editing remain planned.
-- Module baseline commands exist, while automatic module detection/inference and richer lifecycle commands remain planned.
-- Spec intent flags exist on create, while richer interactive guidance and generated templates remain planned.
+- Project profile commands exist, while finer-grained profile editing remains planned.
+- Module baseline commands exist, while richer lifecycle commands remain planned.
+- Spec intent flags and project-first workflow planning exist, while richer interactive TUI/Studio guidance and generated templates remain planned.
 
 ### Not Implemented / Remaining
 
-- Automatic project/module detection and richer lifecycle commands
+- Richer project/module lifecycle commands
 - Action lifecycle start/complete/replan
 - PR validation
 - Test runner recording
@@ -59,8 +60,8 @@ Mutating commands must pass operation ABI, ontology validation, policy checks, a
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep `docs/cli/ux-contract.md` aligned when command groups, output schemas, or exit-code semantics change.
-- Implement or finish: automatic project/module detection and richer lifecycle commands.
-- Implement or finish: interactive/spec-template guidance for `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph deltas.
+- Implement or finish: richer project/module lifecycle commands.
+- Implement or finish: interactive TUI/Studio guidance and spec-template generation for `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph deltas.
 - Implement or finish: Action lifecycle start/complete/replan.
 - Implement or finish: PR validation.
 - Implement or finish: Test runner recording.
