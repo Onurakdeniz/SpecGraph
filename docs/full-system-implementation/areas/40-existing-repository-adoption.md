@@ -2,7 +2,7 @@
 
 **System area:** Existing Repository Adoption  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** F.5 workflow planner plus adoption report foundations.
 
 ## Purpose
 
@@ -14,19 +14,20 @@ Support legacy repos through observed baselines and gradual enforcement modes.
 
 - sg adopt scan modes are documented
 - Import flow and modes are specified
+- `sg workflow plan` provides the first baseline-to-accepted-fact bridge by keeping detected project/module facts untrusted, asking required questions, and producing dry-run receipts before accepted operations.
 
 ### Partly Implemented
 
 - Scan modes exist as foundation
 - Deterministic adoption reports exist for observe, warn, enforce-new-work, and strict modes
-- Source language/tool detection and path-based module inference exist
+- Source language/tool detection and path-based module inference exist as adoption reports and workflow-planner untrusted observations
 - Enforcement gates distinguish legacy observations from new governed work
 
 ### Not Implemented / Remaining
 
 - init --adopt full flow
 - Test detection beyond current language/tool scan
-- Full baseline-to-accepted-fact workflow
+- Full automated baseline-to-accepted-fact workflow beyond planner-assisted dry runs
 
 ## Implementation Parts
 
@@ -47,7 +48,7 @@ Observe reports only, warn warns, enforce-new-work blocks new governed work, str
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: init --adopt full flow.
 - Implement or finish: Test detection beyond current language/tool scan.
-- Implement or finish: Full baseline-to-accepted-fact workflow.
+- Implement or finish: full automated baseline-to-accepted-fact workflow beyond planner-assisted dry runs.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 

@@ -2,7 +2,7 @@
 
 **System area:** ModuleGraphs  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** F.2 module-baseline validator/CLI implementation plus workflow review after promoting project-first system flow.
+**Status basis:** F.5 workflow planner plus F.2 ModuleGraph baseline implementation.
 
 ## Purpose
 
@@ -22,12 +22,13 @@ Represent bounded capability areas such as modules, frontend areas, CLI command 
 - `sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, and `sg module link-capability` route ModuleGraph changes through Operation Runtime receipts.
 - `Spec.Create` and `Spec.Import` are blocked before event append when the trusted ModuleGraph baseline is incomplete.
 - Spec intent now distinguishes existing touched modules from `moduleChanges` new-module declarations; unknown touched modules and incomplete new-module declarations fail before append.
+- `sg workflow plan` detects module directory candidates as untrusted observations, asks required module purpose/layer/package/capability questions, and emits ModuleGraph.Upsert dry-run receipts before acceptance.
 
 ### Partly Implemented
 
 - Basic module references exist
 - Layers, packages, capabilities, and public/private interface facts exist in `sg-module-graph` and can be routed through Operation Runtime.
-- Repository inference is not complete.
+- Repository inference exists as untrusted workflow-planner observations; richer accepted lifecycle commands remain planned.
 - Spec module intent gates exist; richer module consistency and lifecycle rules remain planned.
 
 ### Not Implemented / Remaining
@@ -35,7 +36,7 @@ Represent bounded capability areas such as modules, frontend areas, CLI command 
 - Richer module lifecycle commands
 - Layer/package/capability/interface ontology is partially implemented; richer boundary rules remain
 - Architecture-pack validators
-- Existing repo module inference
+- Standalone module detection and richer accepted module lifecycle flows
 
 ## Implementation Parts
 

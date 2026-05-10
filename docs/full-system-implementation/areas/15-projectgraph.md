@@ -2,7 +2,7 @@
 
 **System area:** ProjectGraph  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** F.1 project-baseline validator/CLI implementation plus workflow review after promoting project-first system flow.
+**Status basis:** F.5 workflow planner plus F.1 ProjectGraph baseline implementation.
 
 ## Purpose
 
@@ -21,16 +21,17 @@ Represent project identity, type, languages, architecture style, runtime topolog
 - `validator.project_baseline` reports missing ProjectGraph profile facts with structured findings and remediation.
 - `sg project profile upsert`, `sg project show`, and `sg project validate --gate spec-authoring` route ProjectGraph profile acceptance through Operation Runtime receipts.
 - `Spec.Create` and `Spec.Import` are blocked before event append when the trusted ProjectGraph profile is incomplete.
+- `sg workflow plan` detects possible project name/language/package manager/test runner/CI provider as untrusted observations and converts missing ProjectGraph baseline facts into required questions plus Project.ProfileUpsert dry-run receipts.
 
 ### Partly Implemented
 
 - Basic Project exists
 - Graph-native project profile facts exist in `sg-project` and are persisted by `sg-store`.
-- Automatic repository detection is not complete.
+- Repository detection exists in the workflow planner as untrusted observations; direct `sg project detect` and richer acceptance UX remain planned.
 
 ### Not Implemented / Remaining
 
-- Automatic project type/language/package/test/CI detection
+- Standalone `sg project detect` command and richer acceptance UX
 - More granular commands to update individual architecture/profile facts
 - Pack/profile compatibility validation
 
@@ -51,7 +52,7 @@ Project metadata drives pack selection, indexers, test runner integration, polic
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: automatic Project type/language/package/test/CI detection.
+- Implement or finish: standalone `sg project detect` and granular profile update commands.
 - Implement or finish: Commands to update architecture.
 - Implement or finish: Pack/profile compatibility validation.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.

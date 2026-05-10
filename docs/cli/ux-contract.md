@@ -238,3 +238,8 @@ Spec authoring now separates:
 ## F.4 Implemented Operation Semantic Preconditions
 
 Operation Runtime now owns semantic gates for `Spec.BindBranch`, `ActionGraph.Generate`, `GitCommit.Record`, `Validation.Record`, and `Proposal.Accept`, so CLI/API/SDK/Studio callers receive the same findings and receipts instead of relying on CLI-only checks.
+
+
+## F.5 Implemented Project-First Workflow Planner
+
+`sg workflow plan` detects repository facts as `UntrustedObservation`, asks missing ProjectGraph/ModuleGraph/SpecGraph required questions first, separates optional suggestions, and emits dry-run receipts for acceptance operations before trusted graph mutation.

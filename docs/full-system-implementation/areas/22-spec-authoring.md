@@ -2,7 +2,7 @@
 
 **System area:** Spec Authoring  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** F.3 spec intent model separation implementation.
+**Status basis:** F.5 project-first workflow planner plus F.3 spec intent separation.
 
 ## Purpose
 
@@ -19,17 +19,18 @@ Support YAML, Markdown, CLI wizard, and Studio authoring while graph state remai
 - `Spec.Create` and `Spec.Import` now require a trusted ModuleGraph baseline before append.
 - Spec authoring now separates legacy `module`, explicit `touchesModules`, `moduleChanges`, `plannedObjects`, and optional `intendedGraphDelta`.
 - Operation Runtime rejects unknown touched modules, incomplete new-module declarations, and planned objects without valid owning module intent before append.
+- `sg workflow plan` asks missing spec id/title/requirements/acceptance criteria/module-intent questions and emits Spec.Create dry-run receipts before graph acceptance.
 
 ### Partly Implemented
 
 - Rich projection schema is broader than current import
-- ProjectGraph and ModuleGraph readiness are enforced; spec intent splitting is implemented; conditional gates remain planned.
+- ProjectGraph and ModuleGraph readiness are enforced; spec intent splitting and required-question planning are implemented; conditional gates remain planned.
 
 ### Not Implemented / Remaining
 
 - Conditional requirements for data/security/architecture/CI-sensitive spec intent.
 - Markdown parsing
-- CLI wizard
+- Richer interactive CLI wizard/TUI
 - Studio authoring
 - Graph-to-projection export
 - Projection drift detection
@@ -52,7 +53,7 @@ Projection schema validation, unknown fields, duplicate stable keys, import idem
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: Markdown parsing.
-- Implement or finish: CLI wizard.
+- Implement or finish: richer interactive CLI wizard/TUI.
 - Implement or finish: Studio authoring.
 - Implement or finish: Graph-to-projection export.
 - Implement or finish: Projection drift detection.
