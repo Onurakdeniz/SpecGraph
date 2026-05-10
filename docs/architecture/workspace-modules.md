@@ -43,8 +43,8 @@ The split is intentionally staged:
 | `sg-adapter-ci` | CI adapter | CI/validator execution data facades. |
 | `sg-adapter-hosting` | Hosting adapter | PR/hosting observation facts. |
 | `sg-adapter-llm` | LLM adapter | Untrusted proposal facade. |
-| `sg-server` | Future API server | Server boundary placeholder that depends inward on runtime/query APIs. |
-| `sg-sdk` | Rust SDK schema facade | Operation/schema facade for generated SDK work. |
+| `sg-server` | API server surface | Transport-neutral server route/query/operation schemas that depend inward on runtime/query APIs; network binding remains outer/future. |
+| `sg-sdk` | Rust SDK client facade | Local/in-process SDK facade over `sg-server` that returns Operation Runtime receipts and never mutates `.specgraph` directly. |
 | `sg-cli` | CLI | Human/JSON command surface and local orchestration only. |
 | `sg-core` | Compatibility facade | Backward-compatible Rust re-export surface only. It must not own implementation logic or non-`sg-*` implementation dependencies. |
 
@@ -52,7 +52,7 @@ The split is intentionally staged:
 
 | Package | Boundary | Rule |
 |---|---|---|
-| `packages/sdk-typescript` | Future TypeScript SDK | Must use generated Operation ABI/API contracts and receipts; no direct `.specgraph` mutation. |
+| `packages/sdk-typescript` | TypeScript SDK | Uses server API query/operation contracts and receipts; no direct `.specgraph` mutation. |
 | `packages/studio` | Future Studio UI | Must use server/SDK query and operation forms; no trusted graph file writes. |
 
 ## Dependency direction

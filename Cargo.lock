@@ -665,6 +665,7 @@ dependencies = [
  "sg-policy",
  "sg-proposal",
  "sg-query",
+ "sg-server",
  "sg-spec",
  "sg-store",
  "sg-testgraph",
@@ -844,14 +845,23 @@ dependencies = [
 name = "sg-sdk"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "sg-model",
+ "sg-server",
+ "sg-spec",
+ "sg-store",
 ]
 
 [[package]]
 name = "sg-server"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "sg-model",
  "sg-query",
+ "sg-spec",
  "sg-store",
 ]
 

@@ -29,6 +29,7 @@ sg-operation.workspace = true
 sg-policy.workspace = true
 sg-proposal.workspace = true
 sg-query.workspace = true
+sg-server.workspace = true
 sg-spec.workspace = true
 sg-store.workspace = true
 sg-testgraph.workspace = true

@@ -403,10 +403,10 @@ Related areas:
 
 ### Implementation Checklist
 
-- [ ] Stabilize read-only server API.
-- [ ] Add TypeScript SDK types generated from schemas where practical.
-- [ ] Add mutating API endpoints only through operation runtime.
-- [ ] Add SDK operation receipt handling.
+- [x] Stabilize read-only server API.
+- [x] Add TypeScript SDK types generated from schemas where practical.
+- [x] Add mutating API endpoints only through operation runtime.
+- [x] Add SDK operation receipt handling.
 - [ ] Build Studio read-only graph/spec/action/finding views.
 - [ ] Add Studio operation forms with dry-run preview.
 - [~] Add example for backend API full loop.
@@ -421,8 +421,8 @@ Related areas:
 
 ### Gate Checks
 
-- [ ] Server cannot mutate graph outside operation runtime.
-- [ ] SDK receives same receipts as CLI.
+- [x] Server cannot mutate graph outside operation runtime.
+- [x] SDK receives same receipts as CLI.
 - [ ] Studio cannot bypass policy or validation.
 - [ ] Every example has happy path and intentional failure path.
 - [~] Released CLI can run proof scenario.
