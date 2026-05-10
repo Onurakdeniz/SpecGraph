@@ -128,6 +128,9 @@ plannedObjects:
     name: create_billing_session
     module: billing
     expectedFile: crates/sg-billing/src/lib.rs
+intendedGraphDelta:
+  createNodes: []
+  createEdges: []
 requirements:
   - id: REQ-001
     text: System can create billing sessions.
@@ -140,8 +143,8 @@ Spec preconditions:
 
 - Project baseline complete.
 - Module baseline complete.
-- Touched modules exist or new modules are fully declared.
-- Planned objects have owning modules.
+- Touched modules exist or new modules are fully declared. **Implemented.**
+- Planned objects have owning modules. **Implemented for Project/ModuleGraph runtime preconditions.**
 - Conditional required fields are present.
 - At least one requirement and acceptance criterion exist.
 
@@ -196,7 +199,7 @@ Operation Runtime must own the gates so CLI/API/SDK/Studio cannot bypass them.
 
 | Operation | Required semantic gates |
 |---|---|
-| `Spec.Create` / `Spec.Import` | Project baseline (implemented), Module baseline (implemented), spec module consistency, planned object ownership, conditional requirements |
+| `Spec.Create` / `Spec.Import` | Project baseline (implemented), Module baseline (implemented), spec module consistency (implemented for touched/changed modules), planned object ownership (implemented), conditional requirements |
 | `Spec.BindBranch` | Spec validity, project/module gates, branch naming, base snapshot |
 | `ActionGraph.Generate` | Valid spec context, module/architecture/data/security scope, no blocking findings |
 | `GitCommit.Record` | CommitPlan scope, active branch, required validation/test evidence |
@@ -249,6 +252,6 @@ The canonical implementation plan tracks this as the post-Phase 7 final closure 
 
 1. Project baseline validator and `sg project` CLI. **Implemented for ProjectGraph profile facts and the spec-authoring runtime gate.**
 2. Module baseline validator and `sg module` CLI. **Implemented for ModuleGraph baseline facts and the spec-authoring runtime gate.**
-3. Spec projection separation: `touchesModules`, `moduleChanges`, `plannedObjects`, intended graph delta.
+3. Spec projection separation: `touchesModules`, `moduleChanges`, `plannedObjects`, intended graph delta. **Implemented with runtime rejection for unknown touched modules and incomplete new-module declarations.**
 4. Operation-specific semantic gates for spec, branch, action, commit, validation, and proposal acceptance.
 5. Agent/wizard detection and required-question planner.

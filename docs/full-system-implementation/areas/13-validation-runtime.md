@@ -22,17 +22,18 @@ Run deterministic validators, emit structured findings, record validation runs, 
 - Finding graph facts include validator id, validator version, remediation, and lifecycle state foundation
 - `validator.project_baseline` emits structured findings for missing ProjectGraph profile facts and is reused by `sg project validate` and the Operation Runtime spec-authoring gate.
 - `validator.module_baseline` emits structured findings for missing ModuleGraph baseline facts and is reused by `sg module validate` and the Operation Runtime spec-authoring gate.
+- `validator.spec_authoring_preconditions` emits structured findings for unknown touched modules, incomplete `moduleChanges`, and planned objects without valid owning module intent.
 
 ### Partly Implemented
 
 - ValidationRun and Finding shapes are documented
 - Structured locations and remediation foundation exists
-- Project and module baseline validation is implemented; spec-intent validation remains planned.
+- Project/module baseline validation and first spec-intent validation are implemented; conditional data/security/architecture requirements remain planned.
 - Full finding lifecycle transitions and waiver interaction still need work
 
 ### Not Implemented / Remaining
 
-- Implement validators for remaining spec authoring preconditions, module consistency, planned object ownership, conditional requirements, action context, commit plan scope, and traceability completeness.
+- Implement validators for remaining conditional requirements, action context, commit plan scope, and traceability completeness.
 - Finding lifecycle
 - Waiver interaction
 - Machine-readable PR/Studio reports

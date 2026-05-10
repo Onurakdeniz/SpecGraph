@@ -21,17 +21,18 @@ Force every graph mutation through a stable operation ABI with preconditions, po
 - Identity, policy evidence, and policy decision persistence operations are registered in the built-in operation ABI
 - Operation Runtime now runs operation-specific semantic preconditions before policy/ontology/event append for spec authoring.
 - `Spec.Create` and `Spec.Import` fail before append when `validator.project_baseline` reports an incomplete ProjectGraph profile or `validator.module_baseline` reports an incomplete ModuleGraph baseline.
+- `Spec.Create` and `Spec.Import` also run spec-intent semantic preconditions for unknown touched modules, incomplete new-module declarations, and planned-object ownership.
 
 ### Partly Implemented
 
 - Required inputs and allowed node/edge types exist as foundation
 - Generic mutation preconditions and postconditions exist for create/update/delete deltas
-- Operation-specific semantic preconditions exist for the ProjectGraph and ModuleGraph portions of `Spec.Create` / `Spec.Import`.
+- Operation-specific semantic preconditions exist for ProjectGraph, ModuleGraph, and spec-intent portions of `Spec.Create` / `Spec.Import`.
 - Full precondition/effect/postcondition DSL needs completion
 
 ### Not Implemented / Remaining
 
-- Remaining operation-specific semantic preconditions for spec intent portions of Spec.Create/Spec.Import plus Spec.BindBranch, ActionGraph.Generate, GitCommit.Record, Validation.Record, and Proposal.Accept.
+- Remaining operation-specific semantic preconditions for conditional data/security/architecture requirements plus Spec.BindBranch, ActionGraph.Generate, GitCommit.Record, Validation.Record, and Proposal.Accept.
 - Dry-run receipts everywhere
 - Transactions and rollback
 - SDK/server ABI compatibility

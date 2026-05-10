@@ -21,12 +21,14 @@ Represent bounded capability areas such as modules, frontend areas, CLI command 
 - `validator.module_baseline` requires at least one trusted Project-linked module with name, purpose, layer, package, and capability before spec authoring.
 - `sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, and `sg module link-capability` route ModuleGraph changes through Operation Runtime receipts.
 - `Spec.Create` and `Spec.Import` are blocked before event append when the trusted ModuleGraph baseline is incomplete.
+- Spec intent now distinguishes existing touched modules from `moduleChanges` new-module declarations; unknown touched modules and incomplete new-module declarations fail before append.
 
 ### Partly Implemented
 
 - Basic module references exist
 - Layers, packages, capabilities, and public/private interface facts exist in `sg-module-graph` and can be routed through Operation Runtime.
 - Repository inference is not complete.
+- Spec module intent gates exist; richer module consistency and lifecycle rules remain planned.
 
 ### Not Implemented / Remaining
 

@@ -11,7 +11,7 @@ lets the CLI and SDK exercise the same handlers in-process.
   Operation Runtime, policy gate, ontology validation, postconditions, event
   append, snapshot write, and receipt write.
 - `Spec.Create` and `Spec.Import` requests receive the same ProjectGraph and
-  ModuleGraph baseline semantic gates as the CLI/SDK before event append.
+  ModuleGraph baseline and spec-intent semantic gates as the CLI/SDK before event append.
 - Server callers submit graph deltas as operation requests; they never write
   `.specgraph/events`, `.specgraph/snapshots`, or receipt files directly.
 - Branch and snapshot query context is explicit and bounded by query limits.
@@ -59,7 +59,22 @@ created/updated/deleted graph ids, findings, and event ids for non-dry-run calls
   "actor": "local:user",
   "graphBranch": "main",
   "dryRun": true,
-  "input": { "spec": "AUTH-001" },
+  "input": {
+    "spec": "AUTH-001",
+    "projection": {
+      "spec": "AUTH-001",
+      "title": "Password reset",
+      "touchesModules": ["Identity"],
+      "plannedObjects": [
+        {
+          "kind": "function",
+          "name": "requestPasswordReset",
+          "module": "Identity",
+          "expectedFile": "src/identity/password-reset.js"
+        }
+      ]
+    }
+  },
   "delta": {
     "createNodes": [
       {
@@ -68,8 +83,27 @@ created/updated/deleted graph ids, findings, and event ids for non-dry-run calls
         "nodeType": "Spec",
         "attributes": {
           "spec": "AUTH-001",
-          "title": "Password reset"
+          "title": "Password reset",
+          "touchesModules": ["Identity"],
+          "plannedObjects": [
+            {
+              "kind": "function",
+              "name": "requestPasswordReset",
+              "module": "Identity",
+              "expectedFile": "src/identity/password-reset.js"
+            }
+          ]
         }
+      }
+    ],
+    "createEdges": [
+      {
+        "id": "edge_node_spec_auth_001_touches_module_node_module_identity",
+        "stableKey": "edge:node_spec_auth_001:TOUCHES_MODULE:node_module_identity",
+        "edgeType": "TOUCHES_MODULE",
+        "from": "node_spec_auth_001",
+        "to": "node_module_identity",
+        "attributes": {}
       }
     ]
   }
@@ -81,4 +115,6 @@ than hand-writing graph nodes. Invalid stable keys, invalid operation/delta
 combinations, denied policies, failed postconditions, or ontology errors are
 rejected before event append. For spec authoring operations, initialize the
 project profile and module baseline first with `Project.ProfileUpsert` and
-`ModuleGraph.Upsert`.
+`ModuleGraph.Upsert`. Include the full spec projection in operation input when
+submitting spec authoring mutations so the runtime can inspect `touchesModules`,
+`moduleChanges`, `plannedObjects`, and `intendedGraphDelta`.

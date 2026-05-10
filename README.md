@@ -90,6 +90,8 @@ cargo run -p sg-cli -- spec create \
   --spec AUTH-001 \
   --title "Password reset" \
   --module Identity \
+  --touches-module Identity \
+  --planned-object function:requestPasswordReset:Identity:src/identity/password-reset.js \
   --requirement "REQ-001:User can request a password reset email" \
   --acceptance-criterion "AC-001:Endpoint returns a generic response"
 cargo run -p sg-cli -- spec validate
@@ -127,12 +129,22 @@ For v0.1, JSONL events are the canonical history. Snapshots and indexes are deri
 
 ## YAML Spec Projection
 
-Specs can also be imported from YAML:
+Specs can also be imported from YAML. Full-system spec intent separates touched modules, planned objects, module changes, and intended graph deltas:
 
 ```yaml
 spec: AUTH-001
 title: Password reset
 module: Identity
+touchesModules:
+  - Identity
+plannedObjects:
+  - kind: function
+    name: requestPasswordReset
+    module: Identity
+    expectedFile: src/identity/password-reset.js
+intendedGraphDelta:
+  createNodes: []
+  createEdges: []
 priority: P1
 summary: Allow users to request a password reset email without exposing account existence.
 requirements:

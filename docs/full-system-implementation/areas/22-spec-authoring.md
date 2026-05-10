@@ -2,7 +2,7 @@
 
 **System area:** Spec Authoring  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** workflow review after promoting project-first system flow.
+**Status basis:** F.3 spec intent model separation implementation.
 
 ## Purpose
 
@@ -17,16 +17,17 @@ Support YAML, Markdown, CLI wizard, and Studio authoring while graph state remai
 - CLI spec creation exists
 - `Spec.Create` and `Spec.Import` now require a trusted ProjectGraph profile before append.
 - `Spec.Create` and `Spec.Import` now require a trusted ModuleGraph baseline before append.
+- Spec authoring now separates legacy `module`, explicit `touchesModules`, `moduleChanges`, `plannedObjects`, and optional `intendedGraphDelta`.
+- Operation Runtime rejects unknown touched modules, incomplete new-module declarations, and planned objects without valid owning module intent before append.
 
 ### Partly Implemented
 
 - Rich projection schema is broader than current import
-- ProjectGraph and ModuleGraph readiness are enforced; spec intent splitting and conditional gates remain planned.
+- ProjectGraph and ModuleGraph readiness are enforced; spec intent splitting is implemented; conditional gates remain planned.
 
 ### Not Implemented / Remaining
 
-- Split spec intent into `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph delta.
-- Block spec create/import before append when spec intent is incomplete.
+- Conditional requirements for data/security/architecture/CI-sensitive spec intent.
 - Markdown parsing
 - CLI wizard
 - Studio authoring
