@@ -19,6 +19,9 @@ Implemented commands:
 - `sg module list`
 - `sg module validate`
 - `sg module link-capability`
+- `sg module activate`
+- `sg module deprecate`
+- `sg module archive`
 - `sg spec create`
 - `sg spec import`
 - `sg spec validate`

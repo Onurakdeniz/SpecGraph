@@ -2,7 +2,7 @@
 
 **System area:** Validation Runtime  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** F.4 operation semantic preconditions plus validation-runtime foundation audit.
+**Status basis:** Production-readiness closure: semantic preconditions plus ontology/module lifecycle/orphan validators.
 
 ## Purpose
 
@@ -24,6 +24,7 @@ Run deterministic validators, emit structured findings, record validation runs, 
 - `validator.module_baseline` emits structured findings for missing ModuleGraph baseline facts and is reused by `sg module validate` and the Operation Runtime spec-authoring gate.
 - `validator.spec_authoring_preconditions` emits structured findings for unknown touched modules, incomplete `moduleChanges`, and planned objects without valid owning module intent.
 - `validator.operation_semantic_preconditions` emits structured findings for branch/action/commit/validation/proposal runtime gates before append.
+- Ontology validation now emits structured module lifecycle findings and `spec.orphan_structured_concept` findings with related graph nodes and remediation.
 
 ### Partly Implemented
 

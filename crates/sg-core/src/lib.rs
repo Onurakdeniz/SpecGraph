@@ -66,6 +66,7 @@ pub use model::*;
 pub use module_graph::{
     capability_node_id, interface_node_id, layer_node_id, module_node_id, package_node_id,
     InterfaceVisibility, ModuleDefinition, ModuleGraphProjection, ModuleInterface,
+    ModuleLifecycleState,
 };
 pub use ontology::{
     MvpOntology, OntologyStateMachine, OntologyStateTransition, OntologyValidatorRule,

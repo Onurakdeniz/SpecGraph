@@ -206,10 +206,10 @@ Related areas:
 - [x] Add project profile facts: project type, architecture, language, package manager, test runner, CI provider.
 - [x] Add module graph facts: modules, layers, packages, capabilities, and public/private interfaces.
 - [x] Add architecture graph facts: ports/adapters, dependency boundaries, and forbidden layer dependency constraints.
-- [ ] Add module lifecycle commands.
+- [x] Add module lifecycle commands.
 - [x] Expand spec projection schema for risks, mitigations, expected/forbidden behaviors, use cases, endpoints, entities, events, and data changes.
 - [x] Add spec import dry-run showing intended graph delta.
-- [ ] Add orphan structured concept validation.
+- [x] Add orphan structured concept validation.
 - [x] Enforce full Spec state machine.
 - [x] Add `sg spec status` with blockers and next operations.
 - [x] Add ActionNode state machine.
@@ -451,7 +451,7 @@ Related areas:
 - [x] Add project baseline validator for spec-authoring readiness.
 - [x] Add `sg project profile upsert/show/validate` commands.
 - [x] Add module baseline validator for spec-authoring readiness.
-- [x] Add `sg module import/declare/list/validate/link-capability` commands.
+- [x] Add `sg module import/declare/list/validate/link-capability/activate/deprecate/archive` commands.
 - [x] Split spec intent into `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph delta.
 - [x] Add operation-specific semantic preconditions inside Operation Runtime.
 - [x] Add agent/wizard detection and required-question planner.

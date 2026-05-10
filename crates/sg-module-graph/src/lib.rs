@@ -36,6 +36,31 @@ pub struct ModuleInterface {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum ModuleLifecycleState {
+    Active,
+    Deprecated,
+    Archived,
+}
+
+impl ModuleLifecycleState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ModuleLifecycleState::Active => "Active",
+            ModuleLifecycleState::Deprecated => "Deprecated",
+            ModuleLifecycleState::Archived => "Archived",
+        }
+    }
+
+    pub fn requires_reason(self) -> bool {
+        matches!(
+            self,
+            ModuleLifecycleState::Deprecated | ModuleLifecycleState::Archived
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InterfaceVisibility {
     Public,
@@ -70,6 +95,8 @@ pub struct ModuleSummary {
     pub purpose: Option<String>,
     pub layer: Option<String>,
     pub package: Option<String>,
+    pub lifecycle_state: Option<String>,
+    pub lifecycle_reason: Option<String>,
     pub capabilities: Vec<String>,
     pub interfaces: Vec<InterfaceSummary>,
 }
@@ -337,6 +364,38 @@ pub fn module_definition_from_graph(graph: &Graph, module_name: &str) -> Option<
     })
 }
 
+pub fn module_lifecycle_delta(
+    graph: &Graph,
+    module_name: &str,
+    state: ModuleLifecycleState,
+    reason: Option<&str>,
+) -> Option<GraphDelta> {
+    let module = graph
+        .nodes
+        .values()
+        .find(|node| node.node_type == "Module" && node_name(node) == module_name)?;
+    let mut updated = module.clone();
+    updated
+        .attributes
+        .insert("lifecycleState".to_string(), json!(state.as_str()));
+
+    match reason.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(reason) => {
+            updated
+                .attributes
+                .insert("lifecycleReason".to_string(), json!(reason));
+        }
+        None => {
+            updated.attributes.remove("lifecycleReason");
+        }
+    }
+
+    Some(GraphDelta {
+        update_nodes: vec![updated],
+        ..GraphDelta::default()
+    })
+}
+
 fn module_summary(graph: &Graph, module: &Node) -> ModuleSummary {
     let layer = outgoing_named_target(graph, &module.id, "IN_LAYER", "Layer")
         .or_else(|| attr_string(module, "layer"));
@@ -367,6 +426,8 @@ fn module_summary(graph: &Graph, module: &Node) -> ModuleSummary {
         purpose: attr_string(module, "purpose"),
         layer,
         package,
+        lifecycle_state: attr_string(module, "lifecycleState"),
+        lifecycle_reason: attr_string(module, "lifecycleReason"),
         capabilities,
         interfaces,
     }
@@ -654,6 +715,47 @@ mod tests {
         assert!(delta.create_nodes.is_empty());
         assert!(delta.update_nodes.is_empty());
         assert!(delta.create_edges.is_empty());
+    }
+
+    #[test]
+    fn module_lifecycle_delta_updates_existing_module_only() {
+        let projection = sample_projection();
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "node_project".to_string(),
+            Node {
+                id: "node_project".to_string(),
+                stable_key: "project:demo".to_string(),
+                node_type: "Project".to_string(),
+                attributes: BTreeMap::from([("name".to_string(), json!("demo"))]),
+            },
+        );
+        graph.apply_delta(&projection.to_delta());
+
+        let delta = module_lifecycle_delta(
+            &graph,
+            "Identity",
+            ModuleLifecycleState::Deprecated,
+            Some("Replaced by AuthCore"),
+        )
+        .expect("module exists");
+
+        assert!(delta.create_nodes.is_empty());
+        assert_eq!(delta.update_nodes.len(), 1);
+        assert_eq!(
+            delta.update_nodes[0]
+                .attributes
+                .get("lifecycleState")
+                .and_then(serde_json::Value::as_str),
+            Some("Deprecated")
+        );
+        assert_eq!(
+            delta.update_nodes[0]
+                .attributes
+                .get("lifecycleReason")
+                .and_then(serde_json::Value::as_str),
+            Some("Replaced by AuthCore")
+        );
     }
 
     fn sample_projection() -> ModuleGraphProjection {

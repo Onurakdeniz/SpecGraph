@@ -80,7 +80,7 @@ sg module validate --gate spec-authoring
 sg module list
 ```
 
-`sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, and `sg module link-capability` are implemented. `sg workflow plan` now detects module candidates as untrusted observations, asks missing ModuleGraph questions, and emits ModuleGraph.Upsert dry-run receipts; detected module facts must still be accepted through `ModuleGraph.Upsert` before they are trusted.
+`sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, `sg module link-capability`, `sg module activate`, `sg module deprecate`, and `sg module archive` are implemented. `sg workflow plan` now detects module candidates as untrusted observations, asks missing ModuleGraph questions, and emits ModuleGraph.Upsert dry-run receipts; detected module facts must still be accepted through `ModuleGraph.Upsert` before they are trusted.
 
 Minimum trusted ModuleGraph baseline before spec authoring:
 

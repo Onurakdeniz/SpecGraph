@@ -2,7 +2,7 @@
 
 **System area:** Operation Runtime ABI  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** F.4 operation-specific semantic gate implementation plus current code/docs audit.
+**Status basis:** Production-readiness closure: operation-specific gates plus ModuleGraph.Lifecycle runtime operation.
 
 ## Purpose
 
@@ -23,6 +23,7 @@ Force every graph mutation through a stable operation ABI with preconditions, po
 - `Spec.Create` and `Spec.Import` fail before append when `validator.project_baseline` reports an incomplete ProjectGraph profile or `validator.module_baseline` reports an incomplete ModuleGraph baseline.
 - `Spec.Create` and `Spec.Import` also run spec-intent semantic preconditions for unknown touched modules, incomplete new-module declarations, and planned-object ownership.
 - `Spec.BindBranch`, `ActionGraph.Generate`, `GitCommit.Record`, `Validation.Record`, and `Proposal.Accept` now have runtime semantic findings so API/SDK/direct callers cannot bypass CLI-only checks.
+- `ModuleGraph.Lifecycle` is registered in the Operation ABI so module activate/deprecate/archive commands update trusted Module lifecycle state through runtime preconditions, policy/ontology validation, postconditions, event append, and receipts.
 
 ### Partly Implemented
 

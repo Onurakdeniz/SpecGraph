@@ -457,6 +457,7 @@ impl MvpOntology {
         findings.extend(sg_data::validate_data_graph(graph));
         findings.extend(sg_data::validate_migration_runtime(graph));
         self.validate_spec_completeness(graph, &mut findings);
+        self.validate_orphan_structured_concepts(graph, &mut findings);
         findings
     }
 
@@ -499,6 +500,54 @@ impl MvpOntology {
     }
 
     fn validate_module_graph(&self, graph: &Graph, findings: &mut Vec<Finding>) {
+        for module in graph
+            .nodes
+            .values()
+            .filter(|node| node.node_type == "Module")
+        {
+            if let Some(state) = module
+                .attributes
+                .get("lifecycleState")
+                .and_then(Value::as_str)
+            {
+                if !MODULE_LIFECYCLE_STATES.contains(&state) {
+                    findings.push(
+                        finding(
+                            "module_graph.lifecycle_state_invalid",
+                            format!(
+                                "Module `{}` has invalid lifecycleState `{}`. Remediation: use Active, Deprecated, or Archived.",
+                                module.id, state
+                            ),
+                        )
+                        .with_remediation("Set lifecycleState to Active, Deprecated, or Archived.")
+                        .with_related_nodes([module.id.clone()]),
+                    );
+                }
+
+                if matches!(state, "Deprecated" | "Archived")
+                    && module
+                        .attributes
+                        .get("lifecycleReason")
+                        .and_then(Value::as_str)
+                        .is_none_or(|reason| reason.trim().is_empty())
+                {
+                    findings.push(
+                        finding(
+                            "module_graph.lifecycle_reason_required",
+                            format!(
+                                "Module `{}` lifecycleState `{}` requires lifecycleReason. Remediation: record the deprecation/archive reason through Operation Runtime.",
+                                module.id, state
+                            ),
+                        )
+                        .with_remediation(
+                            "Record the deprecation/archive reason through Operation Runtime.",
+                        )
+                        .with_related_nodes([module.id.clone()]),
+                    );
+                }
+            }
+        }
+
         for interface in graph
             .nodes
             .values()
@@ -777,6 +826,69 @@ impl MvpOntology {
             }
         }
     }
+
+    fn validate_orphan_structured_concepts(&self, graph: &Graph, findings: &mut Vec<Finding>) {
+        for node in graph.nodes.values() {
+            let Some(owner_edges) = spec_structured_concept_owner_edges(&node.node_type) else {
+                continue;
+            };
+            let incoming_owners: Vec<_> = graph
+                .edges
+                .values()
+                .filter(|edge| {
+                    edge.to == node.id
+                        && owner_edges.contains(&edge.edge_type.as_str())
+                        && graph
+                            .nodes
+                            .get(&edge.from)
+                            .is_some_and(|source| source.node_type == "Spec")
+                })
+                .collect();
+
+            if incoming_owners.is_empty() {
+                findings.push(
+                    finding(
+                        "spec.orphan_structured_concept",
+                        format!(
+                            "{} `{}` is not owned by any Spec. Remediation: link it from its owning Spec with one of: {}.",
+                            node.node_type,
+                            node.id,
+                            owner_edges.join(", ")
+                        ),
+                    )
+                    .with_remediation(format!(
+                        "Link `{}` from its owning Spec with one of: {}.",
+                        node.id,
+                        owner_edges.join(", ")
+                    ))
+                    .with_related_nodes([node.id.clone()]),
+                );
+            }
+        }
+    }
+}
+
+const MODULE_LIFECYCLE_STATES: &[&str] = &["Active", "Deprecated", "Archived"];
+
+const SPEC_STRUCTURED_CONCEPT_OWNERS: &[(&str, &[&str])] = &[
+    ("Requirement", &["HAS_REQUIREMENT"]),
+    ("AcceptanceCriterion", &["HAS_ACCEPTANCE_CRITERION"]),
+    ("Risk", &["HAS_RISK"]),
+    ("Mitigation", &["HAS_MITIGATION"]),
+    ("Behavior", &["HAS_BEHAVIOR"]),
+    ("UseCase", &["HAS_USE_CASE"]),
+    ("Endpoint", &["HAS_ENDPOINT"]),
+    ("DomainEntity", &["HAS_ENTITY"]),
+    ("DomainEvent", &["HAS_EVENT"]),
+    ("DataObject", &["HAS_DATA_OBJECT"]),
+];
+
+fn spec_structured_concept_owner_edges(node_type: &str) -> Option<&'static [&'static str]> {
+    SPEC_STRUCTURED_CONCEPT_OWNERS
+        .iter()
+        .find_map(|(concept_type, owner_edges)| {
+            (*concept_type == node_type).then_some(*owner_edges)
+        })
 }
 
 const SPEC_STATES: &[&str] = &[
@@ -1544,6 +1656,86 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "module_graph.interface_owner_required"));
+    }
+
+    #[test]
+    fn module_lifecycle_state_and_reason_are_validated() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "module".to_string(),
+            Node {
+                id: "module".to_string(),
+                stable_key: "module:identity".to_string(),
+                node_type: "Module".to_string(),
+                attributes: BTreeMap::from([("lifecycleState".to_string(), json!("Archived"))]),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_graph(&graph);
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "module_graph.lifecycle_reason_required"));
+    }
+
+    #[test]
+    fn orphan_structured_spec_concepts_are_validated() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "requirement".to_string(),
+            Node {
+                id: "requirement".to_string(),
+                stable_key: "requirement:auth-001:1".to_string(),
+                node_type: "Requirement".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_graph(&graph);
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "spec.orphan_structured_concept"));
+    }
+
+    #[test]
+    fn owned_structured_spec_concepts_are_not_orphans() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "spec".to_string(),
+            Node {
+                id: "spec".to_string(),
+                stable_key: "spec:AUTH-001".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+        graph.nodes.insert(
+            "requirement".to_string(),
+            Node {
+                id: "requirement".to_string(),
+                stable_key: "requirement:auth-001:1".to_string(),
+                node_type: "Requirement".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+        graph.edges.insert(
+            "has_requirement".to_string(),
+            Edge {
+                id: "has_requirement".to_string(),
+                stable_key: "edge:spec:HAS_REQUIREMENT:requirement".to_string(),
+                edge_type: "HAS_REQUIREMENT".to_string(),
+                from: "spec".to_string(),
+                to: "requirement".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        );
+
+        let findings = MvpOntology::new().validate_graph(&graph);
+
+        assert!(!findings
+            .iter()
+            .any(|finding| finding.code == "spec.orphan_structured_concept"));
     }
 
     #[test]

@@ -8,8 +8,9 @@ use sg_model::{
     OPERATION_REQUEST_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION,
 };
 use sg_module_graph::{
-    linked_modules, module_definition_from_graph, validate_module_baseline, ModuleBaselineReport,
-    ModuleDefinition, ModuleGraphProjection, ModuleSummary,
+    linked_modules, module_definition_from_graph, module_lifecycle_delta, validate_module_baseline,
+    ModuleBaselineReport, ModuleDefinition, ModuleGraphProjection, ModuleLifecycleState,
+    ModuleSummary,
 };
 use sg_ontology::{
     load_pack, plan_pack_migration, validate_pack, OntologyMigrationAction, OntologyPackManifest,
@@ -117,6 +118,8 @@ pub enum StoreError {
     ProjectNotFound,
     #[error("module `{0}` not found")]
     ModuleNotFound(String),
+    #[error("module lifecycle transition to {state} requires a reason")]
+    ModuleLifecycleReasonRequired { state: &'static str },
     #[error("module graph input must contain at least one module")]
     EmptyModuleGraph,
     #[error("operation semantic validation failed for {operation} with {count} error finding(s)")]
@@ -157,6 +160,15 @@ pub struct UpsertModuleGraphOptions {
 pub struct LinkModuleCapabilityOptions {
     pub module: String,
     pub capability: String,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModuleLifecycleOptions {
+    pub module: String,
+    pub state: ModuleLifecycleState,
+    pub reason: Option<String>,
     pub actor: String,
     pub graph_branch: String,
 }
@@ -468,6 +480,13 @@ impl SpecGraphStore {
         options: LinkModuleCapabilityOptions,
     ) -> Result<OperationReceipt> {
         link_module_capability(self.root(), options)
+    }
+
+    pub fn transition_module_lifecycle(
+        &self,
+        options: ModuleLifecycleOptions,
+    ) -> Result<OperationReceipt> {
+        transition_module_lifecycle(self.root(), options)
     }
 
     pub fn module_baseline(&self) -> Result<ModuleBaselineReport> {
@@ -863,6 +882,42 @@ pub fn link_module_capability(
             modules: vec![module],
             actor: options.actor,
             graph_branch: options.graph_branch,
+        },
+    )
+}
+
+pub fn transition_module_lifecycle(
+    root: &Path,
+    options: ModuleLifecycleOptions,
+) -> Result<OperationReceipt> {
+    let reason = options
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if options.state.requires_reason() && reason.is_none() {
+        return Err(StoreError::ModuleLifecycleReasonRequired {
+            state: options.state.as_str(),
+        });
+    }
+
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let delta = module_lifecycle_delta(&replay.graph, &options.module, options.state, reason)
+        .ok_or_else(|| StoreError::ModuleNotFound(options.module.clone()))?;
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "ModuleGraph.Lifecycle".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "module": options.module,
+                "state": options.state.as_str(),
+                "reason": reason,
+            }),
+            delta,
+            dry_run: false,
         },
     )
 }
@@ -5907,6 +5962,77 @@ acceptanceCriteria:
         assert!(report.modules[0]
             .capabilities
             .contains(&"password-reset".to_string()));
+    }
+
+    #[test]
+    fn module_lifecycle_transition_updates_module_through_runtime() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
+
+        let receipt = transition_module_lifecycle(
+            tmp.path(),
+            ModuleLifecycleOptions {
+                module: "Identity".to_string(),
+                state: ModuleLifecycleState::Deprecated,
+                reason: Some("Replaced by AuthCore".to_string()),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "ModuleGraph.Lifecycle");
+        let modules = list_modules(tmp.path()).unwrap();
+        assert_eq!(modules[0].lifecycle_state.as_deref(), Some("Deprecated"));
+        assert_eq!(
+            modules[0].lifecycle_reason.as_deref(),
+            Some("Replaced by AuthCore")
+        );
+    }
+
+    #[test]
+    fn module_lifecycle_deprecate_requires_reason() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
+
+        let error = transition_module_lifecycle(
+            tmp.path(),
+            ModuleLifecycleOptions {
+                module: "Identity".to_string(),
+                state: ModuleLifecycleState::Deprecated,
+                reason: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::ModuleLifecycleReasonRequired {
+                state: "Deprecated"
+            }
+        ));
     }
 
     #[test]

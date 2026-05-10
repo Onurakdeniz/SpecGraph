@@ -34,10 +34,10 @@ use sg_spec::{ModuleChange, ModuleChangeAction, PlannedObject, SpecProjection, T
 use sg_store::{
     ActionLifecycleOptions, AppendOperationOptions, BindBranchOptions, CreateWaiverOptions,
     GenerateActionGraphOptions, GrantRoleOptions, InitOptions, InterfaceVisibility,
-    LinkModuleCapabilityOptions, ModuleDefinition, ModuleInterface, ProjectProfileInput,
-    RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions,
-    ReplayReport, SpecGraphStore, TransitionSpecOptions, UpsertActorOptions,
-    UpsertModuleGraphOptions, UpsertProjectProfileOptions, WorkflowPlanOptions,
+    LinkModuleCapabilityOptions, ModuleDefinition, ModuleInterface, ModuleLifecycleOptions,
+    ModuleLifecycleState, ProjectProfileInput, RecordApprovalOptions, RecordCommitOptions,
+    RecordPolicyReportOptions, ReplayOptions, ReplayReport, SpecGraphStore, TransitionSpecOptions,
+    UpsertActorOptions, UpsertModuleGraphOptions, UpsertProjectProfileOptions, WorkflowPlanOptions,
 };
 use sg_testgraph::{
     validate_required_tests_pass, validate_trace_links, LinksManifest, TestCaseResult, TestLink,
@@ -240,6 +240,12 @@ enum ModuleCommand {
     Validate(ModuleValidateArgs),
     /// Add a capability to an existing module.
     LinkCapability(ModuleLinkCapabilityArgs),
+    /// Mark a trusted module active.
+    Activate(ModuleLifecycleArgs),
+    /// Mark a trusted module deprecated with a reason.
+    Deprecate(ModuleLifecycleArgs),
+    /// Mark a trusted module archived with a reason.
+    Archive(ModuleLifecycleArgs),
 }
 
 #[derive(Debug, Args)]
@@ -289,6 +295,18 @@ struct ModuleLinkCapabilityArgs {
     module: String,
     #[arg(long)]
     capability: String,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ModuleLifecycleArgs {
+    #[arg(long)]
+    module: String,
+    #[arg(long)]
+    reason: Option<String>,
     #[arg(long, default_value = "local:user")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -1423,11 +1441,12 @@ fn handle_module(
                 } else {
                     for module in modules {
                         println!(
-                            "module: {} purpose={} layer={} package={} capabilities={}",
+                            "module: {} purpose={} layer={} package={} state={} capabilities={}",
                             module.name,
                             module.purpose.as_deref().unwrap_or(""),
                             module.layer.as_deref().unwrap_or(""),
                             module.package.as_deref().unwrap_or(""),
+                            module.lifecycle_state.as_deref().unwrap_or("Active"),
                             module.capabilities.join(",")
                         );
                     }
@@ -1476,6 +1495,48 @@ fn handle_module(
                 println!("stateHash: {}", receipt.post_state_hash);
             }
         }
+        ModuleCommand::Activate(args) => {
+            handle_module_lifecycle(store, args, ModuleLifecycleState::Active, output)?;
+        }
+        ModuleCommand::Deprecate(args) => {
+            handle_module_lifecycle(store, args, ModuleLifecycleState::Deprecated, output)?;
+        }
+        ModuleCommand::Archive(args) => {
+            handle_module_lifecycle(store, args, ModuleLifecycleState::Archived, output)?;
+        }
+    }
+    Ok(())
+}
+
+fn handle_module_lifecycle(
+    store: &SpecGraphStore,
+    args: ModuleLifecycleArgs,
+    state: ModuleLifecycleState,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
+    let module = args.module.clone();
+    let receipt = store.transition_module_lifecycle(ModuleLifecycleOptions {
+        module: args.module,
+        state,
+        reason: args.reason,
+        actor: args.actor,
+        graph_branch: args.graph_branch,
+    })?;
+    if output.json() {
+        print_json(&json!({
+            "schemaVersion": "specgraph.cli/v1",
+            "command": format!("sg module {}", state.as_str().to_ascii_lowercase()),
+            "status": "accepted",
+            "module": module,
+            "state": state.as_str(),
+            "receipt": receipt,
+        }))?;
+    } else if !output.quiet {
+        println!("moduleLifecycleChanged: true");
+        println!("module: {module}");
+        println!("state: {}", state.as_str());
+        println!("operationId: {}", receipt.operation_id);
+        println!("stateHash: {}", receipt.post_state_hash);
     }
     Ok(())
 }

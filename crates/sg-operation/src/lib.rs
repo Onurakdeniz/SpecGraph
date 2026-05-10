@@ -106,6 +106,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "ModuleGraph.Lifecycle",
+            category: "module",
+            description: "Transition a trusted Module through Active, Deprecated, and Archived lifecycle states.",
+            required_input_fields: &["module", "state"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["Module"],
+            allowed_create_edge_types: &[],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "ArchitectureGraph.Upsert",
             category: "architecture",
             description: "Create or update architecture layers, ports, adapters, dependency boundaries, and constraints.",

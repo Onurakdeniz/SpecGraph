@@ -2,7 +2,7 @@
 
 **System area:** ModuleGraphs  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** F.5 workflow planner plus F.2 ModuleGraph baseline implementation.
+**Status basis:** Production-readiness closure: ModuleGraph baseline, workflow planner, and lifecycle command implementation.
 
 ## Purpose
 
@@ -23,20 +23,20 @@ Represent bounded capability areas such as modules, frontend areas, CLI command 
 - `Spec.Create` and `Spec.Import` are blocked before event append when the trusted ModuleGraph baseline is incomplete.
 - Spec intent now distinguishes existing touched modules from `moduleChanges` new-module declarations; unknown touched modules and incomplete new-module declarations fail before append.
 - `sg workflow plan` detects module directory candidates as untrusted observations, asks required module purpose/layer/package/capability questions, and emits ModuleGraph.Upsert dry-run receipts before acceptance.
+- `sg module activate`, `sg module deprecate`, and `sg module archive` transition trusted modules through `ModuleGraph.Lifecycle` with Operation Runtime receipts. Deprecate/archive require `lifecycleReason`.
 
 ### Partly Implemented
 
 - Basic module references exist
 - Layers, packages, capabilities, and public/private interface facts exist in `sg-module-graph` and can be routed through Operation Runtime.
-- Repository inference exists as untrusted workflow-planner observations; richer accepted lifecycle commands remain planned.
-- Spec module intent gates exist; richer module consistency and lifecycle rules remain planned.
+- Repository inference exists as untrusted workflow-planner observations; accepting observations still requires runtime-backed ModuleGraph operations.
+- Spec module intent gates and basic module lifecycle validation exist; richer module consistency and boundary rules remain planned.
 
 ### Not Implemented / Remaining
 
-- Richer module lifecycle commands
 - Layer/package/capability/interface ontology is partially implemented; richer boundary rules remain
 - Architecture-pack validators
-- Standalone module detection and richer accepted module lifecycle flows
+- Standalone module detection and richer accepted module inference flows
 
 ## Implementation Parts
 
@@ -46,7 +46,7 @@ Module, Layer, Capability, PublicInterface, DependencyBoundary, Package, Crate
 
 ### 2. Commands / APIs
 
-sg module import/declare/list/validate/link-capability; spec create/import touches existing modules.
+sg module import/declare/list/validate/link-capability/activate/deprecate/archive; spec create/import touches existing modules.
 
 ### 3. Validation and Policy Gates
 
@@ -55,7 +55,6 @@ Module baseline readiness, boundary, dependency, ownership, cross-module policy,
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: richer Module lifecycle commands beyond import/declare/list/validate/link-capability.
 - Implement or finish: richer layer/boundary ontology and lifecycle commands.
 - Implement or finish: Architecture-pack validators.
 - Implement or finish: Existing repo module inference.

@@ -2,7 +2,7 @@
 
 **System area:** SpecGraph  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** F.4 semantic gate implementation plus current code/docs audit.
+**Status basis:** Production-readiness closure: semantic gates plus orphan structured concept validation.
 
 ## Purpose
 
@@ -18,6 +18,7 @@ Represent requested changes as typed subgraphs including requirements, ACs, beha
 - `Spec.Create` / `Spec.Import` carry the full projection in Operation Runtime input so semantic gates can inspect spec intent before append.
 - Unknown touched modules, unknown planned-object owner modules, and incomplete new module declarations are rejected before event append.
 - `Spec.BindBranch` now runs runtime semantic gates for ProjectGraph/ModuleGraph readiness, branch naming, spec completeness, duplicate binding, and base snapshot linkage.
+- Ontology validation reports `spec.orphan_structured_concept` when Requirement, AcceptanceCriterion, Risk, Mitigation, Behavior, UseCase, Endpoint, DomainEntity, DomainEvent, or DataObject facts are not owned by a Spec edge.
 
 ### Partly Implemented
 
@@ -27,7 +28,6 @@ Represent requested changes as typed subgraphs including requirements, ACs, beha
 
 ### Not Implemented / Remaining
 
-- Orphan concept detection
 - Operation plan generation from intended graph delta
 - Risk/security validators
 
@@ -48,7 +48,6 @@ Requirement/AC required, orphan structured concepts, risk mitigation/tests, evid
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Orphan concept detection.
 - Implement or finish: Operation plan generation from intended graph delta.
 - Implement or finish: Risk/security validators.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
