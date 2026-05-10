@@ -11,7 +11,7 @@ lets the CLI and SDK exercise the same handlers in-process.
   Operation Runtime, policy gate, ontology validation, postconditions, event
   append, snapshot write, and receipt write.
 - `Spec.Create` and `Spec.Import` requests receive the same ProjectGraph and
-  ModuleGraph baseline and spec-intent semantic gates as the CLI/SDK before event append.
+  ModuleGraph baseline, spec-intent, branch/action/commit/validation/proposal semantic gates as the CLI/SDK before event append.
 - Server callers submit graph deltas as operation requests; they never write
   `.specgraph/events`, `.specgraph/snapshots`, or receipt files directly.
 - Branch and snapshot query context is explicit and bounded by query limits.

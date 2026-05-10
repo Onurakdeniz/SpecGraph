@@ -34,6 +34,9 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+const VALIDATOR_OPERATION_SEMANTIC_PRECONDITIONS: &str =
+    "validator.operation_semantic_preconditions";
+
 #[derive(Debug, Error)]
 pub enum StoreError {
     #[error("I/O error at {path}: {source}")]
@@ -1399,6 +1402,7 @@ pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<Op
             graph_branch: options.graph_branch,
             input: json!({
                 "commit": options.input.commit,
+                "message": options.input.message,
                 "changedFiles": options.input.changed_files,
             }),
             dry_run: false,
@@ -2433,18 +2437,603 @@ fn validate_operation_semantic_preconditions(
     request: &OperationRequest,
     delta: &GraphDelta,
 ) -> Vec<Finding> {
-    if matches!(request.operation.as_str(), "Spec.Create" | "Spec.Import") {
-        let project_findings = validate_project_baseline(graph).findings;
-        if !project_findings.is_empty() {
-            return project_findings;
+    match request.operation.as_str() {
+        "Spec.Create" | "Spec.Import" => {
+            let project_findings = validate_project_baseline(graph).findings;
+            if !project_findings.is_empty() {
+                return project_findings;
+            }
+            let module_findings = validate_module_baseline(graph).findings;
+            if !module_findings.is_empty() {
+                return module_findings;
+            }
+            validate_spec_authoring_intent(graph, &request.input, delta)
         }
-        let module_findings = validate_module_baseline(graph).findings;
-        if !module_findings.is_empty() {
-            return module_findings;
+        "Spec.BindBranch" => validate_bind_branch_semantic_preconditions(graph, request, delta),
+        "ActionGraph.Generate" => {
+            validate_action_graph_semantic_preconditions(graph, request, delta)
         }
-        return validate_spec_authoring_intent(graph, &request.input, delta);
+        "GitCommit.Record" => validate_git_commit_semantic_preconditions(graph, request, delta),
+        "Validation.Record" => {
+            validate_validation_record_semantic_preconditions(graph, request, delta)
+        }
+        "Proposal.Accept" => validate_proposal_accept_semantic_preconditions(graph, request, delta),
+        _ => Vec::new(),
     }
-    Vec::new()
+}
+
+fn validate_bind_branch_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    let spec = required_input_string(
+        &request.input,
+        "spec",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let branch = required_input_string(
+        &request.input,
+        "branch",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let (Some(spec), Some(branch)) = (spec, branch) else {
+        return findings;
+    };
+
+    if !branch_name_matches_spec(&spec, &branch) {
+        findings.push(semantic_finding(
+            "semantic.bind_branch.invalid_branch_name",
+            format!(
+                "Spec.BindBranch branch `{branch}` must start with `spec/{}`. Remediation: use `sg spec bind-branch --spec {spec} --branch spec/{spec}-<slug>`.",
+                spec.to_ascii_lowercase()
+            ),
+        ));
+    }
+
+    let Some(spec_node) = find_spec_node(graph, &spec) else {
+        findings.push(semantic_finding(
+            "semantic.bind_branch.unknown_spec",
+            format!(
+                "Spec.BindBranch references unknown Spec `{spec}`. Remediation: create/import and validate the spec before binding a branch."
+            ),
+        ));
+        return findings;
+    };
+
+    findings.extend(validate_spec_ready_for_planning(
+        graph,
+        spec_node,
+        "Spec.BindBranch",
+    ));
+
+    if graph
+        .edges
+        .values()
+        .any(|edge| edge.from == spec_node.id && edge.edge_type == "BOUND_TO_BRANCH")
+    {
+        findings.push(semantic_finding(
+            "semantic.bind_branch.already_bound",
+            format!(
+                "Spec `{spec}` is already bound to a branch. Remediation: use the existing branch or rebase/merge through graph branch operations."
+            ),
+        ));
+    }
+
+    let binds_spec = delta
+        .create_edges
+        .iter()
+        .any(|edge| edge.from == spec_node.id && edge.edge_type == "BOUND_TO_BRANCH");
+    if !binds_spec {
+        findings.push(semantic_finding(
+            "semantic.bind_branch.missing_spec_branch_edge",
+            "Spec.BindBranch must create a BOUND_TO_BRANCH edge from the target Spec.",
+        ));
+    }
+
+    let has_snapshot_node = delta
+        .create_nodes
+        .iter()
+        .any(|node| node.node_type == "GraphSnapshot");
+    let has_snapshot_edge = delta
+        .create_edges
+        .iter()
+        .any(|edge| edge.edge_type == "STARTS_FROM_SNAPSHOT");
+    if !has_snapshot_node || !has_snapshot_edge {
+        findings.push(semantic_finding(
+            "semantic.bind_branch.missing_base_snapshot",
+            "Spec.BindBranch must create a GraphSnapshot and STARTS_FROM_SNAPSHOT edge for the current graph state.",
+        ));
+    }
+
+    findings
+}
+
+fn validate_action_graph_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    let Some(spec) = required_input_string(
+        &request.input,
+        "spec",
+        &mut findings,
+        request.operation.as_str(),
+    ) else {
+        return findings;
+    };
+    let Some(spec_node) = find_spec_node(graph, &spec) else {
+        findings.push(semantic_finding(
+            "semantic.action_graph.unknown_spec",
+            format!(
+                "ActionGraph.Generate references unknown Spec `{spec}`. Remediation: create/import the spec before generating actions."
+            ),
+        ));
+        return findings;
+    };
+
+    findings.extend(validate_spec_ready_for_planning(
+        graph,
+        spec_node,
+        "ActionGraph.Generate",
+    ));
+
+    if !graph
+        .edges
+        .values()
+        .any(|edge| edge.from == spec_node.id && edge.edge_type == "BOUND_TO_BRANCH")
+    {
+        findings.push(semantic_finding(
+            "semantic.action_graph.branch_required",
+            format!(
+                "ActionGraph.Generate requires Spec `{spec}` to be branch-bound first. Remediation: run `sg spec bind-branch --spec {spec}`."
+            ),
+        ));
+    }
+
+    if graph
+        .edges
+        .values()
+        .any(|edge| edge.from == spec_node.id && edge.edge_type == "HAS_ACTION_GRAPH")
+    {
+        findings.push(semantic_finding(
+            "semantic.action_graph.already_exists",
+            format!("Spec `{spec}` already has an ActionGraph."),
+        ));
+    }
+
+    let has_action_graph_edge = delta
+        .create_edges
+        .iter()
+        .any(|edge| edge.from == spec_node.id && edge.edge_type == "HAS_ACTION_GRAPH");
+    let has_action_graph_node = delta
+        .create_nodes
+        .iter()
+        .any(|node| node.node_type == "ActionGraph");
+    let has_action_group = delta
+        .create_nodes
+        .iter()
+        .any(|node| node.node_type == "ActionGroup");
+    let has_commit_plan = delta
+        .create_nodes
+        .iter()
+        .any(|node| node.node_type == "CommitPlan");
+    if !(has_action_graph_edge && has_action_graph_node && has_action_group && has_commit_plan) {
+        findings.push(semantic_finding(
+            "semantic.action_graph.incomplete_delta",
+            "ActionGraph.Generate must create an ActionGraph, ActionGroup(s), CommitPlan(s), and HAS_ACTION_GRAPH edge from the Spec.",
+        ));
+    }
+
+    findings
+}
+
+fn validate_git_commit_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    _delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let commit = required_input_string(
+        &request.input,
+        "commit",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let message = required_input_string(
+        &request.input,
+        "message",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let changed_files = input_string_array(&request.input, "changedFiles");
+    let (Some(commit), Some(message)) = (commit, message) else {
+        return findings;
+    };
+
+    let input = CommitValidationInput {
+        commit: commit.clone(),
+        message,
+        changed_files,
+    };
+    findings.extend(validate_commit_binding(graph, &input));
+
+    let trailers = parse_commit_trailers(&input.message);
+    if let Some(spec) = trailers.spec.as_deref() {
+        if let Some(spec_node) = find_spec_node(graph, spec) {
+            let branch_bound = graph
+                .edges
+                .values()
+                .any(|edge| edge.from == spec_node.id && edge.edge_type == "BOUND_TO_BRANCH");
+            if !branch_bound {
+                findings.push(semantic_finding(
+                    "semantic.git_commit.branch_required",
+                    format!(
+                        "GitCommit.Record requires Spec `{spec}` to be bound to an active branch before commits are recorded."
+                    ),
+                ));
+            }
+        }
+    }
+
+    findings
+}
+
+fn validate_validation_record_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let run_id = required_input_string(
+        &request.input,
+        "runId",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let status = required_input_string(
+        &request.input,
+        "status",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let checks = input_string_array(&request.input, "checks");
+    if checks.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.validation_record.checks_required",
+            "Validation.Record requires at least one check name.",
+        ));
+    }
+    if checks.iter().any(|check| check.trim().is_empty()) {
+        findings.push(semantic_finding(
+            "semantic.validation_record.empty_check",
+            "Validation.Record checks must be non-empty strings.",
+        ));
+    }
+
+    let state_hash_input = required_input_string(
+        &request.input,
+        "stateHash",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let current_state_hash = state_hash(graph, CORE_ONTOLOGY_VERSION);
+    if let Some(state_hash_input) = state_hash_input.as_deref() {
+        if state_hash_input != current_state_hash {
+            findings.push(semantic_finding(
+                "semantic.validation_record.state_hash_mismatch",
+                format!(
+                    "Validation.Record stateHash `{state_hash_input}` does not match current replay hash `{current_state_hash}`. Remediation: rerun validation against the current event log."
+                ),
+            ));
+        }
+    }
+
+    if let Some(status) = status.as_deref() {
+        if !matches!(status, "Passed" | "Failed" | "Warning") {
+            findings.push(semantic_finding(
+                "semantic.validation_record.invalid_status",
+                format!(
+                    "Validation.Record status `{status}` is invalid. Remediation: use Passed, Failed, or Warning."
+                ),
+            ));
+        }
+        if status == "Passed" && !checks.iter().any(|check| check == "replay") {
+            findings.push(semantic_finding(
+                "semantic.validation_record.replay_required",
+                "Passed Validation.Record evidence must include the `replay` check.",
+            ));
+        }
+        if status == "Passed"
+            && delta.create_nodes.iter().any(|node| {
+                node.node_type == "Finding"
+                    && node
+                        .attributes
+                        .get("severity")
+                        .and_then(Value::as_str)
+                        .is_some_and(|severity| severity == "Error")
+            })
+        {
+            findings.push(semantic_finding(
+                "semantic.validation_record.passed_with_errors",
+                "Validation.Record cannot be Passed while creating Error findings.",
+            ));
+        }
+    }
+
+    if let Some(run_id) = run_id.as_deref() {
+        if validation_run_node(graph, run_id).is_some() {
+            findings.push(semantic_finding(
+                "semantic.validation_record.duplicate_run",
+                format!("Validation run `{run_id}` already exists."),
+            ));
+        }
+        let has_run_node = delta.create_nodes.iter().any(|node| {
+            node.node_type == "ValidationRun"
+                && node
+                    .attributes
+                    .get("runId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == run_id)
+        });
+        if !has_run_node {
+            findings.push(semantic_finding(
+                "semantic.validation_record.missing_run_node",
+                "Validation.Record must create a ValidationRun node for input runId.",
+            ));
+        }
+    }
+
+    if let Some(project) = find_project_node(graph) {
+        let has_project_edge = delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.from == project.id && edge.edge_type == "VALIDATED_BY");
+        if !has_project_edge {
+            findings.push(semantic_finding(
+                "semantic.validation_record.missing_project_link",
+                "Validation.Record must link the Project to the ValidationRun with VALIDATED_BY.",
+            ));
+        }
+    }
+
+    findings
+}
+
+fn validate_proposal_accept_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let proposal_id = required_input_string(
+        &request.input,
+        "proposal",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let validation_run_id = required_input_string(
+        &request.input,
+        "validationRunId",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let exact_diff_hash = required_input_string(
+        &request.input,
+        "exactDiffHash",
+        &mut findings,
+        request.operation.as_str(),
+    );
+    let (Some(proposal_id), Some(validation_run_id), Some(exact_diff_hash)) =
+        (proposal_id, validation_run_id, exact_diff_hash)
+    else {
+        return findings;
+    };
+
+    let Some(proposal) = proposal_node(graph, &proposal_id) else {
+        findings.push(semantic_finding(
+            "semantic.proposal_accept.unknown_proposal",
+            format!("Proposal.Accept references unknown Proposal `{proposal_id}`."),
+        ));
+        return findings;
+    };
+
+    let trust_state = proposal
+        .attributes
+        .get("trustState")
+        .and_then(Value::as_str)
+        .unwrap_or("Proposed");
+    if trust_state != "Validated" {
+        findings.push(semantic_finding(
+            "semantic.proposal_accept.invalid_trust_state",
+            format!(
+                "Proposal.Accept requires Proposal `{proposal_id}` to be Validated; found `{trust_state}`."
+            ),
+        ));
+    }
+
+    let Some(validation_run) = validation_run_node(graph, &validation_run_id) else {
+        findings.push(semantic_finding(
+            "semantic.proposal_accept.validation_run_missing",
+            format!("Proposal.Accept references missing ValidationRun `{validation_run_id}`."),
+        ));
+        return findings;
+    };
+    if !node_attr_eq(validation_run, "status", "Passed") {
+        findings.push(semantic_finding(
+            "semantic.proposal_accept.validation_not_passed",
+            format!(
+                "Proposal.Accept requires ValidationRun `{validation_run_id}` to have status Passed."
+            ),
+        ));
+    }
+
+    if !proposal_has_passed_sandbox(graph, &proposal.id, &exact_diff_hash) {
+        findings.push(semantic_finding(
+            "semantic.proposal_accept.sandbox_evidence_missing",
+            format!(
+                "Proposal.Accept requires a passed PatchSandboxRun for Proposal `{proposal_id}` with exactDiffHash `{exact_diff_hash}`."
+            ),
+        ));
+    }
+
+    let updates_to_accepted = delta.update_nodes.iter().any(|node| {
+        node.id == proposal.id
+            && node.node_type == "Proposal"
+            && node_attr_eq(node, "trustState", "Accepted")
+            && node_attr_eq(node, "acceptedExactDiffHash", &exact_diff_hash)
+            && node_attr_eq(node, "acceptedValidationRunId", &validation_run_id)
+    });
+    if !updates_to_accepted {
+        findings.push(semantic_finding(
+            "semantic.proposal_accept.missing_accepted_update",
+            "Proposal.Accept must update the Proposal to Accepted with exact diff hash and validation-run id.",
+        ));
+    }
+
+    let has_acceptance = delta.create_nodes.iter().any(|node| {
+        node.node_type == "ProposalAcceptance"
+            && node_attr_eq(node, "proposalId", &proposal_id)
+            && node_attr_eq(node, "validationRunId", &validation_run_id)
+            && node_attr_eq(node, "exactDiffHash", &exact_diff_hash)
+    });
+    if !has_acceptance {
+        findings.push(semantic_finding(
+            "semantic.proposal_accept.missing_acceptance_node",
+            "Proposal.Accept must create a ProposalAcceptance evidence node.",
+        ));
+    }
+
+    findings
+}
+
+fn validate_project_and_module_ready(graph: &Graph) -> Vec<Finding> {
+    let mut findings = validate_project_baseline(graph).findings;
+    if findings.is_empty() {
+        findings.extend(validate_module_baseline(graph).findings);
+    }
+    findings
+}
+
+fn validate_spec_ready_for_planning(
+    graph: &Graph,
+    spec_node: &Node,
+    operation: &str,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    if !graph
+        .edges
+        .values()
+        .any(|edge| edge.from == spec_node.id && edge.edge_type == "HAS_REQUIREMENT")
+    {
+        findings.push(semantic_finding(
+            "semantic.spec.requirement_required",
+            format!("{operation} requires the Spec to have at least one Requirement."),
+        ));
+    }
+    if !graph
+        .edges
+        .values()
+        .any(|edge| edge.from == spec_node.id && edge.edge_type == "HAS_ACCEPTANCE_CRITERION")
+    {
+        findings.push(semantic_finding(
+            "semantic.spec.acceptance_criterion_required",
+            format!("{operation} requires the Spec to have at least one AcceptanceCriterion."),
+        ));
+    }
+    findings
+}
+
+fn required_input_string(
+    input: &Value,
+    key: &str,
+    findings: &mut Vec<Finding>,
+    operation: &str,
+) -> Option<String> {
+    let value = input
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    if value.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.input.required",
+            format!("{operation} requires non-empty input field `{key}`."),
+        ));
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn input_string_array(input: &Value, key: &str) -> Vec<String> {
+    input
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn branch_name_matches_spec(spec: &str, branch: &str) -> bool {
+    let expected_prefix = format!("spec/{spec}").to_ascii_lowercase();
+    branch.to_ascii_lowercase().starts_with(&expected_prefix)
+}
+
+fn validation_run_node<'a>(graph: &'a Graph, run_id: &str) -> Option<&'a Node> {
+    let expected_id = node_id("validation_run", run_id);
+    graph.nodes.values().find(|node| {
+        node.node_type == "ValidationRun"
+            && (node.id == expected_id || node_attr_eq(node, "runId", run_id))
+    })
+}
+
+fn proposal_node<'a>(graph: &'a Graph, proposal_id: &str) -> Option<&'a Node> {
+    graph.nodes.values().find(|node| {
+        node.node_type == "Proposal"
+            && (node.id == node_id("proposal", proposal_id)
+                || node_attr_eq(node, "id", proposal_id))
+    })
+}
+
+fn proposal_has_passed_sandbox(
+    graph: &Graph,
+    proposal_node_id: &str,
+    exact_diff_hash: &str,
+) -> bool {
+    graph
+        .edges
+        .values()
+        .filter(|edge| {
+            edge.from == proposal_node_id && edge.edge_type == "PROPOSAL_HAS_SANDBOX_RUN"
+        })
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .any(|node| {
+            node.node_type == "PatchSandboxRun"
+                && node_attr_eq(node, "exactDiffHash", exact_diff_hash)
+                && node_attr_eq(node, "status", "Passed")
+        })
+}
+
+fn node_attr_eq(node: &Node, key: &str, expected: &str) -> bool {
+    node.attributes
+        .get(key)
+        .and_then(Value::as_str)
+        .is_some_and(|value| value == expected)
+}
+
+fn semantic_finding(code: impl Into<String>, message: impl Into<String>) -> Finding {
+    Finding::new(code, FindingSeverity::Error, message).with_validator(
+        VALIDATOR_OPERATION_SEMANTIC_PRECONDITIONS,
+        CORE_VALIDATOR_VERSION,
+    )
 }
 
 fn find_project_node(graph: &Graph) -> Option<&Node> {
@@ -3901,6 +4490,363 @@ acceptanceCriteria:
             .created_edges
             .iter()
             .any(|edge_id| edge_id.contains("touches_module")));
+    }
+
+    #[test]
+    fn append_operation_rejects_invalid_branch_binding_inside_runtime() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let spec_node = find_spec_node(&replay.graph, "AUTH-001").unwrap();
+        let branch = "feature/password-reset";
+        let branch_id = node_id("git_branch", branch);
+        let snapshot_id = node_id("graph_snapshot", &replay.state_hash);
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.BindBranch".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "spec": "AUTH-001",
+                    "branch": branch,
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![
+                        Node {
+                            id: branch_id.clone(),
+                            stable_key: format!("git-branch:{branch}"),
+                            node_type: "GitBranch".to_string(),
+                            attributes: BTreeMap::from([
+                                ("name".to_string(), json!(branch)),
+                                ("spec".to_string(), json!("AUTH-001")),
+                            ]),
+                        },
+                        Node {
+                            id: snapshot_id.clone(),
+                            stable_key: format!("graph-snapshot:{}", replay.state_hash),
+                            node_type: "GraphSnapshot".to_string(),
+                            attributes: BTreeMap::from([
+                                ("snapshotId".to_string(), json!(snapshot_id)),
+                                ("stateHash".to_string(), json!(replay.state_hash)),
+                            ]),
+                        },
+                    ],
+                    create_edges: vec![
+                        edge(&spec_node.id, "BOUND_TO_BRANCH", &branch_id),
+                        edge(&branch_id, "STARTS_FROM_SNAPSHOT", &snapshot_id),
+                    ],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "Spec.BindBranch"
+        ));
+    }
+
+    #[test]
+    fn append_operation_rejects_action_graph_without_branch_binding_inside_runtime() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let spec_node = find_spec_node(&replay.graph, "AUTH-001").unwrap();
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "ActionGraph.Generate".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
+                delta: action_graph_delta("AUTH-001", &spec_node.id),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "ActionGraph.Generate"
+        ));
+    }
+
+    #[test]
+    fn append_operation_rejects_git_commit_without_trailers_inside_runtime() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let commit = "abc123";
+        let commit_id = node_id("git_commit", commit);
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "GitCommit.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "commit": commit,
+                    "message": "missing trailers",
+                    "changedFiles": [],
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: commit_id,
+                        stable_key: format!("git-commit:{commit}"),
+                        node_type: "GitCommit".to_string(),
+                        attributes: BTreeMap::from([("sha".to_string(), json!(commit))]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 3,
+            } if operation == "GitCommit.Record"
+        ));
+    }
+
+    #[test]
+    fn append_operation_rejects_stale_validation_record_inside_runtime() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let project = find_project_node(&replay.graph).unwrap();
+        let run_id = "validation-stale";
+        let run_node_id = node_id("validation_run", run_id);
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Validation.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "runId": run_id,
+                    "status": "Passed",
+                    "checks": ["replay"],
+                    "stateHash": "stale-state-hash",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: run_node_id.clone(),
+                        stable_key: format!("validation-run:{run_id}"),
+                        node_type: "ValidationRun".to_string(),
+                        attributes: BTreeMap::from([
+                            ("runId".to_string(), json!(run_id)),
+                            ("status".to_string(), json!("Passed")),
+                            ("checks".to_string(), json!(["replay"])),
+                            ("stateHash".to_string(), json!("stale-state-hash")),
+                        ]),
+                    }],
+                    create_edges: vec![edge(&project.id, "VALIDATED_BY", &run_node_id)],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "Validation.Record"
+        ));
+    }
+
+    #[test]
+    fn append_operation_rejects_proposal_accept_without_sandbox_inside_runtime() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let proposal_id = "PROP-001";
+        let proposal_node_id = node_id("proposal", proposal_id);
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Proposal.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"proposal": proposal_id}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: proposal_node_id.clone(),
+                        stable_key: format!("proposal:{proposal_id}"),
+                        node_type: "Proposal".to_string(),
+                        attributes: BTreeMap::from([
+                            ("id".to_string(), json!(proposal_id)),
+                            ("title".to_string(), json!("Validated proposal")),
+                            ("trustState".to_string(), json!("Proposed")),
+                        ]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Proposal.Transition".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "proposal": proposal_id,
+                    "state": "Validated",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    update_nodes: vec![Node {
+                        id: proposal_node_id.clone(),
+                        stable_key: format!("proposal:{proposal_id}"),
+                        node_type: "Proposal".to_string(),
+                        attributes: BTreeMap::from([
+                            ("id".to_string(), json!(proposal_id)),
+                            ("title".to_string(), json!("Validated proposal")),
+                            ("trustState".to_string(), json!("Validated")),
+                        ]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let project = find_project_node(&replay.graph).unwrap();
+        let run_id = "proposal-validation";
+        let run_node_id = node_id("validation_run", run_id);
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Validation.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "runId": run_id,
+                    "status": "Passed",
+                    "checks": ["replay"],
+                    "stateHash": replay.state_hash,
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: run_node_id.clone(),
+                        stable_key: format!("validation-run:{run_id}"),
+                        node_type: "ValidationRun".to_string(),
+                        attributes: BTreeMap::from([
+                            ("runId".to_string(), json!(run_id)),
+                            ("status".to_string(), json!("Passed")),
+                            ("checks".to_string(), json!(["replay"])),
+                            ("stateHash".to_string(), json!(replay.state_hash)),
+                        ]),
+                    }],
+                    create_edges: vec![edge(&project.id, "VALIDATED_BY", &run_node_id)],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+
+        let accepted = Node {
+            id: proposal_node_id.clone(),
+            stable_key: format!("proposal:{proposal_id}"),
+            node_type: "Proposal".to_string(),
+            attributes: BTreeMap::from([
+                ("id".to_string(), json!(proposal_id)),
+                ("title".to_string(), json!("Validated proposal")),
+                ("trustState".to_string(), json!("Accepted")),
+                ("acceptedValidationRunId".to_string(), json!(run_id)),
+                (
+                    "acceptedExactDiffHash".to_string(),
+                    json!("sha256:missing-sandbox"),
+                ),
+            ]),
+        };
+        let acceptance_id = node_id("proposal_acceptance", &format!("{proposal_id}/{run_id}"));
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Proposal.Accept".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "proposal": proposal_id,
+                    "validationRunId": run_id,
+                    "exactDiffHash": "sha256:missing-sandbox",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: acceptance_id.clone(),
+                        stable_key: format!("proposal-acceptance:{proposal_id}/{run_id}"),
+                        node_type: "ProposalAcceptance".to_string(),
+                        attributes: BTreeMap::from([
+                            ("proposalId".to_string(), json!(proposal_id)),
+                            ("validationRunId".to_string(), json!(run_id)),
+                            ("exactDiffHash".to_string(), json!("sha256:missing-sandbox")),
+                        ]),
+                    }],
+                    update_nodes: vec![accepted],
+                    create_edges: vec![
+                        edge(&proposal_node_id, "HAS_PROPOSAL_ACCEPTANCE", &acceptance_id),
+                        edge(&acceptance_id, "ACCEPTED_WITH_VALIDATION", &run_node_id),
+                    ],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "Proposal.Accept"
+        ));
     }
 
     #[test]
@@ -5458,6 +6404,17 @@ acceptanceCriteria:
         )
         .unwrap();
 
+        bind_spec_branch(
+            tmp.path(),
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "spec/auth-001-password-reset".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
         generate_action_graph(
             tmp.path(),
             GenerateActionGraphOptions {
@@ -5511,6 +6468,46 @@ acceptanceCriteria:
             .map(|entry| entry.unwrap().path())
             .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
             .unwrap()
+    }
+
+    fn add_valid_spec(root: &Path) {
+        init_project(
+            root,
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(root);
+        add_module_baseline(root);
+        let projection = SpecProjection {
+            spec: "AUTH-001".to_string(),
+            title: "Password reset".to_string(),
+            module: Some("Identity".to_string()),
+            requirements: vec![sg_spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "User can request reset".to_string(),
+            }],
+            acceptance_criteria: vec![sg_spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Generic response".to_string(),
+            }],
+            ..SpecProjection::default()
+        };
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: projection.operation_input(),
+                dry_run: false,
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap();
     }
 
     fn add_project_profile(root: &Path) {

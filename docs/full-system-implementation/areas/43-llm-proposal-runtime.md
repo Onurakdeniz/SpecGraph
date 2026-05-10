@@ -2,7 +2,7 @@
 
 **System area:** LLM Proposal Runtime
 **Implementation status:** 🟡 Partly implemented
-**Status basis:** code audit after Phase 6.3 implementation of typed untrusted proposal schemas and CLI validation.
+**Status basis:** F.4 Proposal.Accept runtime semantic gate plus typed untrusted proposal schemas.
 
 ## Purpose
 
@@ -14,6 +14,7 @@ Allow LLMs to propose graph deltas, specs, actions, patches, tests, reviews, ont
 
 - Proposal create/transition and trust states exist.
 - `sg proposal accept` records accepted proposal state only with validation-run id and exact diff hash evidence through `Proposal.Accept`.
+- `Proposal.Accept` now rechecks proposal trust state, passed validation run, exact diff hash, passed patch sandbox evidence, accepted Proposal update, and ProposalAcceptance evidence inside Operation Runtime.
 - `sg proposal reject` records explicit rejection without applying payloads.
 - Typed proposal schema `specgraph.proposal/v1` covers graph deltas, code patches, test suggestions, ontology changes, and policy changes.
 - `validate_proposal_schema` rejects proposals born `Accepted`/`Trusted`, validates required identity/title, and checks patch payload shape.
@@ -52,7 +53,7 @@ Allow LLMs to propose graph deltas, specs, actions, patches, tests, reviews, ont
 
 ### 3. Validation and Policy Gates
 
-LLM/provider output cannot be born `Accepted` or `Trusted`; it is stored as untrusted proposal objects. Acceptance goes through `Proposal.Accept` in the Operation Runtime and requires validation evidence plus exact diff hash; direct transition to Accepted/Trusted is rejected by the CLI.
+LLM/provider output cannot be born `Accepted` or `Trusted`; it is stored as untrusted proposal objects. Acceptance goes through `Proposal.Accept` in the Operation Runtime and requires passed validation evidence, exact diff hash, and passed sandbox evidence; direct transition to Accepted/Trusted is rejected by the CLI.
 
 ### 4. Implementation Work Items
 

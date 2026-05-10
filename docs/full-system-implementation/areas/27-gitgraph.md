@@ -2,7 +2,7 @@
 
 **System area:** GitGraph  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** F.4 branch/commit runtime semantic gate implementation.
 
 ## Purpose
 
@@ -14,6 +14,7 @@ Represent Git repositories, branches, commits, PRs, tags, remotes, graph snapsho
 
 - Branch binding creates GitBranch, GraphSnapshot, and binding edges
 - Commit trailers/bindings are MVP foundations
+- `Spec.BindBranch` and `GitCommit.Record` semantic checks now run in Operation Runtime, not only in CLI helper paths.
 
 ### Partly Implemented
 
@@ -21,7 +22,7 @@ Represent Git repositories, branches, commits, PRs, tags, remotes, graph snapsho
 - Graph edges capture branch heads, remotes, commit ancestry, tags, merge base/head/result, and PR source/target branches.
 - `GitGraph.Record` Operation ABI entry accepts the expanded GitGraph facts.
 
-- Branch and commit foundations exist
+- Branch and commit foundations exist with runtime semantic gates
 - PR, tag, remote, merge graph are not complete
 
 ### Not Implemented / Remaining

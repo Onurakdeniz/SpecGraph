@@ -453,7 +453,7 @@ Related areas:
 - [x] Add module baseline validator for spec-authoring readiness.
 - [x] Add `sg module import/declare/list/validate/link-capability` commands.
 - [x] Split spec intent into `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph delta.
-- [~] Add operation-specific semantic preconditions inside Operation Runtime.
+- [x] Add operation-specific semantic preconditions inside Operation Runtime.
 - [ ] Add agent/wizard detection and required-question planner.
 
 ### Gate Checks
@@ -461,7 +461,7 @@ Related areas:
 - [x] `Spec.Create` and `Spec.Import` fail before append when ProjectGraph baseline is incomplete.
 - [x] `Spec.Create` and `Spec.Import` fail before append when ModuleGraph baseline is incomplete.
 - [x] Unknown touched modules and incomplete new module declarations fail before append.
-- [~] CLI, API, SDK, and Studio all receive the same runtime findings/receipts for these gates.
+- [x] CLI, API, SDK, and Studio all receive the same runtime findings/receipts for these gates.
 
 ---
 

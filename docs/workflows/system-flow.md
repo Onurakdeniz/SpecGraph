@@ -200,11 +200,11 @@ Operation Runtime must own the gates so CLI/API/SDK/Studio cannot bypass them.
 | Operation | Required semantic gates |
 |---|---|
 | `Spec.Create` / `Spec.Import` | Project baseline (implemented), Module baseline (implemented), spec module consistency (implemented for touched/changed modules), planned object ownership (implemented), conditional requirements |
-| `Spec.BindBranch` | Spec validity, project/module gates, branch naming, base snapshot |
-| `ActionGraph.Generate` | Valid spec context, module/architecture/data/security scope, no blocking findings |
-| `GitCommit.Record` | CommitPlan scope, active branch, required validation/test evidence |
-| `Validation.Record` | Replay/hash, traceability, policy, architecture/data/security drift checks |
-| `Proposal.Accept` | Proposal trust state, exact diff, sandbox evidence, validation run |
+| `Spec.BindBranch` | Spec validity, project/module gates, branch naming, base snapshot **(implemented in Operation Runtime)** |
+| `ActionGraph.Generate` | Valid spec context, branch-bound spec, module/architecture/data/security scope, no blocking findings **(core gate implemented)** |
+| `GitCommit.Record` | CommitPlan scope, branch-bound spec, required validation/test evidence **(implemented in Operation Runtime)** |
+| `Validation.Record` | Replay/hash, check list, Project linkage, traceability, policy, architecture/data/security drift checks **(core gate implemented)** |
+| `Proposal.Accept` | Proposal trust state, exact diff, sandbox evidence, validation run **(implemented in Operation Runtime)** |
 
 ## Required validators
 
@@ -253,5 +253,5 @@ The canonical implementation plan tracks this as the post-Phase 7 final closure 
 1. Project baseline validator and `sg project` CLI. **Implemented for ProjectGraph profile facts and the spec-authoring runtime gate.**
 2. Module baseline validator and `sg module` CLI. **Implemented for ModuleGraph baseline facts and the spec-authoring runtime gate.**
 3. Spec projection separation: `touchesModules`, `moduleChanges`, `plannedObjects`, intended graph delta. **Implemented with runtime rejection for unknown touched modules and incomplete new-module declarations.**
-4. Operation-specific semantic gates for spec, branch, action, commit, validation, and proposal acceptance.
+4. Operation-specific semantic gates for spec, branch, action, commit, validation, and proposal acceptance. **Implemented for F.4 core gates.**
 5. Agent/wizard detection and required-question planner.

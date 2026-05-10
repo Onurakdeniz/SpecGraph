@@ -2,7 +2,7 @@
 
 **System area:** CommitPlan  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** F.4 GitCommit.Record runtime semantic gate implementation.
 
 ## Purpose
 
@@ -19,9 +19,10 @@ Make commits planned semantic units tied to action groups, allowed files, requir
 
 - CommitPlan now carries `allowedFiles`, `requiredValidation`, and `expectedGraphDelta` enforcement metadata.
 - Commit validation enforces CommitPlan allowed files, required passed validation checks, and `GraphDelta:` trailer requirements where expected.
+- `GitCommit.Record` now carries the commit message in Operation Runtime input and re-runs trailer, ActionGroup, CommitPlan scope, branch-bound spec, and required validation checks before append.
 
 - Trailer validation exists
-- ExpectedGraphDelta and category-specific validation are not complete
+- Exact GraphDelta trailer content matching and richer category-specific validation are not complete
 
 ### Not Implemented / Remaining
 
