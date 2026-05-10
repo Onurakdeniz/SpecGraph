@@ -9,3 +9,4 @@ repository.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sg-model.workspace = true
+sg-validation.workspace = true

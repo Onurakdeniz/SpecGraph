@@ -1,6 +1,7 @@
 use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
+use sg_adapter_api::{built_in_adapter_catalog, validate_adapter_catalog};
 use sg_adapter_code::{index_source_file, observations_to_delta, CodeIndexObservation};
 use sg_adapter_hosting::{validate_provider_check_report, ProviderCheckReport};
 use sg_adoption::{scan_repository, AdoptionMode};
@@ -19,7 +20,11 @@ use sg_policy::{
     built_in_non_waivable_policies, evaluate_policies, evaluate_policies_with_manifests,
     load_policy_manifest, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Waiver,
 };
-use sg_proposal::{validate_proposal_schema, Proposal, TrustState};
+use sg_proposal::{
+    default_allowed_sandbox_commands, proposal_patch_diff, proposal_touched_paths,
+    validate_patch_sandbox_request, validate_proposal_schema, PatchSandboxCommandResult,
+    PatchSandboxPolicy, PatchSandboxReport, PatchSandboxStatus, Proposal, TrustState,
+};
 use sg_query::{GraphQuery, QueryContext, QueryLimits, QueryTarget};
 use sg_spec::{SpecProjection, TextItem};
 use sg_store::{
@@ -34,9 +39,11 @@ use sg_testgraph::{
 };
 use sg_validation::{
     built_in_validators, CORE_VALIDATOR_VERSION, VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING,
-    VALIDATOR_ONTOLOGY, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_PR_HOSTING,
-    VALIDATOR_SNAPSHOT, VALIDATOR_TEST_RUNNER, VALIDATOR_TRACE_LINKS,
+    VALIDATOR_ONTOLOGY, VALIDATOR_OPERATION_ABI, VALIDATOR_PATCH_SANDBOX, VALIDATOR_POLICY,
+    VALIDATOR_PR_HOSTING, VALIDATOR_SECURITY_BOUNDARY, VALIDATOR_SNAPSHOT, VALIDATOR_TEST_RUNNER,
+    VALIDATOR_TRACE_LINKS,
 };
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -72,6 +79,8 @@ enum Commands {
     Adopt(AdoptArgs),
     /// Impact analysis commands.
     Impact(ImpactArgs),
+    /// Adapter catalog and capability commands.
+    Adapter(AdapterArgs),
     /// Pull request and hosting-provider integration commands.
     Pr(PrArgs),
     /// Untrusted proposal commands.
@@ -88,6 +97,8 @@ enum Commands {
     Test(TestArgs),
     /// CI aggregate validation command.
     Ci(CiArgs),
+    /// Security boundary audit commands.
+    Security(SecurityArgs),
     /// Proof-of-idea scenario runner.
     Proof(ProofArgs),
     /// Graph inspection and replay commands.
@@ -393,6 +404,22 @@ struct ImpactAnalyzeArgs {
 }
 
 #[derive(Debug, Args)]
+struct AdapterArgs {
+    #[command(subcommand)]
+    command: AdapterCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AdapterCommand {
+    /// List built-in adapter descriptors and capabilities.
+    Catalog {
+        /// Fail if the built-in adapter catalog violates security capability rules.
+        #[arg(long)]
+        check: bool,
+    },
+}
+
+#[derive(Debug, Args)]
 struct PrArgs {
     #[command(subcommand)]
     command: PrCommand,
@@ -473,6 +500,12 @@ enum ProposalCommand {
     Create(ProposalCreateArgs),
     /// Validate a typed untrusted proposal JSON/YAML file without mutating the graph.
     Validate(ProposalValidateArgs),
+    /// Run a code patch proposal in an isolated local sandbox and optionally record evidence.
+    Sandbox(ProposalSandboxArgs),
+    /// Accept a validated proposal with exact diff and validation evidence.
+    Accept(ProposalAcceptArgs),
+    /// Reject a proposal with a reason.
+    Reject(ProposalRejectArgs),
     /// Move a proposal through the trust-state lifecycle.
     Transition(ProposalTransitionArgs),
 }
@@ -495,6 +528,54 @@ struct ProposalCreateArgs {
 #[derive(Debug, Args)]
 struct ProposalValidateArgs {
     file: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct ProposalSandboxArgs {
+    file: PathBuf,
+    /// Exact allowlisted command to run in the isolated sandbox. Defaults to the full sandbox validation allowlist.
+    #[arg(long = "command")]
+    commands: Vec<String>,
+    /// Write the patch sandbox report JSON.
+    #[arg(long = "report-file")]
+    report_file: Option<PathBuf>,
+    /// Record a PatchSandboxRun graph evidence node.
+    #[arg(long)]
+    record: bool,
+    #[arg(long, default_value = "local:sandbox")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ProposalAcceptArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long = "validation-run-id")]
+    validation_run_id: String,
+    #[arg(long = "exact-diff-hash")]
+    exact_diff_hash: Option<String>,
+    #[arg(long = "exact-diff-file")]
+    exact_diff_file: Option<PathBuf>,
+    #[arg(long)]
+    reason: Option<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ProposalRejectArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long)]
+    reason: String,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
 }
 
 #[derive(Debug, Args)]
@@ -716,6 +797,25 @@ struct CiValidateArgs {
 }
 
 #[derive(Debug, Args)]
+struct SecurityArgs {
+    #[command(subcommand)]
+    command: SecurityCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum SecurityCommand {
+    /// Audit security boundary controls for replay, adapter catalog, and optional event signatures.
+    Audit(SecurityAuditArgs),
+}
+
+#[derive(Debug, Args)]
+struct SecurityAuditArgs {
+    /// Treat unsigned events as errors instead of warnings.
+    #[arg(long)]
+    require_event_signatures: bool,
+}
+
+#[derive(Debug, Args)]
 struct ProofArgs {
     #[command(subcommand)]
     command: ProofCommand,
@@ -802,6 +902,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Policy(args) => handle_policy(&store, args)?,
         Commands::Adopt(args) => handle_adopt(&store, &root, args)?,
         Commands::Impact(args) => handle_impact(&store, args)?,
+        Commands::Adapter(args) => handle_adapter(args)?,
         Commands::Pr(args) => handle_pr(&store, &root, args)?,
         Commands::Proposal(args) => handle_proposal(&store, &root, args)?,
         Commands::Action(args) => handle_action(&store, args)?,
@@ -810,6 +911,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Trace(args) => handle_trace(&store, &root, args)?,
         Commands::Test(args) => handle_test(&store, args)?,
         Commands::Ci(args) => handle_ci(&store, &root, args)?,
+        Commands::Security(args) => handle_security(&store, &root, args)?,
         Commands::Proof(args) => handle_proof(args)?,
         Commands::Graph(args) => handle_graph(&store, &root, args)?,
     }
@@ -1156,6 +1258,38 @@ fn handle_impact(store: &SpecGraphStore, args: ImpactArgs) -> anyhow::Result<()>
     Ok(())
 }
 
+fn handle_adapter(args: AdapterArgs) -> anyhow::Result<()> {
+    match args.command {
+        AdapterCommand::Catalog { check } => {
+            let catalog = built_in_adapter_catalog();
+            for adapter in &catalog {
+                let capabilities = adapter
+                    .capabilities
+                    .iter()
+                    .map(|capability| format!("{capability:?}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let signature = adapter
+                    .signature
+                    .as_ref()
+                    .map(|signature| signature.algorithm.as_str())
+                    .unwrap_or("none");
+                println!(
+                    "{} kind={} capabilities={} signature={}",
+                    adapter.id, adapter.kind, capabilities, signature
+                );
+            }
+            let findings = validate_adapter_catalog(&catalog);
+            print_findings(&findings);
+            if check {
+                fail_on_errors(&findings, "adapter catalog validation")?;
+                println!("adapterCatalog: ok");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Result<()> {
     match args.command {
         PrCommand::Sync(args) => {
@@ -1370,6 +1504,71 @@ fn handle_proposal(store: &SpecGraphStore, root: &Path, args: ProposalArgs) -> a
             print_findings(&findings);
             fail_on_errors(&findings, "proposal schema validation")?;
             println!("proposal: ok id={}", proposal.id);
+        }
+        ProposalCommand::Sandbox(args) => {
+            let proposal = read_proposal_file(root, &args.file)?;
+            let commands = if args.commands.is_empty() {
+                default_allowed_sandbox_commands()
+            } else {
+                args.commands.clone()
+            };
+            let report = run_patch_sandbox(root, &proposal, &commands)?;
+            print_findings(&report.findings);
+            if let Some(report_file) = args.report_file.as_ref() {
+                write_patch_sandbox_report(root, report_file, &report)?;
+                println!(
+                    "patchSandboxReport: {}",
+                    resolve_path(root, report_file.clone()).display()
+                );
+            }
+            if args.record {
+                let replay = store.replay(ReplayOptions { check_hashes: true })?;
+                let delta = patch_sandbox_delta(&replay.graph, &report)?;
+                let receipt = store.append_operation(AppendOperationOptions {
+                    operation: "Proposal.Sandbox".to_string(),
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                    input: json!({
+                        "proposal": proposal.id,
+                        "sandboxRun": report,
+                    }),
+                    dry_run: false,
+                    delta,
+                })?;
+                println!("patchSandboxRecorded: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+            fail_on_errors(&report.findings, "patch sandbox")?;
+            println!("patchSandbox: {:?}", report.status);
+        }
+        ProposalCommand::Accept(args) => {
+            let exact_diff_hash = proposal_acceptance_hash(root, &args)?;
+            let receipt = accept_proposal(
+                store,
+                &args.id,
+                &args.validation_run_id,
+                &exact_diff_hash,
+                args.reason,
+                args.actor,
+                args.graph_branch,
+            )?;
+            println!("proposalAccepted: {}", args.id);
+            println!("exactDiffHash: {exact_diff_hash}");
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        ProposalCommand::Reject(args) => {
+            let receipt = transition_proposal(
+                store,
+                &args.id,
+                TrustState::Rejected,
+                Some(args.reason),
+                args.actor,
+                args.graph_branch,
+            )?;
+            println!("proposalRejected: {}", args.id);
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
         }
         ProposalCommand::Transition(args) => {
             let state = parse_trust_state(&args.state)?;
@@ -1689,6 +1888,80 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
     Ok(())
 }
 
+fn handle_security(store: &SpecGraphStore, root: &Path, args: SecurityArgs) -> anyhow::Result<()> {
+    match args.command {
+        SecurityCommand::Audit(args) => {
+            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            println!(
+                "replay: ok events={} stateHash={}",
+                replay.events_replayed, replay.state_hash
+            );
+            let mut findings = validate_adapter_catalog(&built_in_adapter_catalog());
+            findings.extend(audit_event_signatures(root, args.require_event_signatures)?);
+            print_findings(&findings);
+            fail_on_errors(&findings, "security audit")?;
+            println!("securityAudit: ok");
+        }
+    }
+    Ok(())
+}
+
+fn audit_event_signatures(
+    root: &Path,
+    require_event_signatures: bool,
+) -> anyhow::Result<Vec<Finding>> {
+    let event_dir = root.join(".specgraph/events");
+    let mut findings = Vec::new();
+    if !event_dir.exists() {
+        return Ok(findings);
+    }
+    for entry in fs::read_dir(&event_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+            continue;
+        }
+        for (index, line) in fs::read_to_string(&path)?.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let value: serde_json::Value = serde_json::from_str(line).with_context(|| {
+                format!(
+                    "failed to parse event signature audit input {}:{}",
+                    path.display(),
+                    index + 1
+                )
+            })?;
+            let signatures = value
+                .get("signatures")
+                .and_then(|value| value.as_array())
+                .map(Vec::len)
+                .unwrap_or_default();
+            if signatures == 0 {
+                let severity = if require_event_signatures {
+                    FindingSeverity::Error
+                } else {
+                    FindingSeverity::Warning
+                };
+                findings.push(
+                    Finding::new(
+                        "security.event_unsigned",
+                        severity,
+                        format!(
+                            "Event {}:{} has no signature metadata. Remediation: enable protected-mode event signing before production use.",
+                            path.display(),
+                            index + 1
+                        ),
+                    )
+                    .with_validator(VALIDATOR_SECURITY_BOUNDARY, CORE_VALIDATOR_VERSION)
+                    .with_location(sg_model::FindingLocation::file(path.display().to_string())),
+                );
+            }
+        }
+    }
+    Ok(findings)
+}
+
 fn write_ci_report(
     root: &Path,
     report_file: &Path,
@@ -1724,6 +1997,363 @@ fn write_provider_check_report(
     }
     fs::write(&path, serde_json::to_vec_pretty(report)?)?;
     Ok(())
+}
+
+fn write_patch_sandbox_report(
+    root: &Path,
+    report_file: &Path,
+    report: &PatchSandboxReport,
+) -> anyhow::Result<()> {
+    let path = resolve_path(root, report_file.to_path_buf());
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_vec_pretty(report)?)?;
+    Ok(())
+}
+
+fn run_patch_sandbox(
+    root: &Path,
+    proposal: &Proposal,
+    commands: &[String],
+) -> anyhow::Result<PatchSandboxReport> {
+    let policy = PatchSandboxPolicy::default();
+    let mut findings = validate_patch_sandbox_request(proposal, &policy, commands);
+    let diff = proposal_patch_diff(proposal);
+    let exact_diff_hash = content_hash(diff.as_bytes());
+    let touched_paths = proposal_touched_paths(proposal);
+    let mut command_results = Vec::new();
+
+    if findings
+        .iter()
+        .any(|finding| finding.severity == FindingSeverity::Error)
+    {
+        return Ok(PatchSandboxReport {
+            schema_version: sg_proposal::PATCH_SANDBOX_REPORT_SCHEMA_VERSION.to_string(),
+            proposal_id: proposal.id.clone(),
+            status: PatchSandboxStatus::Failed,
+            exact_diff_hash,
+            touched_paths,
+            commands: command_results,
+            findings,
+        });
+    }
+
+    let sandbox_root = create_sandbox_copy(root)?;
+    let patch_file = sandbox_root.join(".specgraph-proposal.patch");
+    fs::write(&patch_file, diff.as_bytes())?;
+    let check = Command::new("git")
+        .arg("-C")
+        .arg(&sandbox_root)
+        .args(["apply", "--check"])
+        .arg(&patch_file)
+        .output()
+        .context("failed to run git apply --check in patch sandbox")?;
+    if !check.status.success() {
+        findings.push(
+            Finding::new(
+                "sandbox.patch_apply_failed",
+                FindingSeverity::Error,
+                "Patch does not apply cleanly in the isolated sandbox. Remediation: regenerate the exact diff against the current repository state.",
+            )
+            .with_validator(VALIDATOR_PATCH_SANDBOX, CORE_VALIDATOR_VERSION)
+            .with_remediation(stderr_string(&check.stderr)),
+        );
+    } else {
+        let apply = Command::new("git")
+            .arg("-C")
+            .arg(&sandbox_root)
+            .args(["apply"])
+            .arg(&patch_file)
+            .output()
+            .context("failed to run git apply in patch sandbox")?;
+        if !apply.status.success() {
+            findings.push(
+                Finding::new(
+                    "sandbox.patch_apply_failed",
+                    FindingSeverity::Error,
+                    "Patch apply failed after preflight. Remediation: inspect the sandbox stderr and regenerate the patch.",
+                )
+                .with_validator(VALIDATOR_PATCH_SANDBOX, CORE_VALIDATOR_VERSION)
+                .with_remediation(stderr_string(&apply.stderr)),
+            );
+        } else {
+            for command in commands {
+                let result = run_sandbox_command(&sandbox_root, command)?;
+                if result.exit_code != 0 {
+                    findings.push(
+                        Finding::new(
+                            "sandbox.command_failed",
+                            FindingSeverity::Error,
+                            format!(
+                                "Sandbox command `{}` failed with exit code {}. Remediation: fix the proposal patch or command before acceptance.",
+                                command, result.exit_code
+                            ),
+                        )
+                        .with_validator(VALIDATOR_PATCH_SANDBOX, CORE_VALIDATOR_VERSION)
+                        .with_location(sg_model::FindingLocation::command(command.clone()))
+                        .with_remediation(truncate_output(&result.stderr)),
+                    );
+                }
+                command_results.push(result);
+            }
+        }
+    }
+
+    let status = if findings
+        .iter()
+        .any(|finding| finding.severity == FindingSeverity::Error)
+    {
+        PatchSandboxStatus::Failed
+    } else {
+        PatchSandboxStatus::Passed
+    };
+    Ok(PatchSandboxReport {
+        schema_version: sg_proposal::PATCH_SANDBOX_REPORT_SCHEMA_VERSION.to_string(),
+        proposal_id: proposal.id.clone(),
+        status,
+        exact_diff_hash,
+        touched_paths,
+        commands: command_results,
+        findings,
+    })
+}
+
+fn run_sandbox_command(
+    sandbox_root: &Path,
+    command: &str,
+) -> anyhow::Result<PatchSandboxCommandResult> {
+    let parts = command.split_whitespace().collect::<Vec<_>>();
+    let Some((program, args)) = parts.split_first() else {
+        bail!("sandbox command cannot be empty");
+    };
+    let home = sandbox_root.join(".sandbox-home");
+    fs::create_dir_all(&home)?;
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(sandbox_root)
+        .env("SPECGRAPH_SANDBOX", "1")
+        .env("HOME", &home)
+        .env_remove("GITHUB_TOKEN")
+        .env_remove("GH_TOKEN")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("AWS_ACCESS_KEY_ID")
+        .env_remove("AWS_SECRET_ACCESS_KEY")
+        .env_remove("GOOGLE_APPLICATION_CREDENTIALS")
+        .output()
+        .with_context(|| format!("failed to run sandbox command `{command}`"))?;
+    Ok(PatchSandboxCommandResult {
+        command: command.to_string(),
+        exit_code: output.status.code().unwrap_or(1),
+        stdout: truncate_output(&String::from_utf8_lossy(&output.stdout)),
+        stderr: truncate_output(&String::from_utf8_lossy(&output.stderr)),
+    })
+}
+
+fn create_sandbox_copy(root: &Path) -> anyhow::Result<PathBuf> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let sandbox_root = env::temp_dir().join(format!("specgraph-patch-sandbox-{nonce}"));
+    copy_repo_for_sandbox(root, &sandbox_root)?;
+    let init = Command::new("git")
+        .arg("-C")
+        .arg(&sandbox_root)
+        .args(["init", "-q"])
+        .output()
+        .context("failed to initialize git repository in patch sandbox")?;
+    if !init.status.success() {
+        bail!("git init failed in patch sandbox");
+    }
+    Ok(sandbox_root)
+}
+
+fn copy_repo_for_sandbox(from: &Path, to: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if matches!(
+            name_str.as_ref(),
+            ".git" | "target" | ".DS_Store" | "node_modules"
+        ) {
+            continue;
+        }
+        let source = entry.path();
+        let dest = to.join(&name);
+        if source.is_dir() {
+            copy_repo_for_sandbox(&source, &dest)?;
+        } else if source.is_file() {
+            fs::copy(&source, &dest).with_context(|| {
+                format!(
+                    "failed to copy sandbox file {} -> {}",
+                    source.display(),
+                    dest.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn patch_sandbox_delta(graph: &Graph, report: &PatchSandboxReport) -> anyhow::Result<GraphDelta> {
+    let proposal = find_proposal_node(graph, &report.proposal_id)?;
+    let run_id = patch_sandbox_run_id(&report.proposal_id, &report.exact_diff_hash);
+    let node = Node {
+        id: run_id.clone(),
+        stable_key: format!(
+            "patch-sandbox-run:{}/{}",
+            report.proposal_id, report.exact_diff_hash
+        ),
+        node_type: "PatchSandboxRun".to_string(),
+        attributes: BTreeMap::from([
+            ("proposalId".to_string(), json!(report.proposal_id)),
+            ("schemaVersion".to_string(), json!(report.schema_version)),
+            ("status".to_string(), json!(report.status)),
+            ("exactDiffHash".to_string(), json!(report.exact_diff_hash)),
+            ("touchedPaths".to_string(), json!(report.touched_paths)),
+            ("commands".to_string(), json!(report.commands)),
+            ("findings".to_string(), json!(report.findings)),
+            ("sourceTrust".to_string(), json!("SandboxEvidence")),
+        ]),
+    };
+    Ok(GraphDelta {
+        create_nodes: vec![node],
+        create_edges: vec![edge(&proposal.id, "PROPOSAL_HAS_SANDBOX_RUN", &run_id)],
+        ..GraphDelta::default()
+    })
+}
+
+fn patch_sandbox_run_id(proposal_id: &str, exact_diff_hash: &str) -> String {
+    node_id(
+        "patch_sandbox_run",
+        &format!("{proposal_id}/{}", exact_diff_hash.replace(':', "-")),
+    )
+}
+
+fn proposal_acceptance_hash(root: &Path, args: &ProposalAcceptArgs) -> anyhow::Result<String> {
+    match (&args.exact_diff_hash, &args.exact_diff_file) {
+        (Some(hash), None) => Ok(hash.clone()),
+        (None, Some(path)) => {
+            let bytes = fs::read(resolve_path(root, path.clone()))?;
+            Ok(content_hash(&bytes))
+        }
+        (Some(_), Some(_)) => bail!("pass either --exact-diff-hash or --exact-diff-file, not both"),
+        (None, None) => bail!("proposal accept requires --exact-diff-hash or --exact-diff-file"),
+    }
+}
+
+fn accept_proposal(
+    store: &SpecGraphStore,
+    id: &str,
+    validation_run_id: &str,
+    exact_diff_hash: &str,
+    reason: Option<String>,
+    actor: String,
+    graph_branch: String,
+) -> anyhow::Result<OperationReceipt> {
+    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let proposal = find_proposal_node(&replay.graph, id)?;
+    let current = proposal
+        .attributes
+        .get("trustState")
+        .and_then(|value| value.as_str())
+        .and_then(parse_trust_state_value)
+        .unwrap_or(TrustState::Proposed);
+    if current != TrustState::Validated {
+        bail!(
+            "proposal accept requires current state Validated; found {}",
+            trust_state_label(current)
+        );
+    }
+    let validation_node_id = validation_run_node_id(validation_run_id);
+    if !replay.graph.nodes.contains_key(&validation_node_id) {
+        bail!("validation run `{validation_run_id}` not found in graph");
+    }
+    let mut updated = proposal.clone();
+    updated
+        .attributes
+        .insert("trustState".to_string(), json!(TrustState::Accepted));
+    updated
+        .attributes
+        .insert("acceptedBy".to_string(), json!(actor.clone()));
+    updated.attributes.insert(
+        "acceptedValidationRunId".to_string(),
+        json!(validation_run_id),
+    );
+    updated
+        .attributes
+        .insert("acceptedExactDiffHash".to_string(), json!(exact_diff_hash));
+    if let Some(reason) = &reason {
+        updated
+            .attributes
+            .insert("acceptReason".to_string(), json!(reason));
+    }
+    let acceptance_id = node_id("proposal_acceptance", &format!("{id}/{validation_run_id}"));
+    let acceptance = Node {
+        id: acceptance_id.clone(),
+        stable_key: format!("proposal-acceptance:{id}/{validation_run_id}"),
+        node_type: "ProposalAcceptance".to_string(),
+        attributes: BTreeMap::from([
+            ("proposalId".to_string(), json!(id)),
+            ("validationRunId".to_string(), json!(validation_run_id)),
+            ("exactDiffHash".to_string(), json!(exact_diff_hash)),
+            ("acceptedBy".to_string(), json!(actor.clone())),
+            ("reason".to_string(), json!(reason)),
+        ]),
+    };
+    store
+        .append_operation(AppendOperationOptions {
+            operation: "Proposal.Accept".to_string(),
+            actor,
+            graph_branch,
+            input: json!({
+                "proposal": id,
+                "validationRunId": validation_run_id,
+                "exactDiffHash": exact_diff_hash,
+                "reason": reason,
+            }),
+            dry_run: false,
+            delta: GraphDelta {
+                create_nodes: vec![acceptance],
+                update_nodes: vec![updated],
+                create_edges: vec![
+                    edge(&proposal.id, "HAS_PROPOSAL_ACCEPTANCE", &acceptance_id),
+                    edge(
+                        &acceptance_id,
+                        "ACCEPTED_WITH_VALIDATION",
+                        &validation_node_id,
+                    ),
+                ],
+                ..GraphDelta::default()
+            },
+        })
+        .map_err(Into::into)
+}
+
+fn content_hash(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+fn truncate_output(output: &str) -> String {
+    const LIMIT: usize = 16_000;
+    if output.chars().count() > LIMIT {
+        format!(
+            "{}…[truncated]",
+            output.chars().take(LIMIT).collect::<String>()
+        )
+    } else {
+        output.to_string()
+    }
+}
+
+fn stderr_string(stderr: &[u8]) -> String {
+    truncate_output(&String::from_utf8_lossy(stderr))
 }
 
 fn find_project_node_id(graph: &Graph) -> anyhow::Result<String> {
@@ -2561,6 +3191,8 @@ fn validator_id_for_check(check: &str) -> &'static str {
         "commit" | "git" => VALIDATOR_GIT_BINDING,
         "pr-hosting" | "pr" => VALIDATOR_PR_HOSTING,
         "test" | "test-runner" => VALIDATOR_TEST_RUNNER,
+        "patch-sandbox" | "sandbox" => VALIDATOR_PATCH_SANDBOX,
+        "security" | "security-boundary" => VALIDATOR_SECURITY_BOUNDARY,
         "code-index" => VALIDATOR_CODE_SCOPE,
         "policy" => VALIDATOR_POLICY,
         "replay" => VALIDATOR_SNAPSHOT,
@@ -2739,17 +3371,8 @@ fn proposal_delta(proposal: &Proposal) -> GraphDelta {
     }
 }
 
-fn transition_proposal(
-    store: &SpecGraphStore,
-    id: &str,
-    target: TrustState,
-    reason: Option<String>,
-    actor: String,
-    graph_branch: String,
-) -> anyhow::Result<OperationReceipt> {
-    let replay = store.replay(ReplayOptions { check_hashes: true })?;
-    let proposal = replay
-        .graph
+fn find_proposal_node<'a>(graph: &'a Graph, id: &str) -> anyhow::Result<&'a Node> {
+    graph
         .nodes
         .values()
         .find(|node| {
@@ -2760,7 +3383,24 @@ fn transition_proposal(
                     .and_then(|value| value.as_str())
                     .is_some_and(|value| value == id)
         })
-        .with_context(|| format!("proposal not found: {id}"))?;
+        .with_context(|| format!("proposal not found: {id}"))
+}
+
+fn transition_proposal(
+    store: &SpecGraphStore,
+    id: &str,
+    target: TrustState,
+    reason: Option<String>,
+    actor: String,
+    graph_branch: String,
+) -> anyhow::Result<OperationReceipt> {
+    if matches!(target, TrustState::Accepted | TrustState::Trusted) {
+        bail!(
+            "use `sg proposal accept` for Accepted/Trusted proposal transitions so exact diff and validation evidence are recorded"
+        );
+    }
+    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let proposal = find_proposal_node(&replay.graph, id)?;
     let current = proposal
         .attributes
         .get("trustState")
@@ -2831,9 +3471,7 @@ fn valid_trust_transition(current: TrustState, target: TrustState) -> bool {
             | (TrustState::Observed, TrustState::Rejected)
             | (TrustState::Proposed, TrustState::Validated)
             | (TrustState::Proposed, TrustState::Rejected)
-            | (TrustState::Validated, TrustState::Accepted)
             | (TrustState::Validated, TrustState::Rejected)
-            | (TrustState::Accepted, TrustState::Trusted)
             | (TrustState::Accepted, TrustState::Rejected)
     )
 }

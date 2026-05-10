@@ -121,6 +121,8 @@ impl MvpOntology {
                 "Waiver",
                 "ImpactAnalysis",
                 "Proposal",
+                "PatchSandboxRun",
+                "ProposalAcceptance",
                 "ProposedGraphDelta",
                 "ProposedCodePatch",
                 "ProposedPolicyChange",
@@ -263,6 +265,9 @@ impl MvpOntology {
                 "PROPOSES_POLICY_CHANGE",
                 "PROPOSES_ONTOLOGY_CHANGE",
                 "PROPOSES_TEST",
+                "PROPOSAL_HAS_SANDBOX_RUN",
+                "HAS_PROPOSAL_ACCEPTANCE",
+                "ACCEPTED_WITH_VALIDATION",
                 "HAS_CONFLICT",
                 "HAS_ISSUE_EVIDENCE",
                 "HAS_REPRODUCTION",
@@ -1296,6 +1301,9 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         "PROPOSES_TEST" => Some((&["Proposal"], &["ProposedTestSuggestion"])),
         "PROPOSES_ONTOLOGY_CHANGE" => Some((&["Proposal"], &["ProposedOntologyChange"])),
         "PROPOSES_POLICY_CHANGE" => Some((&["Proposal"], &["ProposedPolicyChange"])),
+        "PROPOSAL_HAS_SANDBOX_RUN" => Some((&["Proposal"], &["PatchSandboxRun"])),
+        "HAS_PROPOSAL_ACCEPTANCE" => Some((&["Proposal"], &["ProposalAcceptance"])),
+        "ACCEPTED_WITH_VALIDATION" => Some((&["ProposalAcceptance"], &["ValidationRun"])),
         _ => None,
     }
 }

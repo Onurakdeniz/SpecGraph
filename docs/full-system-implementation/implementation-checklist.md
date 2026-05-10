@@ -359,10 +359,12 @@ Related areas:
 - [29. PR and Hosting Integration](areas/29-pr-and-hosting-integration.md)
 - [43. LLM Proposal Runtime](areas/43-llm-proposal-runtime.md)
 - [44. Patch Sandbox](areas/44-patch-sandbox.md)
+- [45. Security Boundaries](areas/45-security-boundaries.md)
+- [46. Adapter Layer](areas/46-adapter-layer.md)
 
 ### Implementation Checklist
 
-- [ ] Add official GitHub Action workflow around `sg ci validate`.
+- [x] Add official GitHub Action workflow around `sg ci validate`.
 - [x] Emit JSON validation report for PR annotations.
 - [x] Add PR graph model.
 - [x] Add PR metadata sync from hosting provider.
@@ -371,19 +373,22 @@ Related areas:
 - [x] Add protected-branch setup docs.
 - [x] Add LLM proposal schemas for graph delta, code patch, test suggestion, and ontology/policy change.
 - [x] Add proposal validation pipeline.
-- [ ] Add isolated patch sandbox.
-- [ ] Add command allowlist for sandbox.
-- [ ] Deny secrets and production access in sandbox.
-- [~] Add accept/reject proposal operations.
+- [x] Add isolated patch sandbox.
+- [x] Add command allowlist for sandbox.
+- [x] Deny secrets and production access in sandbox.
+- [x] Add accept/reject proposal operations.
+- [x] Add expanded adapter catalog for Git, filesystem, package, test, database, CI, hosting, LLM, and sandbox adapters.
+- [x] Add security capability checks, signature metadata audit, and sandbox constraint findings.
 
 ### Gate Checks
 
 - [x] PR with validation errors shows actionable findings.
 - [x] Provider required checks can block merge.
 - [x] LLM proposal remains untrusted until accepted by operation.
-- [ ] Out-of-scope patch is rejected in sandbox.
-- [ ] Patch cannot access secrets.
-- [ ] Accepted patch has validation evidence and exact diff.
+- [x] Out-of-scope patch is rejected in sandbox.
+- [x] Patch cannot access secrets.
+- [x] Accepted patch has validation evidence and exact diff.
+- [x] Providers, adapters, and LLMs can propose/observe but cannot create trusted facts without accepted operations.
 
 ---
 

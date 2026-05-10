@@ -14,6 +14,8 @@ pub const VALIDATOR_POLICY: &str = "validator.policy";
 pub const VALIDATOR_SNAPSHOT: &str = "validator.snapshot";
 pub const VALIDATOR_TRACE_LINKS: &str = "validator.trace_links";
 pub const VALIDATOR_TEST_RUNNER: &str = "validator.test_runner";
+pub const VALIDATOR_PATCH_SANDBOX: &str = "validator.patch_sandbox";
+pub const VALIDATOR_SECURITY_BOUNDARY: &str = "validator.security_boundary";
 pub const VALIDATOR_ADAPTER_TRUST: &str = "validator.adapter_trust";
 pub const VALIDATOR_ARCHITECTURE_PACK: &str = "validator.architecture_pack";
 pub const VALIDATOR_MIGRATION_RUNTIME: &str = "validator.migration_runtime";
@@ -111,6 +113,18 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Test Runner Integration",
             description: "Validates TestRun/TestResult evidence and required linked test pass/fail state.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_PATCH_SANDBOX,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Patch Sandbox",
+            description: "Validates patch scope, command allowlists, secret/production denial, and sandbox execution evidence.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_SECURITY_BOUNDARY,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "Security Boundaries",
+            description: "Validates adapter capabilities, signatures, sandbox constraints, and security boundary audit findings.",
         },
         ValidatorDefinition {
             id: VALIDATOR_TRACE_LINKS,

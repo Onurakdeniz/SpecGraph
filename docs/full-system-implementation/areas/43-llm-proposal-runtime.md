@@ -13,6 +13,8 @@ Allow LLMs to propose graph deltas, specs, actions, patches, tests, reviews, ont
 ### Fully Implemented
 
 - Proposal create/transition and trust states exist.
+- `sg proposal accept` records accepted proposal state only with validation-run id and exact diff hash evidence through `Proposal.Accept`.
+- `sg proposal reject` records explicit rejection without applying payloads.
 - Typed proposal schema `specgraph.proposal/v1` covers graph deltas, code patches, test suggestions, ontology changes, and policy changes.
 - `validate_proposal_schema` rejects proposals born `Accepted`/`Trusted`, validates required identity/title, and checks patch payload shape.
 - `sg proposal validate <file>` validates typed proposal JSON/YAML without mutating the graph.
@@ -22,15 +24,15 @@ Allow LLMs to propose graph deltas, specs, actions, patches, tests, reviews, ont
 
 ### Partly Implemented
 
-- Proposal lifecycle and schemas exist, but the sandbox and exact acceptance workflow are later Phase 6 slices.
+- Proposal lifecycle, schemas, local sandbox validation, and evidence-gated acceptance exist; provider-hosted LLM runtimes remain future work.
 - LLM output can be parsed/validated/recorded, but no provider-specific LLM runtime is included yet.
 
 ### Not Implemented / Remaining
 
 - Real LLM provider adapters.
-- Patch sandbox execution.
-- Human/runtime proposal acceptance that applies exact deltas/patches with evidence.
-- Secret, command, and production-access sandbox guardrails.
+- Provider-hosted patch sandbox execution.
+- Applying accepted exact deltas/patches into the real working tree.
+- Provider-hosted secret/command/production enforcement beyond local sandbox policy.
 
 ## Implementation Parts
 
@@ -43,19 +45,22 @@ Allow LLMs to propose graph deltas, specs, actions, patches, tests, reviews, ont
 - `sg proposal create --id <id> --title <title>` records a minimal untrusted proposal.
 - `sg proposal create --file <proposal.json>` records typed untrusted payload nodes and edges.
 - `sg proposal validate <proposal.json>` validates a typed proposal without mutating state.
-- `sg proposal transition --id <id> --state <state>` moves the proposal lifecycle without applying payloads.
+- `sg proposal transition --id <id> --state <state>` moves non-acceptance lifecycle states without applying payloads.
+- `sg proposal sandbox <file>` validates code patches in an isolated copy and can record `PatchSandboxRun` evidence.
+- `sg proposal accept --id <id> --validation-run-id <run> --exact-diff-hash <sha256:...>` accepts only with validation and exact diff evidence.
+- `sg proposal reject --id <id> --reason <reason>` rejects proposals explicitly.
 
 ### 3. Validation and Policy Gates
 
-LLM/provider output cannot be born `Accepted` or `Trusted`; it is stored as untrusted proposal objects. Later acceptance must go through the Operation Runtime, policy checks, validation evidence, and exact payload application rather than direct adapter mutation.
+LLM/provider output cannot be born `Accepted` or `Trusted`; it is stored as untrusted proposal objects. Acceptance goes through `Proposal.Accept` in the Operation Runtime and requires validation evidence plus exact diff hash; direct transition to Accepted/Trusted is rejected by the CLI.
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test typed proposal schemas and CLI validation.
 - Implement or finish: LLM adapters.
-- Implement or finish: patch sandbox.
-- Implement or finish: human/runtime acceptance workflow.
-- Implement or finish: command allowlists and secret/production access denials.
+- Preserve and regression-test local patch sandbox and exact-diff acceptance behavior.
+- Implement or finish: applying accepted exact payloads into the real working tree.
+- Preserve and extend command allowlists and secret/production access denials as provider-hosted sandboxing arrives.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 

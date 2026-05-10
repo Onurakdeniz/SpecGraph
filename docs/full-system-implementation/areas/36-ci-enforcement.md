@@ -16,6 +16,7 @@ Make CI the enforcement boundary by replaying graph state and running all valida
 - MVP CI acceptance criteria are listed
 - `sg pr validate --report-file` emits provider-native check report JSON for PR annotations
 - Provider check evidence can be recorded as `ProviderCheckRun` / `ProviderCheckAnnotation` graph facts linked to `ValidationRun`
+- `.github/workflows/ci.yml` includes an official `sg ci validate --report-file` step when `.specgraph` is present in the checkout
 
 ### Partly Implemented
 
@@ -28,7 +29,7 @@ Make CI the enforcement boundary by replaying graph state and running all valida
 
 ### Not Implemented / Remaining
 
-- GitHub/GitLab templates
+- GitLab template and provider check publishing glue
 - Official provider workflow templates and API publishing
 - Graph merge validation
 - Full provider-native policy/data/security annotations
@@ -50,7 +51,7 @@ Exit non-zero on errors; repeat hooks; record evidence only after gates pass
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: GitHub/GitLab templates.
+- Implement or finish: GitLab template and direct provider check publishing glue.
 - Implement or finish: provider workflow templates and direct check publishing.
 - Implement or finish: Graph merge validation.
 - Implement or finish: Full policy/test/data/security validators.

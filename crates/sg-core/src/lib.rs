@@ -97,8 +97,11 @@ pub use store::{
 };
 
 pub use adapter::{
-    validate_adapter_delta, AdapterCapability, AdapterDescriptor, ADOPTION_ADAPTER_ID,
-    CODE_INDEXER_ADAPTER_ID, SOURCE_TRUST_OBSERVATION, TRUST_STATE_OBSERVED,
+    built_in_adapter_catalog, validate_adapter_catalog, validate_adapter_delta, AdapterCapability,
+    AdapterDescriptor, AdapterSignature, ADOPTION_ADAPTER_ID, CI_ADAPTER_ID,
+    CODE_INDEXER_ADAPTER_ID, DATABASE_ADAPTER_ID, GIT_ADAPTER_ID, HOSTING_ADAPTER_ID,
+    LLM_ADAPTER_ID, PACKAGE_ADAPTER_ID, PATCH_SANDBOX_ADAPTER_ID, SOURCE_TRUST_OBSERVATION,
+    TEST_ADAPTER_ID, TRUST_STATE_OBSERVED,
 };
 pub use adoption::{
     adoption_report_delta, adoption_report_from_delta, scan_repository, AdoptionFinding,

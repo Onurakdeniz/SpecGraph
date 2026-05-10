@@ -502,7 +502,7 @@ pub fn pull_request_node_id(provider: &str, number: &str) -> String {
     format!("node_pull_request_{}_{}", stable(provider), stable(number))
 }
 pub fn validation_run_node_id(run_id: &str) -> String {
-    format!("node_validation_run_{}", stable(run_id))
+    format!("node_validation_run_{}", stable(run_id).replace('-', "_"))
 }
 
 pub fn stable(value: &str) -> String {
