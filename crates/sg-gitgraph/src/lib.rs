@@ -9,6 +9,7 @@ pub use git::{
 };
 pub use git_graph::{
     branch_node_id, commit_node_id, merge_node_id, pull_request_node_id, remote_node_id,
-    tag_node_id, GitBranchFact, GitCommitFact, GitGraphProjection, GitMergeFact, GitRemoteFact,
-    GitTagFact, PullRequestFact,
+    stable as git_graph_stable, tag_node_id, upsert_delta_for_graph, validate_pr_hosting_graph,
+    validation_run_node_id, GitBranchFact, GitCommitFact, GitGraphProjection, GitMergeFact,
+    GitRemoteFact, GitTagFact, PullRequestFact, SOURCE_TRUST_OBSERVATION, TRUST_STATE_OBSERVED,
 };

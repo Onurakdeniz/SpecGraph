@@ -1,8 +1,8 @@
 # 36. CI Enforcement
 
-**System area:** CI Enforcement  
-**Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**System area:** CI Enforcement
+**Implementation status:** 🟡 Partly implemented
+**Status basis:** code audit after Phase 6.2 provider-check report integration.
 
 ## Purpose
 
@@ -12,8 +12,10 @@ Make CI the enforcement boundary by replaying graph state and running all valida
 
 ### Fully Implemented
 
-- sg ci validate and --record are documented
+- `sg ci validate` and `--record` are documented
 - MVP CI acceptance criteria are listed
+- `sg pr validate --report-file` emits provider-native check report JSON for PR annotations
+- Provider check evidence can be recorded as `ProviderCheckRun` / `ProviderCheckAnnotation` graph facts linked to `ValidationRun`
 
 ### Partly Implemented
 
@@ -22,12 +24,12 @@ Make CI the enforcement boundary by replaying graph state and running all valida
 - Installed pre-push hook runs the same CI validation path and writes `.specgraph/validation/ci-report.json`.
 
 - Aggregate MVP validation exists
-- Provider annotations, test recording, and full policy/data/security pipeline remain
+- Provider annotation JSON exists; direct provider API publishing and full policy/data/security pipeline remain
 
 ### Not Implemented / Remaining
 
 - GitHub/GitLab templates
-- Machine-readable reports
+- Official provider workflow templates and API publishing
 - Graph merge validation
 - Full provider-native policy/data/security annotations
 
@@ -39,7 +41,7 @@ ValidationRun, Finding, Project, Spec, GitCommit/PR links
 
 ### 2. Commands / APIs
 
-sg ci validate --skip-git, --record; full pipeline replay, ontology, git, code, trace, test, policy
+sg ci validate --skip-git, --record; sg pr validate --report-file, --record; full pipeline replay, ontology, git, code, trace, test, policy
 
 ### 3. Validation and Policy Gates
 
@@ -49,7 +51,7 @@ Exit non-zero on errors; repeat hooks; record evidence only after gates pass
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: GitHub/GitLab templates.
-- Implement or finish: Machine-readable reports.
+- Implement or finish: provider workflow templates and direct check publishing.
 - Implement or finish: Graph merge validation.
 - Implement or finish: Full policy/test/data/security validators.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.

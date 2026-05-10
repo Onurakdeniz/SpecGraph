@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sg_model::{Edge, GraphDelta, Node};
+use sg_model::{Edge, Finding, FindingLocation, FindingSeverity, Graph, GraphDelta, Node};
+use sg_validation::{CORE_VALIDATOR_VERSION, VALIDATOR_PR_HOSTING};
 use std::collections::BTreeMap;
+
+pub const SOURCE_TRUST_OBSERVATION: &str = "Observation";
+pub const TRUST_STATE_OBSERVED: &str = "Observed";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,7 +68,7 @@ pub struct GitMergeFact {
     pub result: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestFact {
     pub provider: String,
@@ -72,6 +76,22 @@ pub struct PullRequestFact {
     pub branch: String,
     pub target_branch: String,
     pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<String>,
 }
 
 impl GitGraphProjection {
@@ -90,45 +110,10 @@ impl GitGraphProjection {
             );
         }
         for branch in &self.branches {
-            insert_node(&mut nodes, branch_node(branch));
-            let branch_id = branch_node_id(&branch.name);
-            insert_edge(
-                &mut edges,
-                edge(&self.project_node_id, "HAS_GIT_BRANCH", &branch_id),
-            );
-            if let Some(remote) = &branch.remote {
-                insert_edge(
-                    &mut edges,
-                    edge(&branch_id, "TRACKS_REMOTE", &remote_node_id(remote)),
-                );
-            }
-            if let Some(head) = &branch.head {
-                insert_edge(
-                    &mut edges,
-                    edge(&branch_id, "POINTS_TO_COMMIT", &commit_node_id(head)),
-                );
-            }
+            insert_branch(&mut nodes, &mut edges, &self.project_node_id, branch);
         }
         for commit in &self.commits {
-            insert_node(&mut nodes, commit_node(commit));
-            insert_edge(
-                &mut edges,
-                edge(
-                    &self.project_node_id,
-                    "HAS_GIT_COMMIT",
-                    &commit_node_id(&commit.sha),
-                ),
-            );
-            for parent in &commit.parent_shas {
-                insert_edge(
-                    &mut edges,
-                    edge(
-                        &commit_node_id(&commit.sha),
-                        "PARENT_COMMIT",
-                        &commit_node_id(parent),
-                    ),
-                );
-            }
+            insert_commit(&mut nodes, &mut edges, &self.project_node_id, commit);
         }
         for tag in &self.tags {
             insert_node(&mut nodes, tag_node(tag));
@@ -177,37 +162,168 @@ impl GitGraphProjection {
             );
         }
         for pr in &self.pull_requests {
-            insert_node(&mut nodes, pull_request_node(pr));
-            insert_edge(
+            insert_branch(
+                &mut nodes,
                 &mut edges,
-                edge(
+                &self.project_node_id,
+                &GitBranchFact {
+                    name: pr.branch.clone(),
+                    head: pr.head_sha.clone(),
+                    remote: None,
+                },
+            );
+            insert_branch(
+                &mut nodes,
+                &mut edges,
+                &self.project_node_id,
+                &GitBranchFact {
+                    name: pr.target_branch.clone(),
+                    head: pr.base_sha.clone(),
+                    remote: None,
+                },
+            );
+            if let Some(head) = &pr.head_sha {
+                insert_commit(
+                    &mut nodes,
+                    &mut edges,
                     &self.project_node_id,
-                    "HAS_PULL_REQUEST",
-                    &pull_request_node_id(&pr.provider, &pr.number),
-                ),
+                    &GitCommitFact {
+                        sha: head.clone(),
+                        parent_shas: vec![],
+                        message: None,
+                    },
+                );
+            }
+            if let Some(base) = &pr.base_sha {
+                insert_commit(
+                    &mut nodes,
+                    &mut edges,
+                    &self.project_node_id,
+                    &GitCommitFact {
+                        sha: base.clone(),
+                        parent_shas: vec![],
+                        message: None,
+                    },
+                );
+            }
+            insert_node(&mut nodes, pull_request_node(pr));
+            let pr_id = pull_request_node_id(&pr.provider, &pr.number);
+            insert_edge(
+                &mut edges,
+                edge(&self.project_node_id, "HAS_PULL_REQUEST", &pr_id),
+            );
+            insert_edge(
+                &mut edges,
+                edge(&pr_id, "PR_FROM_BRANCH", &branch_node_id(&pr.branch)),
             );
             insert_edge(
                 &mut edges,
                 edge(
-                    &pull_request_node_id(&pr.provider, &pr.number),
-                    "PR_FROM_BRANCH",
-                    &branch_node_id(&pr.branch),
-                ),
-            );
-            insert_edge(
-                &mut edges,
-                edge(
-                    &pull_request_node_id(&pr.provider, &pr.number),
+                    &pr_id,
                     "PR_TARGET_BRANCH",
                     &branch_node_id(&pr.target_branch),
                 ),
             );
+            if let Some(head) = &pr.head_sha {
+                insert_edge(
+                    &mut edges,
+                    edge(&pr_id, "PR_HEAD_COMMIT", &commit_node_id(head)),
+                );
+            }
+            if let Some(base) = &pr.base_sha {
+                insert_edge(
+                    &mut edges,
+                    edge(&pr_id, "PR_BASE_COMMIT", &commit_node_id(base)),
+                );
+            }
+            if let Some(run_id) = &pr.validation_run_id {
+                insert_edge(
+                    &mut edges,
+                    edge(
+                        &pr_id,
+                        "PR_HAS_VALIDATION_RUN",
+                        &validation_run_node_id(run_id),
+                    ),
+                );
+            }
         }
         GraphDelta {
             create_nodes: nodes.into_values().collect(),
             create_edges: edges.into_values().collect(),
             ..GraphDelta::default()
         }
+    }
+
+    pub fn to_upsert_delta(&self, graph: &Graph) -> GraphDelta {
+        let delta = self.to_delta();
+        upsert_delta_for_graph(delta, graph)
+    }
+}
+
+pub fn upsert_delta_for_graph(delta: GraphDelta, graph: &Graph) -> GraphDelta {
+    let mut out = GraphDelta::default();
+    for node in delta.create_nodes {
+        if graph.nodes.contains_key(&node.id) {
+            out.update_nodes.push(node);
+        } else {
+            out.create_nodes.push(node);
+        }
+    }
+    for edge in delta.create_edges {
+        if graph.edges.contains_key(&edge.id) {
+            out.update_edges.push(edge);
+        } else {
+            out.create_edges.push(edge);
+        }
+    }
+    out.delete_nodes = delta.delete_nodes;
+    out.delete_edges = delta.delete_edges;
+    out
+}
+
+fn insert_branch(
+    nodes: &mut BTreeMap<String, Node>,
+    edges: &mut BTreeMap<String, Edge>,
+    project: &str,
+    branch: &GitBranchFact,
+) {
+    insert_node(nodes, branch_node(branch));
+    let branch_id = branch_node_id(&branch.name);
+    insert_edge(edges, edge(project, "HAS_GIT_BRANCH", &branch_id));
+    if let Some(remote) = &branch.remote {
+        insert_edge(
+            edges,
+            edge(&branch_id, "TRACKS_REMOTE", &remote_node_id(remote)),
+        );
+    }
+    if let Some(head) = &branch.head {
+        insert_edge(
+            edges,
+            edge(&branch_id, "POINTS_TO_COMMIT", &commit_node_id(head)),
+        );
+    }
+}
+
+fn insert_commit(
+    nodes: &mut BTreeMap<String, Node>,
+    edges: &mut BTreeMap<String, Edge>,
+    project: &str,
+    commit: &GitCommitFact,
+) {
+    insert_node(nodes, commit_node(commit));
+    insert_edge(
+        edges,
+        edge(project, "HAS_GIT_COMMIT", &commit_node_id(&commit.sha)),
+    );
+    for parent in &commit.parent_shas {
+        insert_edge(
+            edges,
+            edge(
+                &commit_node_id(&commit.sha),
+                "PARENT_COMMIT",
+                &commit_node_id(parent),
+            ),
+        );
     }
 }
 
@@ -280,8 +396,74 @@ fn pull_request_node(pr: &PullRequestFact) -> Node {
             ("provider".into(), json!(pr.provider)),
             ("number".into(), json!(pr.number)),
             ("state".into(), json!(pr.state)),
+            ("title".into(), json!(pr.title)),
+            ("url".into(), json!(pr.url)),
+            ("author".into(), json!(pr.author)),
+            ("headSha".into(), json!(pr.head_sha)),
+            ("baseSha".into(), json!(pr.base_sha)),
+            ("validationRunId".into(), json!(pr.validation_run_id)),
+            ("sourceTrust".into(), json!(SOURCE_TRUST_OBSERVATION)),
+            ("trustState".into(), json!(TRUST_STATE_OBSERVED)),
+            (
+                "observedBy".into(),
+                json!(pr
+                    .observed_by
+                    .clone()
+                    .unwrap_or_else(|| "adapter:hosting".to_string())),
+            ),
+            ("observedAt".into(), json!(pr.observed_at)),
         ]),
     }
+}
+
+pub fn validate_pr_hosting_graph(graph: &Graph) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for pr in graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "PullRequest")
+    {
+        let source_trust = pr
+            .attributes
+            .get("sourceTrust")
+            .and_then(|value| value.as_str());
+        let trust_state = pr
+            .attributes
+            .get("trustState")
+            .and_then(|value| value.as_str());
+        if source_trust != Some(SOURCE_TRUST_OBSERVATION)
+            || trust_state != Some(TRUST_STATE_OBSERVED)
+        {
+            findings.push(pr_finding("pr_hosting.trust_boundary", format!("PullRequest `{}` must remain observed/untrusted. Remediation: set sourceTrust=Observation and trustState=Observed; accept changes only through Operation Runtime.", pr.id)).with_related_nodes([pr.id.clone()]));
+        }
+        for (edge_type, label) in [
+            ("PR_FROM_BRANCH", "source branch"),
+            ("PR_TARGET_BRANCH", "target branch"),
+        ] {
+            if !graph
+                .edges
+                .values()
+                .any(|edge| edge.from == pr.id && edge.edge_type == edge_type)
+            {
+                findings.push(pr_finding("pr_hosting.link_missing", format!("PullRequest `{}` is missing {} link `{}`. Remediation: sync provider metadata with branch bindings.", pr.id, label, edge_type)).with_related_nodes([pr.id.clone()]));
+            }
+        }
+        let state = pr
+            .attributes
+            .get("state")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if !matches!(state, "open" | "closed" | "merged" | "draft") {
+            findings.push(pr_finding("pr_hosting.state_invalid", format!("PullRequest `{}` has invalid state `{}`. Remediation: use open, closed, merged, or draft.", pr.id, state)).with_related_nodes([pr.id.clone()]));
+        }
+    }
+    findings
+}
+
+fn pr_finding(code: &str, message: String) -> Finding {
+    Finding::new(code, FindingSeverity::Error, message)
+        .with_validator(VALIDATOR_PR_HOSTING, CORE_VALIDATOR_VERSION)
+        .with_location(FindingLocation::command("sg pr sync"))
 }
 
 fn insert_node(nodes: &mut BTreeMap<String, Node>, node: Node) {
@@ -319,8 +501,11 @@ pub fn merge_node_id(id: &str) -> String {
 pub fn pull_request_node_id(provider: &str, number: &str) -> String {
     format!("node_pull_request_{}_{}", stable(provider), stable(number))
 }
+pub fn validation_run_node_id(run_id: &str) -> String {
+    format!("node_validation_run_{}", stable(run_id))
+}
 
-fn stable(value: &str) -> String {
+pub fn stable(value: &str) -> String {
     let mut out = String::new();
     let mut sep = false;
     for ch in value.chars() {
@@ -343,7 +528,6 @@ fn stable(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn git_graph_projection_models_repo_facts() {
         let delta = GitGraphProjection {
@@ -378,6 +562,14 @@ mod tests {
                 branch: "feature".into(),
                 target_branch: "development".into(),
                 state: "open".into(),
+                title: Some("Add feature".into()),
+                url: Some("https://example.test/pr/1".into()),
+                author: Some("onur".into()),
+                head_sha: Some("abc123".into()),
+                base_sha: Some("def456".into()),
+                validation_run_id: Some("ci-1".into()),
+                observed_by: Some("adapter:github".into()),
+                observed_at: None,
             }],
         }
         .to_delta();
@@ -390,8 +582,46 @@ mod tests {
             .iter()
             .any(|node| node.node_type == "PullRequest"));
         assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "PR_HEAD_COMMIT"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "PR_HAS_VALIDATION_RUN"));
+        assert!(delta
             .create_nodes
             .iter()
             .all(|node| !node.node_type.is_empty()));
+    }
+
+    #[test]
+    fn pr_hosting_validation_requires_observed_trust_and_branch_links() {
+        let delta = GitGraphProjection {
+            project_node_id: "node_project".into(),
+            pull_requests: vec![PullRequestFact {
+                provider: "github".into(),
+                number: "2".into(),
+                branch: "feature".into(),
+                target_branch: "development".into(),
+                state: "open".into(),
+                ..PullRequestFact::default()
+            }],
+            ..GitGraphProjection::default()
+        }
+        .to_delta();
+        let mut graph = Graph::default();
+        graph.apply_delta(&delta);
+        assert!(validate_pr_hosting_graph(&graph).is_empty());
+        let pr_id = pull_request_node_id("github", "2");
+        graph
+            .nodes
+            .get_mut(&pr_id)
+            .unwrap()
+            .attributes
+            .insert("trustState".into(), json!("Trusted"));
+        assert!(validate_pr_hosting_graph(&graph)
+            .iter()
+            .any(|f| f.code == "pr_hosting.trust_boundary"));
     }
 }

@@ -2,8 +2,12 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use sg_adapter_code::{index_source_file, observations_to_delta, CodeIndexObservation};
+use sg_adapter_hosting::{validate_provider_check_report, ProviderCheckReport};
 use sg_adoption::{scan_repository, AdoptionMode};
-use sg_gitgraph::{validate_commit_binding, CommitValidationInput};
+use sg_gitgraph::{
+    git_graph_stable, pull_request_node_id, validate_commit_binding, validate_pr_hosting_graph,
+    validation_run_node_id, CommitValidationInput, GitGraphProjection, PullRequestFact,
+};
 use sg_impact::analyze_impact;
 use sg_merge::{detect_merge_conflicts, diff_graphs};
 use sg_model::{
@@ -15,7 +19,7 @@ use sg_policy::{
     built_in_non_waivable_policies, evaluate_policies, evaluate_policies_with_manifests,
     load_policy_manifest, PolicyCheckInput, PolicyEffect, PolicyManifest, PolicyRule, Waiver,
 };
-use sg_proposal::{Proposal, TrustState};
+use sg_proposal::{validate_proposal_schema, Proposal, TrustState};
 use sg_query::{GraphQuery, QueryContext, QueryLimits, QueryTarget};
 use sg_spec::{SpecProjection, TextItem};
 use sg_store::{
@@ -30,8 +34,8 @@ use sg_testgraph::{
 };
 use sg_validation::{
     built_in_validators, CORE_VALIDATOR_VERSION, VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING,
-    VALIDATOR_ONTOLOGY, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_SNAPSHOT,
-    VALIDATOR_TRACE_LINKS,
+    VALIDATOR_ONTOLOGY, VALIDATOR_OPERATION_ABI, VALIDATOR_POLICY, VALIDATOR_PR_HOSTING,
+    VALIDATOR_SNAPSHOT, VALIDATOR_TEST_RUNNER, VALIDATOR_TRACE_LINKS,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -68,6 +72,8 @@ enum Commands {
     Adopt(AdoptArgs),
     /// Impact analysis commands.
     Impact(ImpactArgs),
+    /// Pull request and hosting-provider integration commands.
+    Pr(PrArgs),
     /// Untrusted proposal commands.
     Proposal(ProposalArgs),
     /// ActionGraph and CommitPlan commands.
@@ -387,6 +393,75 @@ struct ImpactAnalyzeArgs {
 }
 
 #[derive(Debug, Args)]
+struct PrArgs {
+    #[command(subcommand)]
+    command: PrCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum PrCommand {
+    /// Sync observed pull request metadata into the graph.
+    Sync(PrSyncArgs),
+    /// Run PR validation and emit provider-native check annotations.
+    Validate(PrValidateArgs),
+}
+
+#[derive(Debug, Args)]
+struct PrSyncArgs {
+    #[arg(long)]
+    provider: String,
+    #[arg(long)]
+    number: String,
+    #[arg(long)]
+    branch: String,
+    #[arg(long = "target-branch")]
+    target_branch: String,
+    #[arg(long, default_value = "open")]
+    state: String,
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long)]
+    url: Option<String>,
+    #[arg(long)]
+    author: Option<String>,
+    #[arg(long = "head-sha")]
+    head_sha: Option<String>,
+    #[arg(long = "base-sha")]
+    base_sha: Option<String>,
+    #[arg(long = "validation-run-id")]
+    validation_run_id: Option<String>,
+    #[arg(long, default_value = "local:hosting")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct PrValidateArgs {
+    #[arg(long)]
+    provider: String,
+    #[arg(long)]
+    number: String,
+    #[arg(long, default_value = "local/repo")]
+    repository: String,
+    #[arg(long, default_value = ".specgraph/links.yaml")]
+    links_file: PathBuf,
+    #[arg(long)]
+    skip_git: bool,
+    #[arg(long)]
+    base: Option<String>,
+    #[arg(long = "report-file")]
+    report_file: Option<PathBuf>,
+    /// Append ValidationRun, PR validation link, and provider check nodes.
+    #[arg(long)]
+    record: bool,
+    #[arg(long, default_value = "local:ci")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
 struct ProposalArgs {
     #[command(subcommand)]
     command: ProposalCommand,
@@ -396,6 +471,8 @@ struct ProposalArgs {
 enum ProposalCommand {
     /// Store an untrusted proposal node without accepting it as trusted graph facts.
     Create(ProposalCreateArgs),
+    /// Validate a typed untrusted proposal JSON/YAML file without mutating the graph.
+    Validate(ProposalValidateArgs),
     /// Move a proposal through the trust-state lifecycle.
     Transition(ProposalTransitionArgs),
 }
@@ -403,13 +480,21 @@ enum ProposalCommand {
 #[derive(Debug, Args)]
 struct ProposalCreateArgs {
     #[arg(long)]
-    id: String,
+    id: Option<String>,
     #[arg(long)]
-    title: String,
+    title: Option<String>,
+    /// Optional typed proposal JSON/YAML file from an LLM or adapter.
+    #[arg(long)]
+    file: Option<PathBuf>,
     #[arg(long, default_value = "local:user")]
     actor: String,
     #[arg(long, default_value = "main")]
     graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ProposalValidateArgs {
+    file: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -717,7 +802,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Policy(args) => handle_policy(&store, args)?,
         Commands::Adopt(args) => handle_adopt(&store, &root, args)?,
         Commands::Impact(args) => handle_impact(&store, args)?,
-        Commands::Proposal(args) => handle_proposal(&store, args)?,
+        Commands::Pr(args) => handle_pr(&store, &root, args)?,
+        Commands::Proposal(args) => handle_proposal(&store, &root, args)?,
         Commands::Action(args) => handle_action(&store, args)?,
         Commands::Git(args) => handle_git(&store, &root, args)?,
         Commands::Code(args) => handle_code(&store, &root, args)?,
@@ -1070,34 +1156,220 @@ fn handle_impact(store: &SpecGraphStore, args: ImpactArgs) -> anyhow::Result<()>
     Ok(())
 }
 
-fn handle_proposal(store: &SpecGraphStore, args: ProposalArgs) -> anyhow::Result<()> {
+fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Result<()> {
+    match args.command {
+        PrCommand::Sync(args) => {
+            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let project_node_id = find_project_node_id(&replay.graph)?;
+            let pr = PullRequestFact {
+                provider: args.provider.clone(),
+                number: args.number.clone(),
+                branch: args.branch.clone(),
+                target_branch: args.target_branch.clone(),
+                state: args.state.clone(),
+                title: args.title,
+                url: args.url,
+                author: args.author,
+                head_sha: args.head_sha,
+                base_sha: args.base_sha,
+                validation_run_id: args.validation_run_id,
+                observed_by: Some(format!("adapter:{}", args.provider)),
+                observed_at: None,
+            };
+            let projection = GitGraphProjection {
+                project_node_id,
+                pull_requests: vec![pr.clone()],
+                ..GitGraphProjection::default()
+            };
+            let delta = projection.to_upsert_delta(&replay.graph);
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "Hosting.Sync".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({
+                    "provider": args.provider.clone(),
+                    "pullRequest": pr,
+                }),
+                delta,
+                dry_run: false,
+            })?;
+            println!("pullRequestSynced: {}", args.number);
+            println!("provider: {}", args.provider);
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        PrCommand::Validate(args) => {
+            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let mut checks = vec![
+                "replay".to_string(),
+                "spec".to_string(),
+                "test".to_string(),
+                "pr-hosting".to_string(),
+            ];
+            let mut findings = Vec::new();
+
+            println!(
+                "replay: ok events={} stateHash={}",
+                replay.events_replayed, replay.state_hash
+            );
+
+            let spec_report = store.validate_specs()?;
+            findings.extend(spec_report.findings);
+
+            if resolve_path(root, args.links_file.clone()).exists()
+                || has_acceptance_criteria(&replay)
+            {
+                let manifest = read_links_manifest(root, &args.links_file)?;
+                findings.extend(validate_trace_links(&replay.graph, &manifest));
+                checks.push("trace".to_string());
+            }
+
+            findings.extend(validate_required_tests_pass(&replay.graph));
+
+            if !args.skip_git && root.join(".git").exists() {
+                findings.extend(collect_git_range_findings(
+                    &replay.graph,
+                    root,
+                    args.base.clone(),
+                    "HEAD",
+                )?);
+                checks.push("git".to_string());
+            }
+
+            findings.extend(validate_pr_hosting_graph(&replay.graph));
+            let pr_id = pull_request_node_id(&args.provider, &args.number);
+            if !replay.graph.nodes.contains_key(&pr_id) {
+                findings.push(
+                    Finding::new(
+                        "pr_hosting.pr_missing",
+                        FindingSeverity::Error,
+                        format!(
+                            "PullRequest `{}/{}` is not synced. Remediation: run `sg pr sync --provider {} --number {} --branch <branch> --target-branch <target>` before validating or recording provider checks.",
+                            args.provider, args.number, args.provider, args.number
+                        ),
+                    )
+                    .with_validator(VALIDATOR_PR_HOSTING, CORE_VALIDATOR_VERSION)
+                    .with_location(sg_model::FindingLocation::command("sg pr validate")),
+                );
+            }
+
+            let status = if findings
+                .iter()
+                .any(|finding| finding.severity == FindingSeverity::Error)
+            {
+                "Failed"
+            } else {
+                "Passed"
+            };
+            let run_id = validation_run_id("pr");
+            let mut report = ProviderCheckReport::from_findings(
+                args.provider.clone(),
+                args.repository.clone(),
+                args.number.clone(),
+                run_id.clone(),
+                &findings,
+            );
+            let report_findings = validate_provider_check_report(&report);
+            if !report_findings.is_empty() {
+                findings.extend(report_findings);
+                report = ProviderCheckReport::from_findings(
+                    args.provider.clone(),
+                    args.repository.clone(),
+                    args.number.clone(),
+                    run_id.clone(),
+                    &findings,
+                );
+            }
+
+            if let Some(report_file) = args.report_file.as_ref() {
+                write_provider_check_report(root, report_file, &report)?;
+                println!(
+                    "providerCheckReport: {}",
+                    resolve_path(root, report_file.clone()).display()
+                );
+            }
+
+            if args.record
+                && !findings
+                    .iter()
+                    .any(|finding| finding.code == "pr_hosting.pr_missing")
+            {
+                let mut delta = validation_run_delta(
+                    &replay.graph,
+                    &run_id,
+                    status,
+                    &checks,
+                    &findings,
+                    &replay.state_hash,
+                );
+                let pr_link = pull_request_validation_link_delta(
+                    &replay.graph,
+                    &args.provider,
+                    &args.number,
+                    &run_id,
+                )?;
+                extend_delta(&mut delta, pr_link);
+                extend_delta(&mut delta, report.to_delta(&replay.graph));
+                let receipt = store.append_operation(AppendOperationOptions {
+                    operation: "Hosting.Sync".to_string(),
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                    input: json!({
+                        "provider": args.provider.clone(),
+                        "pullRequest": {
+                            "provider": args.provider.clone(),
+                            "number": args.number.clone(),
+                        },
+                        "validationRunId": run_id.clone(),
+                        "checkReport": report,
+                    }),
+                    delta,
+                    dry_run: false,
+                })?;
+                println!("validationRunRecorded: {run_id}");
+                println!("providerCheckRecorded: {}", args.number);
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+
+            print_findings(&findings);
+            fail_on_errors(&findings, "PR validation")?;
+            println!("pr: ok status={status}");
+        }
+    }
+    Ok(())
+}
+
+fn handle_proposal(store: &SpecGraphStore, root: &Path, args: ProposalArgs) -> anyhow::Result<()> {
     match args.command {
         ProposalCommand::Create(args) => {
-            let proposal = Proposal::new(args.id.clone(), args.title.clone());
-            let node = Node {
-                id: node_id("proposal", &args.id),
-                stable_key: format!("proposal:{}", args.id),
-                node_type: "Proposal".to_string(),
-                attributes: BTreeMap::from([
-                    ("id".to_string(), json!(proposal.id)),
-                    ("title".to_string(), json!(proposal.title)),
-                    ("trustState".to_string(), json!(TrustState::Proposed)),
-                ]),
-            };
+            let proposal = proposal_from_create_args(root, args.id, args.title, args.file)?;
+            let findings = validate_proposal_schema(&proposal);
+            print_findings(&findings);
+            fail_on_errors(&findings, "proposal schema validation")?;
+            let delta = proposal_delta(&proposal);
             let receipt = store.append_operation(AppendOperationOptions {
                 operation: "Proposal.Create".to_string(),
                 actor: args.actor,
                 graph_branch: args.graph_branch,
-                input: json!({"proposal": args.id}),
+                input: json!({
+                    "proposal": proposal.id.clone(),
+                    "schemaVersion": proposal.schema_version.clone(),
+                    "kind": proposal.kind,
+                }),
                 dry_run: false,
-                delta: GraphDelta {
-                    create_nodes: vec![node],
-                    ..GraphDelta::default()
-                },
+                delta,
             })?;
-            println!("proposalCreated: {}", args.id);
-            println!("trustState: Proposed");
+            println!("proposalCreated: {}", proposal.id);
+            println!("trustState: {}", trust_state_label(proposal.trust_state));
             println!("operationId: {}", receipt.operation_id);
+        }
+        ProposalCommand::Validate(args) => {
+            let proposal = read_proposal_file(root, &args.file)?;
+            let findings = validate_proposal_schema(&proposal);
+            print_findings(&findings);
+            fail_on_errors(&findings, "proposal schema validation")?;
+            println!("proposal: ok id={}", proposal.id);
         }
         ProposalCommand::Transition(args) => {
             let state = parse_trust_state(&args.state)?;
@@ -1439,6 +1711,114 @@ fn write_ci_report(
     });
     fs::write(&path, serde_json::to_vec_pretty(&report)?)?;
     Ok(())
+}
+
+fn write_provider_check_report(
+    root: &Path,
+    report_file: &Path,
+    report: &ProviderCheckReport,
+) -> anyhow::Result<()> {
+    let path = resolve_path(root, report_file.to_path_buf());
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_vec_pretty(report)?)?;
+    Ok(())
+}
+
+fn find_project_node_id(graph: &Graph) -> anyhow::Result<String> {
+    graph
+        .nodes
+        .values()
+        .find(|node| node.node_type == "Project")
+        .map(|node| node.id.clone())
+        .context("SpecGraph project node not found; run `sg init` first")
+}
+
+fn collect_git_range_findings(
+    graph: &Graph,
+    root: &Path,
+    base: Option<String>,
+    head: &str,
+) -> anyhow::Result<Vec<Finding>> {
+    let base = match base {
+        Some(value) => value,
+        None => default_git_base(root).unwrap_or_else(|| "HEAD~1".to_string()),
+    };
+    let commits = git_commits(root, &base, head).unwrap_or_default();
+    if commits.is_empty() {
+        println!("git: no commits to validate for {base}..{head}");
+        return Ok(Vec::new());
+    }
+
+    let mut findings = Vec::new();
+    for commit in commits {
+        let message = git_commit_message(root, &commit)?;
+        let changed_files = git_commit_changed_files(root, &commit)?;
+        let input = CommitValidationInput {
+            commit,
+            message,
+            changed_files,
+        };
+        findings.extend(validate_commit_binding(graph, &input));
+    }
+    Ok(findings)
+}
+
+fn pull_request_validation_link_delta(
+    graph: &Graph,
+    provider: &str,
+    number: &str,
+    run_id: &str,
+) -> anyhow::Result<GraphDelta> {
+    let pr_id = pull_request_node_id(provider, number);
+    let mut pr = graph
+        .nodes
+        .get(&pr_id)
+        .cloned()
+        .with_context(|| format!("PullRequest `{provider}/{number}` is not synced"))?;
+    pr.attributes
+        .insert("validationRunId".to_string(), json!(run_id));
+    let link = gitgraph_edge(
+        &pr_id,
+        "PR_HAS_VALIDATION_RUN",
+        &validation_run_node_id(run_id),
+    );
+    let mut delta = GraphDelta {
+        update_nodes: vec![pr],
+        ..GraphDelta::default()
+    };
+    if graph.edges.contains_key(&link.id) {
+        delta.update_edges.push(link);
+    } else {
+        delta.create_edges.push(link);
+    }
+    Ok(delta)
+}
+
+fn gitgraph_edge(from: &str, edge_type: &str, to: &str) -> Edge {
+    Edge {
+        id: format!(
+            "edge_{}_{}_{}",
+            git_graph_stable(from),
+            git_graph_stable(edge_type),
+            git_graph_stable(to)
+        ),
+        stable_key: format!("edge:{from}:{edge_type}:{to}"),
+        edge_type: edge_type.to_string(),
+        from: from.to_string(),
+        to: to.to_string(),
+        attributes: BTreeMap::new(),
+    }
+}
+
+fn extend_delta(target: &mut GraphDelta, source: GraphDelta) {
+    target.create_nodes.extend(source.create_nodes);
+    target.update_nodes.extend(source.update_nodes);
+    target.delete_nodes.extend(source.delete_nodes);
+    target.create_edges.extend(source.create_edges);
+    target.update_edges.extend(source.update_edges);
+    target.delete_edges.extend(source.delete_edges);
 }
 
 fn handle_proof(args: ProofArgs) -> anyhow::Result<()> {
@@ -2179,6 +2559,8 @@ fn validator_id_for_check(check: &str) -> &'static str {
         "spec" => VALIDATOR_ONTOLOGY,
         "trace" => VALIDATOR_TRACE_LINKS,
         "commit" | "git" => VALIDATOR_GIT_BINDING,
+        "pr-hosting" | "pr" => VALIDATOR_PR_HOSTING,
+        "test" | "test-runner" => VALIDATOR_TEST_RUNNER,
         "code-index" => VALIDATOR_CODE_SCOPE,
         "policy" => VALIDATOR_POLICY,
         "replay" => VALIDATOR_SNAPSHOT,
@@ -2196,6 +2578,165 @@ fn validation_run_id(prefix: &str) -> String {
 
 fn policy_run_id() -> String {
     validation_run_id("policy")
+}
+
+fn proposal_from_create_args(
+    root: &Path,
+    id: Option<String>,
+    title: Option<String>,
+    file: Option<PathBuf>,
+) -> anyhow::Result<Proposal> {
+    match file {
+        Some(path) => {
+            let proposal = read_proposal_file(root, &path)?;
+            if let Some(id) = id {
+                if id != proposal.id {
+                    bail!(
+                        "proposal --id `{}` does not match file proposal id `{}`",
+                        id,
+                        proposal.id
+                    );
+                }
+            }
+            if let Some(title) = title {
+                if title != proposal.title {
+                    bail!(
+                        "proposal --title `{}` does not match file proposal title `{}`",
+                        title,
+                        proposal.title
+                    );
+                }
+            }
+            Ok(proposal)
+        }
+        None => {
+            let id = id.context("proposal create requires --id when --file is not provided")?;
+            let title =
+                title.context("proposal create requires --title when --file is not provided")?;
+            Ok(Proposal::new(id, title))
+        }
+    }
+}
+
+fn read_proposal_file(root: &Path, path: &Path) -> anyhow::Result<Proposal> {
+    let path = resolve_path(root, path.to_path_buf());
+    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    match path.extension().and_then(|value| value.to_str()) {
+        Some("yaml" | "yml") => serde_yaml::from_slice(&bytes)
+            .with_context(|| format!("failed to parse proposal {}", path.display())),
+        _ => serde_json::from_slice(&bytes)
+            .with_context(|| format!("failed to parse proposal {}", path.display())),
+    }
+}
+
+fn proposal_delta(proposal: &Proposal) -> GraphDelta {
+    let proposal_id = node_id("proposal", &proposal.id);
+    let mut create_nodes = vec![Node {
+        id: proposal_id.clone(),
+        stable_key: format!("proposal:{}", proposal.id),
+        node_type: "Proposal".to_string(),
+        attributes: BTreeMap::from([
+            ("schemaVersion".to_string(), json!(proposal.schema_version)),
+            ("id".to_string(), json!(proposal.id)),
+            ("title".to_string(), json!(proposal.title)),
+            ("trustState".to_string(), json!(proposal.trust_state)),
+            ("kind".to_string(), json!(proposal.kind)),
+            ("sourceTrust".to_string(), json!("Proposal")),
+        ]),
+    }];
+    let mut create_edges = Vec::new();
+
+    if let Some(graph_delta) = &proposal.graph_delta {
+        let id = node_id("proposed_graph_delta", &proposal.id);
+        create_nodes.push(Node {
+            id: id.clone(),
+            stable_key: format!("proposed-graph-delta:{}", proposal.id),
+            node_type: "ProposedGraphDelta".to_string(),
+            attributes: BTreeMap::from([
+                ("summary".to_string(), json!(graph_delta.summary)),
+                ("delta".to_string(), json!(graph_delta.delta)),
+                ("trustState".to_string(), json!("Proposed")),
+            ]),
+        });
+        create_edges.push(edge(&proposal_id, "PROPOSES_DELTA", &id));
+    }
+
+    if let Some(code_patch) = &proposal.code_patch {
+        let id = node_id("proposed_code_patch", &proposal.id);
+        create_nodes.push(Node {
+            id: id.clone(),
+            stable_key: format!("proposed-code-patch:{}", proposal.id),
+            node_type: "ProposedCodePatch".to_string(),
+            attributes: BTreeMap::from([
+                ("summary".to_string(), json!(code_patch.summary)),
+                ("files".to_string(), json!(code_patch.files)),
+                ("trustState".to_string(), json!("Proposed")),
+            ]),
+        });
+        create_edges.push(edge(&proposal_id, "PROPOSES_PATCH", &id));
+    }
+
+    for (index, test) in proposal.test_suggestions.iter().enumerate() {
+        let key = format!("{}/{}", proposal.id, index);
+        let id = node_id("proposed_test_suggestion", &key);
+        create_nodes.push(Node {
+            id: id.clone(),
+            stable_key: format!("proposed-test-suggestion:{key}"),
+            node_type: "ProposedTestSuggestion".to_string(),
+            attributes: BTreeMap::from([
+                ("testName".to_string(), json!(test.test_name)),
+                ("file".to_string(), json!(test.file)),
+                ("command".to_string(), json!(test.command)),
+                ("rationale".to_string(), json!(test.rationale)),
+                ("trustState".to_string(), json!("Proposed")),
+            ]),
+        });
+        create_edges.push(edge(&proposal_id, "PROPOSES_TEST", &id));
+    }
+
+    for change in &proposal.ontology_changes {
+        let key = format!("{}/{}", proposal.id, change.change_id);
+        let id = node_id("proposed_ontology_change", &key);
+        create_nodes.push(Node {
+            id: id.clone(),
+            stable_key: format!("proposed-ontology-change:{key}"),
+            node_type: "ProposedOntologyChange".to_string(),
+            attributes: BTreeMap::from([
+                ("changeId".to_string(), json!(change.change_id)),
+                ("pack".to_string(), json!(change.pack)),
+                ("description".to_string(), json!(change.description)),
+                (
+                    "migrationRequired".to_string(),
+                    json!(change.migration_required),
+                ),
+                ("trustState".to_string(), json!("Proposed")),
+            ]),
+        });
+        create_edges.push(edge(&proposal_id, "PROPOSES_ONTOLOGY_CHANGE", &id));
+    }
+
+    for change in &proposal.policy_changes {
+        let key = format!("{}/{}", proposal.id, change.policy_id);
+        let id = node_id("proposed_policy_change", &key);
+        create_nodes.push(Node {
+            id: id.clone(),
+            stable_key: format!("proposed-policy-change:{key}"),
+            node_type: "ProposedPolicyChange".to_string(),
+            attributes: BTreeMap::from([
+                ("policyId".to_string(), json!(change.policy_id)),
+                ("effect".to_string(), json!(change.effect)),
+                ("rationale".to_string(), json!(change.rationale)),
+                ("trustState".to_string(), json!("Proposed")),
+            ]),
+        });
+        create_edges.push(edge(&proposal_id, "PROPOSES_POLICY_CHANGE", &id));
+    }
+
+    GraphDelta {
+        create_nodes,
+        create_edges,
+        ..GraphDelta::default()
+    }
 }
 
 fn transition_proposal(
