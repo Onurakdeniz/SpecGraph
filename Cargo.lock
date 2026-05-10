@@ -819,6 +819,7 @@ dependencies = [
 name = "sg-project"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "sg-model",
 ]
@@ -887,6 +888,7 @@ dependencies = [
  "sg-ontology",
  "sg-operation",
  "sg-policy",
+ "sg-project",
  "sg-query",
  "sg-spec",
  "sg-validation",

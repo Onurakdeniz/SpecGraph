@@ -97,7 +97,7 @@ Status values:
 | Command group | Commands | Status | Output contract |
 |---|---|---|---|
 | `sg init` | `sg init` | Partial | Human summary; JSON `receipt` for initialized project facts and created paths. |
-| `sg project` | `profile`, `show`, `validate`, `set-tooling` | Planned | JSON `ProjectGraph` report/items; mutating forms return receipts. |
+| `sg project` | `profile upsert`, `show`, `validate`, future `detect`, `set-tooling` | Partial | JSON ProjectGraph baseline report/items; mutating profile acceptance returns receipts. |
 | `sg module` | `declare`, `list`, `validate`, `link-capability` | Planned | JSON module/interface items or validation findings; mutations return receipts. |
 | `sg architecture` | `declare-layer`, `declare-port`, `validate`, `drift`, `pack validate` | Planned | Architecture report/findings; mutations return receipts. |
 | `sg data` | `declare-table`, `declare-contract`, `validate`, `owners` | Planned | DataGraph report/items/findings; mutations return receipts. |
@@ -200,3 +200,13 @@ Phase 7 adds the final product-surface command groups needed by release/docs/per
 - `sg perf budgets --check` enforces that every performance budget has a positive threshold.
 
 These commands support the global `--format json` / `--json` envelope convention.
+
+## F.1 Implemented Project Baseline CLI
+
+The project-first closure adds the first trusted ProjectGraph command group:
+
+- `sg project profile upsert --file <YAML|JSON>` accepts project profile facts through Operation Runtime using `Project.ProfileUpsert`.
+- `sg project show` reports the current ProjectGraph baseline, missing required profile edges, and findings.
+- `sg project validate --gate spec-authoring` fails with `validator.project_baseline` findings until project type, language, architecture style, package manager, test runner, and CI provider facts are trusted.
+
+`Spec.Create` and `Spec.Import` now use the same runtime gate, so CLI/API/SDK callers cannot bypass ProjectGraph readiness before spec authoring.

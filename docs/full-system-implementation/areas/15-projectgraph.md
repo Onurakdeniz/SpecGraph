@@ -2,7 +2,7 @@
 
 **System area:** ProjectGraph  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** fresh Phase 3.1 implementation audit plus workflow review after promoting project-first system flow.
+**Status basis:** F.1 project-baseline validator/CLI implementation plus workflow review after promoting project-first system flow.
 
 ## Purpose
 
@@ -18,19 +18,20 @@ Represent project identity, type, languages, architecture style, runtime topolog
 - Project profile fact ontology now includes `ProjectType`, `Language`, `ArchitectureStyle`, `PackageManager`, `TestRunner`, and `CIProvider` nodes.
 - `Project.ProfileUpsert` is registered in the Operation ABI and can accept the profile fact nodes and their Project edges.
 - Built-in ontology validation enforces singleton Project profile edges for type, architecture, package manager, test runner, and CI provider.
+- `validator.project_baseline` reports missing ProjectGraph profile facts with structured findings and remediation.
+- `sg project profile upsert`, `sg project show`, and `sg project validate --gate spec-authoring` route ProjectGraph profile acceptance through Operation Runtime receipts.
+- `Spec.Create` and `Spec.Import` are blocked before event append when the trusted ProjectGraph profile is incomplete.
 
 ### Partly Implemented
 
 - Basic Project exists
-- Graph-native project profile facts exist in `sg-core` and can be routed through Operation Runtime.
-- Dedicated CLI commands and automatic repository detection are not complete.
+- Graph-native project profile facts exist in `sg-project` and are persisted by `sg-store`.
+- Automatic repository detection is not complete.
 
 ### Not Implemented / Remaining
 
-- Project baseline validator that blocks `Spec.Create` / `Spec.Import` until required profile facts are trusted.
-- `sg project profile upsert/show/validate` commands.
 - Automatic project type/language/package/test/CI detection
-- Commands to update architecture/profile facts
+- More granular commands to update individual architecture/profile facts
 - Pack/profile compatibility validation
 
 ## Implementation Parts
@@ -41,16 +42,16 @@ Project, ProjectType, Language, ArchitectureStyle, RuntimeTopology, DatabaseEngi
 
 ### 2. Commands / APIs
 
-sg init, future sg project set-type, set-architecture, status
+sg init, sg project profile upsert/show/validate, future sg project detect/set-type/set-architecture/status
 
 ### 3. Validation and Policy Gates
 
-Project metadata drives pack selection, indexers, test runner integration, policies, and CI setup validation
+Project metadata drives pack selection, indexers, test runner integration, policies, CI setup validation, and the spec-authoring readiness gate.
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: automatic Project type/language/package/test/CI detection and CLI/profile commands.
+- Implement or finish: automatic Project type/language/package/test/CI detection.
 - Implement or finish: Commands to update architecture.
 - Implement or finish: Pack/profile compatibility validation.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
@@ -73,4 +74,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

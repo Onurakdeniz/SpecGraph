@@ -661,7 +661,7 @@ mod tests {
     use serde_json::json;
     use sg_model::Node;
     use sg_spec::SpecProjection;
-    use sg_store::InitOptions;
+    use sg_store::{InitOptions, ProjectProfileInput, UpsertProjectProfileOptions};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -720,7 +720,7 @@ mod tests {
         assert!(receipt.dry_run);
         assert!(receipt.event_ids.is_empty());
         let status = api.status().unwrap();
-        assert_eq!(status.events_replayed, 1);
+        assert_eq!(status.events_replayed, 2);
     }
 
     #[test]
@@ -751,7 +751,7 @@ mod tests {
 
         assert!(error.message.contains("failed"));
         let status = api.status().unwrap();
-        assert_eq!(status.events_replayed, 1);
+        assert_eq!(status.events_replayed, 2);
     }
 
     fn create_spec(api: &SpecGraphApi, spec: &str, dry_run: bool) -> OperationReceipt {
@@ -786,6 +786,21 @@ mod tests {
         store
             .init(InitOptions {
                 project_name: format!("project-{prefix}"),
+                actor: "local:test".to_string(),
+                graph_branch: "main".to_string(),
+            })
+            .unwrap();
+        store
+            .upsert_project_profile(UpsertProjectProfileOptions {
+                profile: ProjectProfileInput {
+                    project_name: Some(format!("project-{prefix}")),
+                    project_type: "developer-tooling".to_string(),
+                    architecture: "modular-workspace".to_string(),
+                    languages: vec!["rust".to_string()],
+                    package_manager: "cargo".to_string(),
+                    test_runner: "cargo-test".to_string(),
+                    ci_provider: "github-actions".to_string(),
+                },
                 actor: "local:test".to_string(),
                 graph_branch: "main".to_string(),
             })

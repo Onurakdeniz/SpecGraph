@@ -15,15 +15,17 @@ Support YAML, Markdown, CLI wizard, and Studio authoring while graph state remai
 - `docs/workflows/system-flow.md` defines project-first spec authoring preconditions.
 - YAML projection format and import are documented
 - CLI spec creation exists
+- `Spec.Create` and `Spec.Import` now require a trusted ProjectGraph profile before append.
 
 ### Partly Implemented
 
 - Rich projection schema is broader than current import
+- ProjectGraph readiness is enforced; ModuleGraph baseline, spec intent splitting, and conditional gates remain planned.
 
 ### Not Implemented / Remaining
 
 - Split spec intent into `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph delta.
-- Block spec create/import before append when project/module baselines or spec intent are incomplete.
+- Block spec create/import before append when ModuleGraph baseline or spec intent are incomplete.
 - Markdown parsing
 - CLI wizard
 - Studio authoring
@@ -72,4 +74,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

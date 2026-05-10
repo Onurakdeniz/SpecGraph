@@ -56,10 +56,12 @@ Spec authoring allowed: no
 Detection is an observation; acceptance is a trusted operation.
 
 ```bash
-sg project detect --dry-run
 sg project profile upsert --file project-profile.yaml
+sg project show
 sg project validate --gate spec-authoring
 ```
+
+`sg project profile upsert`, `sg project show`, and `sg project validate --gate spec-authoring` are implemented. Automatic `sg project detect --dry-run` remains a planned observation command; detected facts must still be accepted through `Project.ProfileUpsert` before they are trusted.
 
 Minimum trusted ProjectGraph profile before spec authoring:
 
@@ -193,7 +195,7 @@ Operation Runtime must own the gates so CLI/API/SDK/Studio cannot bypass them.
 
 | Operation | Required semantic gates |
 |---|---|
-| `Spec.Create` / `Spec.Import` | Project baseline, Module baseline, spec module consistency, planned object ownership, conditional requirements |
+| `Spec.Create` / `Spec.Import` | Project baseline (implemented), Module baseline, spec module consistency, planned object ownership, conditional requirements |
 | `Spec.BindBranch` | Spec validity, project/module gates, branch naming, base snapshot |
 | `ActionGraph.Generate` | Valid spec context, module/architecture/data/security scope, no blocking findings |
 | `GitCommit.Record` | CommitPlan scope, active branch, required validation/test evidence |
@@ -244,7 +246,7 @@ Agents must not immediately write specs, invent project/module facts, treat obse
 
 The canonical implementation plan tracks this as the post-Phase 7 final closure sequence:
 
-1. Project baseline validator and `sg project` CLI.
+1. Project baseline validator and `sg project` CLI. **Implemented for ProjectGraph profile facts and the spec-authoring runtime gate.**
 2. Module baseline validator and `sg module` CLI.
 3. Spec projection separation: `touchesModules`, `moduleChanges`, `plannedObjects`, intended graph delta.
 4. Operation-specific semantic gates for spec, branch, action, commit, validation, and proposal acceptance.

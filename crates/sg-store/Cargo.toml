@@ -15,6 +15,7 @@ sg-model.workspace = true
 sg-ontology.workspace = true
 sg-operation.workspace = true
 sg-policy.workspace = true
+sg-project.workspace = true
 sg-query.workspace = true
 sg-spec.workspace = true
 sg-validation.workspace = true
