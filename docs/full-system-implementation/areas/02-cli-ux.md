@@ -2,7 +2,7 @@
 
 **System area:** CLI UX  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** code/docs audit after Phase 7.6 implementation.
 
 ## Purpose
 
@@ -16,11 +16,15 @@ Provide the complete sg command surface for project setup, ontology, specs, acti
 - MVP quick start is documented
 - Phase 0 CLI UX contract now exists at `docs/cli/ux-contract.md`
 - Planned command inventory, output families, global options, mutating command rules, and exit-code meanings are documented
+- Global `--format human|json`, `--json`, `--quiet`, and `--no-color` flags are accepted
+- `sg api`, `sg docs`, `sg release`, and `sg perf` product-surface command groups exist
+- `sg docs cli-reference` emits a generated clap CLI reference
+- `sg release evidence` and `sg perf budgets --check` provide stable JSON outputs for release/performance automation
 
 ### Partly Implemented
 
 - Full CLI reference contains commands that are not all implemented
-- Some commands need implementation updates to match the documented JSON output and stable exit-code contract
+- Legacy command groups keep their established human output while newly closed Phase 7 product-surface commands support JSON automation envelopes
 
 ### Not Implemented / Remaining
 
@@ -29,7 +33,7 @@ Provide the complete sg command surface for project setup, ontology, specs, acti
 - PR validation
 - Test runner recording
 - Graph branch/merge commands
-- Global `--format human|json`, `--json`, `--dry-run`, `--quiet`, and `--no-color` behavior across all command groups
+- Complete JSON envelopes for every legacy command group
 
 ## Implementation Parts
 
@@ -54,7 +58,7 @@ Mutating commands must pass operation ABI, ontology validation, policy checks, a
 - Implement or finish: PR validation.
 - Implement or finish: Test runner recording.
 - Implement or finish: Graph branch/merge commands.
-- Implement or finish: stable JSON output and global output flags for all commands.
+- Implement or finish: stable JSON output envelopes for remaining legacy commands.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 
@@ -63,7 +67,7 @@ Mutating commands must pass operation ABI, ontology validation, policy checks, a
 - The documented commands/APIs work for the happy path and at least one intentional failure path.
 - Validation findings identify the graph object, file or command involved, and remediation.
 - The area can be exercised from CLI/CI without relying on untrusted direct mutation.
-- Every command group has documented human/JSON behavior and uses the shared exit-code contract.
+- Phase 7 product-surface command groups have documented human/JSON behavior; remaining legacy commands keep moving toward the shared exit-code contract.
 
 ## Source Notes
 

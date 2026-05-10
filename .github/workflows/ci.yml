@@ -21,8 +21,12 @@ jobs:
         run: python3 scripts/check_architecture_boundaries.py
       - name: Docs source-of-truth check
         run: python3 scripts/check_docs_source_of_truth.py
-      - name: Benchmark budget skeleton check
+      - name: Examples catalog check
+        run: python3 scripts/check_examples_catalog.py
+      - name: Benchmark budget check
         run: python3 scripts/check_benchmark_budgets.py
+      - name: Phase 7 asset check
+        run: python3 scripts/check_phase7_assets.py
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Cargo test

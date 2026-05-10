@@ -1,0 +1,40 @@
+name: SpecGraph Validate
+description: Run SpecGraph OS validation/proof checks in GitHub Actions.
+author: SpecGraph
+inputs:
+  root:
+    description: Repository root to validate.
+    required: false
+    default: .
+  run-proof:
+    description: Run the local proof scenario after workspace validation.
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    - name: Format
+      shell: bash
+      run: cargo fmt --all -- --check
+    - name: Boundary and docs checks
+      shell: bash
+      run: |
+        python3 scripts/check_architecture_boundaries.py
+        python3 scripts/check_docs_source_of_truth.py
+        python3 scripts/check_examples_catalog.py
+        python3 scripts/check_benchmark_budgets.py
+        python3 scripts/check_phase7_assets.py
+    - name: Clippy
+      shell: bash
+      run: cargo clippy --workspace --all-targets -- -D warnings
+    - name: Tests
+      shell: bash
+      run: cargo test --workspace --all-targets
+    - name: Proof
+      if: ${{ inputs.run-proof == 'true' }}
+      shell: bash
+      run: cargo run -p sg-cli -- --root "${{ inputs.root }}" proof run

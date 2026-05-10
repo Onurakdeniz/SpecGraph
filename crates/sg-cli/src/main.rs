@@ -1,5 +1,5 @@
 use anyhow::{bail, Context};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use serde_json::json;
 use sg_adapter_api::{built_in_adapter_catalog, validate_adapter_catalog};
 use sg_adapter_code::{index_source_file, observations_to_delta, CodeIndexObservation};
@@ -60,9 +60,47 @@ use std::time::{SystemTime, UNIX_EPOCH};
 struct Cli {
     #[arg(long, global = true, value_name = "DIR", default_value = ".")]
     root: PathBuf,
+    #[arg(long, global = true, value_enum, default_value_t = OutputFormat::Human)]
+    format: OutputFormat,
+    #[arg(long, global = true)]
+    json: bool,
+    #[arg(long, global = true)]
+    quiet: bool,
+    #[arg(long, global = true)]
+    no_color: bool,
 
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum OutputFormat {
+    Human,
+    Json,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OutputConfig {
+    format: OutputFormat,
+    quiet: bool,
+}
+
+impl OutputConfig {
+    fn from_cli(cli: &Cli) -> Self {
+        let _no_color = cli.no_color;
+        Self {
+            format: if cli.json {
+                OutputFormat::Json
+            } else {
+                cli.format
+            },
+            quiet: cli.quiet,
+        }
+    }
+
+    fn json(self) -> bool {
+        self.format == OutputFormat::Json
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -105,6 +143,12 @@ enum Commands {
     Ci(CiArgs),
     /// Security boundary audit commands.
     Security(SecurityArgs),
+    /// Documentation validation and generated reference commands.
+    Docs(DocsArgs),
+    /// Release evidence and packaging commands.
+    Release(ReleaseArgs),
+    /// Performance budget commands.
+    Perf(PerfArgs),
     /// Proof-of-idea scenario runner.
     Proof(ProofArgs),
     /// Graph inspection and replay commands.
@@ -878,6 +922,62 @@ struct SecurityAuditArgs {
 }
 
 #[derive(Debug, Args)]
+struct DocsArgs {
+    #[command(subcommand)]
+    command: DocsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum DocsCommand {
+    /// Validate required full-system docs and generated-reference inputs exist.
+    Check,
+    /// Emit the current clap-generated CLI reference.
+    CliReference {
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Args)]
+struct ReleaseArgs {
+    #[command(subcommand)]
+    command: ReleaseCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ReleaseCommand {
+    /// Validate local release prerequisites that do not publish anything.
+    Check {
+        #[arg(long)]
+        allow_dirty: bool,
+    },
+    /// Generate release evidence JSON with source commit, graph snapshot/state, and artifact checksums.
+    Evidence {
+        #[arg(long)]
+        version: String,
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        allow_dirty: bool,
+    },
+}
+
+#[derive(Debug, Args)]
+struct PerfArgs {
+    #[command(subcommand)]
+    command: PerfCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum PerfCommand {
+    /// List and optionally enforce documented performance budgets.
+    Budgets {
+        #[arg(long)]
+        check: bool,
+    },
+}
+
+#[derive(Debug, Args)]
 struct ProofArgs {
     #[command(subcommand)]
     command: ProofCommand,
@@ -952,6 +1052,7 @@ struct GraphQueryArgs {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let output = OutputConfig::from_cli(&cli);
     let root = cli.root.canonicalize().unwrap_or(cli.root);
     let store = SpecGraphStore::new(&root);
 
@@ -975,6 +1076,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Test(args) => handle_test(&store, args)?,
         Commands::Ci(args) => handle_ci(&store, &root, args)?,
         Commands::Security(args) => handle_security(&store, &root, args)?,
+        Commands::Docs(args) => handle_docs(&root, args, output)?,
+        Commands::Release(args) => handle_release(&store, &root, args, output)?,
+        Commands::Perf(args) => handle_perf(&root, args, output)?,
         Commands::Proof(args) => handle_proof(args)?,
         Commands::Graph(args) => handle_graph(&store, &root, args)?,
     }
@@ -2638,6 +2742,295 @@ fn extend_delta(target: &mut GraphDelta, source: GraphDelta) {
     target.create_edges.extend(source.create_edges);
     target.update_edges.extend(source.update_edges);
     target.delete_edges.extend(source.delete_edges);
+}
+
+fn handle_docs(root: &Path, args: DocsArgs, output: OutputConfig) -> anyhow::Result<()> {
+    match args.command {
+        DocsCommand::Check => {
+            let required = required_docs();
+            let missing = required
+                .iter()
+                .filter(|path| !root.join(path).exists())
+                .copied()
+                .collect::<Vec<_>>();
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg docs check",
+                    "status": if missing.is_empty() { "passed" } else { "failed" },
+                    "checked": required.len(),
+                    "missing": missing,
+                }))?;
+            } else if !output.quiet {
+                println!("docsChecked: {}", required.len());
+                println!("missing: {}", missing.len());
+                for path in &missing {
+                    println!("missing: {path}");
+                }
+            }
+            if !missing.is_empty() {
+                bail!("docs check failed with {} missing file(s)", missing.len());
+            }
+        }
+        DocsCommand::CliReference { output: path } => {
+            let mut command = Cli::command();
+            let reference = command.render_long_help().to_string();
+            if let Some(path) = path {
+                fs::write(&path, &reference)
+                    .with_context(|| format!("failed to write {}", path.display()))?;
+                if !output.quiet && !output.json() {
+                    println!("cliReference: {}", path.display());
+                }
+            } else {
+                print!("{reference}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_release(
+    store: &SpecGraphStore,
+    root: &Path,
+    args: ReleaseArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
+    match args.command {
+        ReleaseCommand::Check { allow_dirty } => {
+            let report = release_check_report(root, allow_dirty)?;
+            if output.json() {
+                print_json(&report)?;
+            } else if !output.quiet {
+                println!(
+                    "releaseCheck: {}",
+                    report["status"].as_str().unwrap_or("unknown")
+                );
+                println!("dirty: {}", report["dirty"].as_bool().unwrap_or(false));
+                println!(
+                    "artifacts: {}",
+                    report["artifacts"].as_array().map_or(0, Vec::len)
+                );
+            }
+            if report["status"] == "failed" {
+                bail!("release check failed");
+            }
+        }
+        ReleaseCommand::Evidence {
+            version,
+            output: path,
+            allow_dirty,
+        } => {
+            let evidence = release_evidence(store, root, &version, allow_dirty)?;
+            if let Some(ref path) = path {
+                write_json_file(path, &evidence)?;
+                if !output.quiet && !output.json() {
+                    println!("releaseEvidence: {}", path.display());
+                }
+            }
+            if output.json() || path.is_none() {
+                print_json(&evidence)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_perf(root: &Path, args: PerfArgs, output: OutputConfig) -> anyhow::Result<()> {
+    match args.command {
+        PerfCommand::Budgets { check } => {
+            let path = root.join("tests/performance/budget-placeholders.json");
+            let budgets: serde_json::Value = serde_json::from_slice(
+                &fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?,
+            )
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+            let benchmarks = budgets
+                .get("benchmarks")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let missing_thresholds = benchmarks
+                .iter()
+                .filter(|bench| budget_threshold_missing(bench.get("budget")))
+                .filter_map(|bench| bench.get("id").and_then(serde_json::Value::as_str))
+                .collect::<Vec<_>>();
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg perf budgets",
+                    "status": if missing_thresholds.is_empty() { "passed" } else { "failed" },
+                    "budgetStatus": budgets.get("status").and_then(serde_json::Value::as_str),
+                    "count": benchmarks.len(),
+                    "missingThresholds": missing_thresholds,
+                    "benchmarks": benchmarks,
+                }))?;
+            } else if !output.quiet {
+                println!(
+                    "budgetStatus: {}",
+                    budgets
+                        .get("status")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown")
+                );
+                println!("benchmarks: {}", benchmarks.len());
+                for bench in &benchmarks {
+                    println!(
+                        "{} {}",
+                        bench
+                            .get("id")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown"),
+                        bench.get("budget").unwrap_or(&serde_json::Value::Null)
+                    );
+                }
+            }
+            if check && !missing_thresholds.is_empty() {
+                bail!(
+                    "performance budgets are missing thresholds: {}",
+                    missing_thresholds.join(",")
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn required_docs() -> Vec<&'static str> {
+    vec![
+        "docs/architecture/boundaries.md",
+        "docs/architecture/workspace-modules.md",
+        "docs/api/server.md",
+        "docs/sdk/typescript.md",
+        "docs/studio/README.md",
+        "docs/cli/ux-contract.md",
+        "docs/release/distribution.md",
+        "docs/performance/budgets.md",
+        "docs/examples/catalog.md",
+        "docs/reference/index.md",
+        "docs/full-system-implementation/phase-gated-implementation-plan.md",
+        "docs/full-system-implementation/implementation-checklist.md",
+    ]
+}
+
+fn release_check_report(root: &Path, allow_dirty: bool) -> anyhow::Result<serde_json::Value> {
+    let dirty = git_output(root, &["status", "--porcelain"])
+        .map(|status| !status.is_empty())
+        .unwrap_or(false);
+    let artifacts = release_artifact_paths()
+        .into_iter()
+        .map(|path| {
+            json!({
+                "path": path,
+                "exists": root.join(path).exists(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let missing = artifacts
+        .iter()
+        .filter(|artifact| !artifact["exists"].as_bool().unwrap_or(false))
+        .filter_map(|artifact| artifact["path"].as_str())
+        .collect::<Vec<_>>();
+    let blocked = (!allow_dirty && dirty) || !missing.is_empty();
+    Ok(json!({
+        "schemaVersion": "specgraph.release-check/v1",
+        "status": if blocked { "failed" } else { "passed" },
+        "dirty": dirty,
+        "allowDirty": allow_dirty,
+        "missing": missing,
+        "artifacts": artifacts,
+    }))
+}
+
+fn release_evidence(
+    store: &SpecGraphStore,
+    root: &Path,
+    version: &str,
+    allow_dirty: bool,
+) -> anyhow::Result<serde_json::Value> {
+    let check = release_check_report(root, allow_dirty)?;
+    if check["status"] == "failed" {
+        bail!("release evidence requires a passing release check; pass --allow-dirty only for local dry runs");
+    }
+    let commit = git_output(root, &["rev-parse", "HEAD"]).unwrap_or_else(|_| "unknown".to_string());
+    let graph = store.replay(ReplayOptions { check_hashes: true }).ok();
+    let artifacts = release_artifact_paths()
+        .into_iter()
+        .filter_map(|path| {
+            checksum_file(root, path)
+                .ok()
+                .map(|checksum| (path, checksum))
+        })
+        .map(|(path, checksum)| json!({"path": path, "sha256": checksum}))
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "schemaVersion": "specgraph.release-evidence/v1",
+        "version": version,
+        "sourceCommit": commit,
+        "graph": graph.as_ref().map(|report| json!({
+            "stateHash": report.state_hash,
+            "lastSequence": report.last_sequence,
+            "lastEventId": report.last_event_id,
+        })),
+        "validationCommands": [
+            "cargo fmt --all -- --check",
+            "cargo clippy --workspace --all-targets -- -D warnings",
+            "cargo test --workspace --all-targets",
+            "cargo run -p sg-cli -- proof run",
+            "python3 scripts/check_architecture_boundaries.py",
+            "python3 scripts/check_docs_source_of_truth.py",
+            "python3 scripts/check_benchmark_budgets.py",
+            "python3 scripts/check_examples_catalog.py",
+            "python3 scripts/check_phase7_assets.py"
+        ],
+        "artifacts": artifacts,
+        "releaseCheck": check,
+    }))
+}
+
+fn release_artifact_paths() -> Vec<&'static str> {
+    vec![
+        "Cargo.toml",
+        "Cargo.lock",
+        "action.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml",
+        "docs/release/distribution.md",
+        "docs/performance/budgets.md",
+        "docs/examples/catalog.md",
+        "examples/catalog.json",
+        "packages/sdk-typescript/package.json",
+        "packages/studio/package.json",
+    ]
+}
+
+fn checksum_file(root: &Path, rel_path: &str) -> anyhow::Result<String> {
+    let path = root.join(rel_path);
+    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+}
+
+fn write_json_file(path: &Path, value: &serde_json::Value) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::write(path, serde_json::to_vec_pretty(value)?)
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn print_json(value: &serde_json::Value) -> anyhow::Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+fn budget_threshold_missing(budget: Option<&serde_json::Value>) -> bool {
+    let Some(budget) = budget else {
+        return true;
+    };
+    let max_missing = budget.get("max").is_some_and(serde_json::Value::is_null);
+    let min_missing = budget.get("min").is_some_and(serde_json::Value::is_null);
+    max_missing || min_missing
 }
 
 fn handle_proof(args: ProofArgs) -> anyhow::Result<()> {

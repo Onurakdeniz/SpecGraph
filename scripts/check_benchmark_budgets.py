@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the Phase 0 performance benchmark budget skeleton."""
+"""Validate the SpecGraph performance benchmark budget contract."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ REQUIRED_IDS = {
     "indexing.changed-files",
     "adoption.scan-observe",
     "ci.full-proof-path",
+    "server.readonly-query",
 }
 
 
@@ -30,6 +31,8 @@ def main() -> int:
 
     if data.get("schemaVersion") != "specgraph.performance-budgets/v1":
         errors.append("schemaVersion must be specgraph.performance-budgets/v1")
+    if data.get("status") != "enforced":
+        errors.append("status must be enforced after Phase 7.10")
 
     benchmarks = data.get("benchmarks")
     if not isinstance(benchmarks, list):
@@ -65,7 +68,12 @@ def main() -> int:
             if metric not in {"wallMs", "filesPerSecond"}:
                 errors.append(f"{bench_id or index}: unsupported budget metric `{metric}`")
             if "max" not in budget and "min" not in budget:
-                errors.append(f"{bench_id or index}: budget must declare max or min, even when placeholder null")
+                errors.append(f"{bench_id or index}: budget must declare max or min")
+            for bound in ["max", "min"]:
+                if bound in budget:
+                    value = budget[bound]
+                    if not isinstance(value, (int, float)) or value <= 0:
+                        errors.append(f"{bench_id or index}: budget.{bound} must be a positive number after Phase 7.10")
 
     missing_areas = sorted(REQUIRED_AREAS - seen_areas)
     if missing_areas:

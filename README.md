@@ -6,10 +6,7 @@ SpecGraph OS is a graph-constrained software execution runtime. The current impl
 
 ## Current Implementation Baseline
 
-This repository currently contains a Rust workspace with:
-
-- `sg-core`: graph types, operation receipts, JSONL event replay, canonical hashing, and MVP ontology validation.
-- `sg-cli`: the `sg` command-line interface.
+This repository currently contains a modular Rust workspace for trusted graph/runtime crates, adapters, CLI, server, SDK, plus TypeScript package boundaries for SDK and Studio. `sg-core` is a compatibility facade; implementation lives in the owning `sg-*` crates.
 
 Implemented commands:
 
@@ -37,6 +34,20 @@ Implemented commands:
 - `sg graph status`
 - `sg graph diff`
 - `sg graph conflicts`
+- `sg api routes|health|status|query|findings|mutate`
+- `sg docs check|cli-reference`
+- `sg release check|evidence`
+- `sg perf budgets`
+
+Phase 7 product surfaces now include:
+
+- transport-neutral server API schemas in `crates/sg-server`;
+- Rust SDK receipt facade in `crates/sg-sdk`;
+- TypeScript SDK types/client in `packages/sdk-typescript`;
+- Studio read-only/dry-run UI boundary in `packages/studio`;
+- example catalog checks in `examples/catalog.json`;
+- release workflow/action/evidence in `.github/workflows/release.yml`, `action.yml`, and `scripts/prepare_release_evidence.py`;
+- enforced performance budget metadata in `tests/performance/budget-placeholders.json`.
 
 ## Quick Start
 
