@@ -276,7 +276,10 @@ mod tests {
     use serde_json::json;
     use sg_server::{ApiQueryRequest, ApiQuerySelector};
     use sg_spec::SpecProjection;
-    use sg_store::{InitOptions, ProjectProfileInput, SpecGraphStore, UpsertProjectProfileOptions};
+    use sg_store::{
+        InitOptions, ModuleDefinition, ProjectProfileInput, SpecGraphStore,
+        UpsertModuleGraphOptions, UpsertProjectProfileOptions,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -324,7 +327,7 @@ mod tests {
 
         assert!(receipt.dry_run);
         assert!(receipt.event_ids.is_empty());
-        assert_eq!(client.status().unwrap().events_replayed, 2);
+        assert_eq!(client.status().unwrap().events_replayed, 3);
     }
 
     #[test]
@@ -397,6 +400,20 @@ mod tests {
                     test_runner: "cargo-test".to_string(),
                     ci_provider: "github-actions".to_string(),
                 },
+                actor: "local:sdk-test".to_string(),
+                graph_branch: "main".to_string(),
+            })
+            .unwrap();
+        store
+            .upsert_modules(UpsertModuleGraphOptions {
+                modules: vec![ModuleDefinition {
+                    name: "Sdk".to_string(),
+                    purpose: "Owns SDK test specs".to_string(),
+                    layer: "application".to_string(),
+                    package: "crates/sg-sdk".to_string(),
+                    capabilities: vec!["sdk-test".to_string()],
+                    interfaces: Vec::new(),
+                }],
                 actor: "local:sdk-test".to_string(),
                 graph_branch: "main".to_string(),
             })

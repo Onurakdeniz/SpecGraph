@@ -2,7 +2,7 @@
 
 **System area:** ModuleGraphs  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** fresh Phase 3.2 implementation audit plus workflow review after promoting project-first system flow.
+**Status basis:** F.2 module-baseline validator/CLI implementation plus workflow review after promoting project-first system flow.
 
 ## Purpose
 
@@ -18,18 +18,19 @@ Represent bounded capability areas such as modules, frontend areas, CLI command 
 - Built-in ontology now includes `Layer`, `Package`, `Capability`, and `PublicInterface` graph facts.
 - `ModuleGraph.Upsert` is registered in the Operation ABI for module/layer/package/capability/interface deltas.
 - Public/private interface visibility is validated, and every `PublicInterface` must be exposed by an owning `Module`.
+- `validator.module_baseline` requires at least one trusted Project-linked module with name, purpose, layer, package, and capability before spec authoring.
+- `sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, and `sg module link-capability` route ModuleGraph changes through Operation Runtime receipts.
+- `Spec.Create` and `Spec.Import` are blocked before event append when the trusted ModuleGraph baseline is incomplete.
 
 ### Partly Implemented
 
 - Basic module references exist
-- Layers, packages, capabilities, and public/private interface facts exist in `sg-core` and can be routed through Operation Runtime.
-- Dedicated module lifecycle CLI commands and repository inference are not complete.
+- Layers, packages, capabilities, and public/private interface facts exist in `sg-module-graph` and can be routed through Operation Runtime.
+- Repository inference is not complete.
 
 ### Not Implemented / Remaining
 
-- Module baseline validator requiring at least one module with purpose, layer, package/path, and capability before spec authoring.
-- `sg module import/declare/list/validate/link-capability` commands.
-- Module lifecycle commands
+- Richer module lifecycle commands
 - Layer/package/capability/interface ontology is partially implemented; richer boundary rules remain
 - Architecture-pack validators
 - Existing repo module inference
@@ -42,16 +43,16 @@ Module, Layer, Capability, PublicInterface, DependencyBoundary, Package, Crate
 
 ### 2. Commands / APIs
 
-Future sg module add/list; spec create/import touches modules
+sg module import/declare/list/validate/link-capability; spec create/import touches existing modules.
 
 ### 3. Validation and Policy Gates
 
-Boundary, dependency, ownership, cross-module policy, action allowed-scope validation
+Module baseline readiness, boundary, dependency, ownership, cross-module policy, action allowed-scope validation.
 
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Module lifecycle commands.
+- Implement or finish: richer Module lifecycle commands beyond import/declare/list/validate/link-capability.
 - Implement or finish: richer layer/boundary ontology and lifecycle commands.
 - Implement or finish: Architecture-pack validators.
 - Implement or finish: Existing repo module inference.
@@ -75,4 +76,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

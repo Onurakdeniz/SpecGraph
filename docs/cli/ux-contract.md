@@ -98,7 +98,7 @@ Status values:
 |---|---|---|---|
 | `sg init` | `sg init` | Partial | Human summary; JSON `receipt` for initialized project facts and created paths. |
 | `sg project` | `profile upsert`, `show`, `validate`, future `detect`, `set-tooling` | Partial | JSON ProjectGraph baseline report/items; mutating profile acceptance returns receipts. |
-| `sg module` | `declare`, `list`, `validate`, `link-capability` | Planned | JSON module/interface items or validation findings; mutations return receipts. |
+| `sg module` | `import`, `declare`, `list`, `validate`, `link-capability`, future `detect` | Partial | JSON module/interface items or validation findings; mutations return receipts. |
 | `sg architecture` | `declare-layer`, `declare-port`, `validate`, `drift`, `pack validate` | Planned | Architecture report/findings; mutations return receipts. |
 | `sg data` | `declare-table`, `declare-contract`, `validate`, `owners` | Planned | DataGraph report/items/findings; mutations return receipts. |
 | `sg migration` | `plan`, `record`, `validate`, `rollback-evidence` | Planned | Migration plan/report/findings; accepted evidence returns receipts. |
@@ -210,3 +210,15 @@ The project-first closure adds the first trusted ProjectGraph command group:
 - `sg project validate --gate spec-authoring` fails with `validator.project_baseline` findings until project type, language, architecture style, package manager, test runner, and CI provider facts are trusted.
 
 `Spec.Create` and `Spec.Import` now use the same runtime gate, so CLI/API/SDK callers cannot bypass ProjectGraph readiness before spec authoring.
+
+## F.2 Implemented Module Baseline CLI
+
+The module-first closure adds the trusted ModuleGraph command group:
+
+- `sg module import --file <YAML|JSON>` accepts one or more modules through `ModuleGraph.Upsert`.
+- `sg module declare --name ... --purpose ... --layer ... --package ... --capability ...` accepts one module from CLI flags.
+- `sg module list` reports trusted modules linked from the Project.
+- `sg module validate --gate spec-authoring` fails with `validator.module_baseline` findings until at least one Project-linked module has name, purpose, layer, package, and capability facts.
+- `sg module link-capability --module <NAME> --capability <NAME>` adds a capability to an existing module through Operation Runtime.
+
+`Spec.Create` and `Spec.Import` now use both ProjectGraph and ModuleGraph runtime gates before event append.

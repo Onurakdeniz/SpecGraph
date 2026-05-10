@@ -182,7 +182,6 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
             allowed_create_node_types: &[
                 "Spec",
-                "Module",
                 "Requirement",
                 "AcceptanceCriterion",
                 "Risk",
@@ -196,7 +195,6 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
                 "TestCase",
             ],
             allowed_create_edge_types: &[
-                "HAS_MODULE",
                 "TOUCHES_MODULE",
                 "HAS_REQUIREMENT",
                 "HAS_ACCEPTANCE_CRITERION",
@@ -221,7 +219,6 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
             allowed_create_node_types: &[
                 "Spec",
-                "Module",
                 "Requirement",
                 "AcceptanceCriterion",
                 "Risk",
@@ -235,7 +232,6 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
                 "TestCase",
             ],
             allowed_create_edge_types: &[
-                "HAS_MODULE",
                 "TOUCHES_MODULE",
                 "HAS_REQUIREMENT",
                 "HAS_ACCEPTANCE_CRITERION",

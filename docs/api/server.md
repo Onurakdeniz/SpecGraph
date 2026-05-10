@@ -10,6 +10,8 @@ lets the CLI and SDK exercise the same handlers in-process.
 - Mutating endpoints must call `SpecGraphStore::append_operation`, which runs the
   Operation Runtime, policy gate, ontology validation, postconditions, event
   append, snapshot write, and receipt write.
+- `Spec.Create` and `Spec.Import` requests receive the same ProjectGraph and
+  ModuleGraph baseline semantic gates as the CLI/SDK before event append.
 - Server callers submit graph deltas as operation requests; they never write
   `.specgraph/events`, `.specgraph/snapshots`, or receipt files directly.
 - Branch and snapshot query context is explicit and bounded by query limits.
@@ -77,4 +79,6 @@ created/updated/deleted graph ids, findings, and event ids for non-dry-run calls
 Real clients should usually build deltas through the owning domain modules rather
 than hand-writing graph nodes. Invalid stable keys, invalid operation/delta
 combinations, denied policies, failed postconditions, or ontology errors are
-rejected before event append.
+rejected before event append. For spec authoring operations, initialize the
+project profile and module baseline first with `Project.ProfileUpsert` and
+`ModuleGraph.Upsert`.

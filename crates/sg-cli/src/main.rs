@@ -33,10 +33,11 @@ use sg_server::{
 use sg_spec::{SpecProjection, TextItem};
 use sg_store::{
     ActionLifecycleOptions, AppendOperationOptions, BindBranchOptions, CreateWaiverOptions,
-    GenerateActionGraphOptions, GrantRoleOptions, InitOptions, ProjectProfileInput,
+    GenerateActionGraphOptions, GrantRoleOptions, InitOptions, InterfaceVisibility,
+    LinkModuleCapabilityOptions, ModuleDefinition, ModuleInterface, ProjectProfileInput,
     RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions,
     ReplayReport, SpecGraphStore, TransitionSpecOptions, UpsertActorOptions,
-    UpsertProjectProfileOptions,
+    UpsertModuleGraphOptions, UpsertProjectProfileOptions,
 };
 use sg_testgraph::{
     validate_required_tests_pass, validate_trace_links, LinksManifest, TestCaseResult, TestLink,
@@ -110,6 +111,8 @@ enum Commands {
     Init(InitArgs),
     /// Project profile and baseline commands.
     Project(ProjectArgs),
+    /// Module baseline and capability commands.
+    Module(ModuleArgs),
     /// Spec authoring and validation commands.
     Spec(SpecArgs),
     /// Ontology pack commands.
@@ -215,6 +218,79 @@ struct ProjectValidateArgs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ProjectGate {
     SpecAuthoring,
+}
+
+#[derive(Debug, Args)]
+struct ModuleArgs {
+    #[command(subcommand)]
+    command: ModuleCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ModuleCommand {
+    /// Import graph-native modules from a YAML/JSON file.
+    Import(ModuleImportArgs),
+    /// Declare one module from CLI flags.
+    Declare(ModuleDeclareArgs),
+    /// List trusted modules linked from the Project.
+    List,
+    /// Validate module baseline gates.
+    Validate(ModuleValidateArgs),
+    /// Add a capability to an existing module.
+    LinkCapability(ModuleLinkCapabilityArgs),
+}
+
+#[derive(Debug, Args)]
+struct ModuleImportArgs {
+    #[arg(long)]
+    file: PathBuf,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ModuleDeclareArgs {
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    purpose: String,
+    #[arg(long)]
+    layer: String,
+    #[arg(long)]
+    package: String,
+    #[arg(long = "capability", required = true)]
+    capabilities: Vec<String>,
+    #[arg(long = "interface")]
+    interfaces: Vec<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ModuleValidateArgs {
+    #[arg(long, value_enum, default_value_t = ModuleGate::SpecAuthoring)]
+    gate: ModuleGate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ModuleGate {
+    SpecAuthoring,
+}
+
+#[derive(Debug, Args)]
+struct ModuleLinkCapabilityArgs {
+    #[arg(long)]
+    module: String,
+    #[arg(long)]
+    capability: String,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
 }
 
 #[derive(Debug, Args)]
@@ -1111,6 +1187,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Init(args) => handle_init(&store, &root, args)?,
         Commands::Project(args) => handle_project(&store, &root, args, output)?,
+        Commands::Module(args) => handle_module(&store, &root, args, output)?,
         Commands::Spec(args) => handle_spec(&store, &root, args)?,
         Commands::Ontology(args) => handle_ontology(&store, &root, args)?,
         Commands::Operation(args) => handle_operation(args),
@@ -1222,6 +1299,126 @@ fn handle_project(
             fail_on_errors(&report.findings, "project baseline validation")?;
             if !output.quiet && !output.json() {
                 println!("project: baseline ok");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_module(
+    store: &SpecGraphStore,
+    root: &Path,
+    args: ModuleArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
+    match args.command {
+        ModuleCommand::Import(args) => {
+            let modules = read_module_definitions(root, &args.file)?;
+            let receipt = store.upsert_modules(UpsertModuleGraphOptions {
+                modules,
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg module import",
+                    "status": "accepted",
+                    "receipt": receipt,
+                }))?;
+            } else if !output.quiet {
+                println!("modulesImported: true");
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+        }
+        ModuleCommand::Declare(args) => {
+            let module = module_definition_from_args(&args)?;
+            let receipt = store.upsert_modules(UpsertModuleGraphOptions {
+                modules: vec![module],
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg module declare",
+                    "status": "accepted",
+                    "receipt": receipt,
+                }))?;
+            } else if !output.quiet {
+                println!("moduleDeclared: true");
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+        }
+        ModuleCommand::List => {
+            let modules = store.list_modules()?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg module list",
+                    "status": "ok",
+                    "count": modules.len(),
+                    "items": modules,
+                }))?;
+            } else if !output.quiet {
+                if modules.is_empty() {
+                    println!("modules: none");
+                } else {
+                    for module in modules {
+                        println!(
+                            "module: {} purpose={} layer={} package={} capabilities={}",
+                            module.name,
+                            module.purpose.as_deref().unwrap_or(""),
+                            module.layer.as_deref().unwrap_or(""),
+                            module.package.as_deref().unwrap_or(""),
+                            module.capabilities.join(",")
+                        );
+                    }
+                }
+            }
+        }
+        ModuleCommand::Validate(args) => {
+            let report = store.module_baseline()?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg module validate",
+                    "status": if report.complete { "passed" } else { "failed" },
+                    "gate": format!("{:?}", args.gate),
+                    "moduleBaseline": report,
+                }))?;
+            } else if !output.quiet {
+                println!("gate: {:?}", args.gate);
+                println!("moduleBaselineComplete: {}", report.complete);
+                println!("moduleCount: {}", report.module_count);
+                println!("missing: {}", report.missing.join(","));
+                print_findings(&report.findings);
+            }
+            fail_on_errors(&report.findings, "module baseline validation")?;
+            if !output.quiet && !output.json() {
+                println!("module: baseline ok");
+            }
+        }
+        ModuleCommand::LinkCapability(args) => {
+            let receipt = store.link_module_capability(LinkModuleCapabilityOptions {
+                module: args.module,
+                capability: args.capability,
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg module link-capability",
+                    "status": "accepted",
+                    "receipt": receipt,
+                }))?;
+            } else if !output.quiet {
+                println!("moduleCapabilityLinked: true");
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
             }
         }
     }
@@ -3195,6 +3392,23 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         graph_branch: "main".to_string(),
     })?;
     println!("proof:project-profile ok");
+    store.upsert_modules(UpsertModuleGraphOptions {
+        modules: vec![ModuleDefinition {
+            name: "Identity".to_string(),
+            purpose: "Owns identity and password reset workflows".to_string(),
+            layer: "application".to_string(),
+            package: "crates/proof/src/identity".to_string(),
+            capabilities: vec!["password-reset".to_string()],
+            interfaces: vec![ModuleInterface {
+                name: "PasswordResetService".to_string(),
+                visibility: InterfaceVisibility::Public,
+                surface: "service".to_string(),
+            }],
+        }],
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+    })?;
+    println!("proof:module-baseline ok");
 
     let projection = SpecProjection {
         spec: "AUTH-001".to_string(),
@@ -3715,6 +3929,58 @@ fn read_project_profile_input(root: &Path, path: &Path) -> anyhow::Result<Projec
     }
     serde_yaml::from_value(value)
         .with_context(|| format!("failed to parse project profile {}", path.display()))
+}
+
+fn read_module_definitions(root: &Path, path: &Path) -> anyhow::Result<Vec<ModuleDefinition>> {
+    let path = resolve_path(root, path.to_path_buf());
+    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let value: serde_yaml::Value = serde_yaml::from_slice(&bytes)
+        .with_context(|| format!("failed to parse module graph {}", path.display()))?;
+    if let Some(modules) = value.get("modules") {
+        return serde_yaml::from_value(modules.clone())
+            .with_context(|| format!("failed to parse module graph {}", path.display()));
+    }
+    if value.is_sequence() {
+        return serde_yaml::from_value(value)
+            .with_context(|| format!("failed to parse module graph {}", path.display()));
+    }
+    let module: ModuleDefinition = serde_yaml::from_value(value)
+        .with_context(|| format!("failed to parse module graph {}", path.display()))?;
+    Ok(vec![module])
+}
+
+fn module_definition_from_args(args: &ModuleDeclareArgs) -> anyhow::Result<ModuleDefinition> {
+    Ok(ModuleDefinition {
+        name: args.name.clone(),
+        purpose: args.purpose.clone(),
+        layer: args.layer.clone(),
+        package: args.package.clone(),
+        capabilities: args.capabilities.clone(),
+        interfaces: args
+            .interfaces
+            .iter()
+            .map(|interface| parse_module_interface(interface))
+            .collect::<anyhow::Result<Vec<_>>>()?,
+    })
+}
+
+fn parse_module_interface(value: &str) -> anyhow::Result<ModuleInterface> {
+    let parts = value.splitn(3, ':').collect::<Vec<_>>();
+    if parts.len() != 3 {
+        bail!(
+            "module interface `{value}` must use name:visibility:surface, e.g. PasswordResetService:public:service"
+        );
+    }
+    let visibility = match parts[1] {
+        "public" => InterfaceVisibility::Public,
+        "private" => InterfaceVisibility::Private,
+        other => bail!("module interface visibility `{other}` must be public or private"),
+    };
+    Ok(ModuleInterface {
+        name: parts[0].to_string(),
+        visibility,
+        surface: parts[2].to_string(),
+    })
 }
 
 fn read_links_manifest(root: &Path, path: &Path) -> anyhow::Result<LinksManifest> {

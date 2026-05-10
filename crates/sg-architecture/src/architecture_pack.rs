@@ -130,6 +130,7 @@ mod tests {
             modules: vec![
                 ModuleDefinition {
                     name: "api".to_string(),
+                    purpose: "Serve API requests".to_string(),
                     layer: "interface".to_string(),
                     package: "api".to_string(),
                     capabilities: Vec::new(),
@@ -137,6 +138,7 @@ mod tests {
                 },
                 ModuleDefinition {
                     name: "db".to_string(),
+                    purpose: "Persist application data".to_string(),
                     layer: "infrastructure".to_string(),
                     package: "db".to_string(),
                     capabilities: Vec::new(),

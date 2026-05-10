@@ -68,13 +68,6 @@ impl SpecProjection {
 
         if let Some(module) = &self.module {
             let module_id = node_id("module", module);
-            create_nodes.push(Node {
-                id: module_id.clone(),
-                stable_key: format!("module:{module}"),
-                node_type: "Module".to_string(),
-                attributes: BTreeMap::from([("name".to_string(), json!(module))]),
-            });
-            create_edges.push(edge("node_project", "HAS_MODULE", &module_id));
             create_edges.push(edge(&spec_id, "TOUCHES_MODULE", &module_id));
         }
 

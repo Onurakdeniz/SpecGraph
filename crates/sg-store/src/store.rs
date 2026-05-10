@@ -7,6 +7,10 @@ use sg_model::{
     OperationRequest, Snapshot, EVENT_SCHEMA_VERSION, OPERATION_RECEIPT_SCHEMA_VERSION,
     OPERATION_REQUEST_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION,
 };
+use sg_module_graph::{
+    linked_modules, module_definition_from_graph, validate_module_baseline, ModuleBaselineReport,
+    ModuleDefinition, ModuleGraphProjection, ModuleSummary,
+};
 use sg_ontology::{
     load_pack, plan_pack_migration, validate_pack, OntologyMigrationAction, OntologyPackManifest,
 };
@@ -106,6 +110,10 @@ pub enum StoreError {
     ApprovalAuthorityFailed(String),
     #[error("project node not found")]
     ProjectNotFound,
+    #[error("module `{0}` not found")]
+    ModuleNotFound(String),
+    #[error("module graph input must contain at least one module")]
+    EmptyModuleGraph,
     #[error("operation semantic validation failed for {operation} with {count} error finding(s)")]
     SemanticValidationFailed { operation: String, count: usize },
     #[error("query limit exceeded: {0}")]
@@ -129,6 +137,21 @@ pub struct InitOptions {
 #[derive(Debug, Clone)]
 pub struct UpsertProjectProfileOptions {
     pub profile: ProjectProfileInput,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpsertModuleGraphOptions {
+    pub modules: Vec<ModuleDefinition>,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkModuleCapabilityOptions {
+    pub module: String,
+    pub capability: String,
     pub actor: String,
     pub graph_branch: String,
 }
@@ -356,6 +379,25 @@ impl SpecGraphStore {
 
     pub fn project_baseline(&self) -> Result<ProjectBaselineReport> {
         project_baseline(self.root())
+    }
+
+    pub fn upsert_modules(&self, options: UpsertModuleGraphOptions) -> Result<OperationReceipt> {
+        upsert_modules(self.root(), options)
+    }
+
+    pub fn link_module_capability(
+        &self,
+        options: LinkModuleCapabilityOptions,
+    ) -> Result<OperationReceipt> {
+        link_module_capability(self.root(), options)
+    }
+
+    pub fn module_baseline(&self) -> Result<ModuleBaselineReport> {
+        module_baseline(self.root())
+    }
+
+    pub fn list_modules(&self) -> Result<Vec<ModuleSummary>> {
+        list_modules(self.root())
     }
 
     pub fn replay(&self, options: ReplayOptions) -> Result<ReplayReport> {
@@ -684,6 +726,76 @@ pub fn upsert_project_profile(
 pub fn project_baseline(root: &Path) -> Result<ProjectBaselineReport> {
     let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
     Ok(validate_project_baseline(&replay.graph))
+}
+
+pub fn upsert_modules(root: &Path, options: UpsertModuleGraphOptions) -> Result<OperationReceipt> {
+    if options.modules.is_empty() {
+        return Err(StoreError::EmptyModuleGraph);
+    }
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let project = find_project_node(&replay.graph).ok_or(StoreError::ProjectNotFound)?;
+    let projection = ModuleGraphProjection {
+        project_node_id: project.id.clone(),
+        modules: options.modules.clone(),
+    };
+    let delta = projection.to_upsert_delta(&replay.graph);
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "ModuleGraph.Upsert".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "module": options.modules,
+                "relationships": {
+                    "project": project.id,
+                },
+            }),
+            delta,
+            dry_run: false,
+        },
+    )
+}
+
+pub fn link_module_capability(
+    root: &Path,
+    options: LinkModuleCapabilityOptions,
+) -> Result<OperationReceipt> {
+    if options.capability.trim().is_empty() {
+        return Err(StoreError::EmptyModuleGraph);
+    }
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let mut module = module_definition_from_graph(&replay.graph, &options.module)
+        .ok_or_else(|| StoreError::ModuleNotFound(options.module.clone()))?;
+    if !module
+        .capabilities
+        .iter()
+        .any(|capability| capability == &options.capability)
+    {
+        module.capabilities.push(options.capability);
+    }
+    upsert_modules(
+        root,
+        UpsertModuleGraphOptions {
+            modules: vec![module],
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+        },
+    )
+}
+
+pub fn module_baseline(root: &Path) -> Result<ModuleBaselineReport> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    Ok(validate_module_baseline(&replay.graph))
+}
+
+pub fn list_modules(root: &Path) -> Result<Vec<ModuleSummary>> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let project = find_project_node(&replay.graph).ok_or(StoreError::ProjectNotFound)?;
+    let mut modules = linked_modules(&replay.graph, &project.id);
+    modules.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(modules)
 }
 
 pub fn install_ontology_pack(
@@ -2324,7 +2436,11 @@ fn validate_operation_semantic_preconditions(
     request: &OperationRequest,
 ) -> Vec<Finding> {
     if matches!(request.operation.as_str(), "Spec.Create" | "Spec.Import") {
-        return validate_project_baseline(graph).findings;
+        let project_findings = validate_project_baseline(graph).findings;
+        if !project_findings.is_empty() {
+            return project_findings;
+        }
+        return validate_module_baseline(graph).findings;
     }
     Vec::new()
 }
@@ -3551,6 +3667,119 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn append_operation_blocks_spec_authoring_until_module_baseline_exists() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(tmp.path());
+        let projection = SpecProjection {
+            spec: "AUTH-001".to_string(),
+            title: "Password reset".to_string(),
+            module: None,
+            priority: None,
+            summary: None,
+            requirements: vec![sg_spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "User can request reset".to_string(),
+            }],
+            acceptance_criteria: vec![sg_spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Generic response".to_string(),
+            }],
+            ..SpecProjection::default()
+        };
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"spec": "AUTH-001"}),
+                dry_run: false,
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "Spec.Create"
+        ));
+        let report = module_baseline(tmp.path()).unwrap();
+        assert!(!report.complete);
+        assert!(report.missing.contains(&"HAS_MODULE".to_string()));
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert_eq!(replay.events_replayed, 2);
+        assert!(!replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "Spec"));
+    }
+
+    #[test]
+    fn module_import_and_link_capability_complete_baseline() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(tmp.path());
+
+        let receipt = upsert_modules(
+            tmp.path(),
+            UpsertModuleGraphOptions {
+                modules: vec![ModuleDefinition {
+                    name: "Identity".to_string(),
+                    purpose: "Owns identity workflows".to_string(),
+                    layer: "application".to_string(),
+                    package: "src/identity".to_string(),
+                    capabilities: vec!["identity".to_string()],
+                    interfaces: Vec::new(),
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt.operation, "ModuleGraph.Upsert");
+
+        link_module_capability(
+            tmp.path(),
+            LinkModuleCapabilityOptions {
+                module: "Identity".to_string(),
+                capability: "password-reset".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let report = module_baseline(tmp.path()).unwrap();
+        assert!(report.complete);
+        assert_eq!(report.module_count, 1);
+        assert!(report.modules[0]
+            .capabilities
+            .contains(&"password-reset".to_string()));
+    }
+
+    #[test]
     fn spec_import_creates_graph_facts_and_validates() {
         let tmp = tempdir().unwrap();
         init_project(
@@ -3563,6 +3792,7 @@ acceptanceCriteria:
         )
         .unwrap();
         add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
 
         let spec_path = tmp.path().join("AUTH-001.yaml");
         fs::write(
@@ -3590,7 +3820,7 @@ acceptanceCriteria:
         .unwrap();
 
         let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
-        assert_eq!(replay.events_replayed, 3);
+        assert_eq!(replay.events_replayed, 4);
         assert!(replay
             .graph
             .nodes
@@ -3619,6 +3849,7 @@ acceptanceCriteria:
         )
         .unwrap();
         add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
 
         let projection = SpecProjection {
             spec: "AUTH-001".to_string(),
@@ -3749,6 +3980,7 @@ acceptanceCriteria:
         )
         .unwrap();
         add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
 
         let error = append_operation(
             tmp.path(),
@@ -3830,6 +4062,7 @@ acceptanceCriteria:
         )
         .unwrap();
         add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
 
         let projection = SpecProjection {
             spec: "AUTH-001".to_string(),
@@ -3874,7 +4107,7 @@ acceptanceCriteria:
             .any(|edge_id| edge_id.contains("has_requirement")));
 
         let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
-        assert_eq!(replay.events_replayed, 2);
+        assert_eq!(replay.events_replayed, 3);
         assert!(!replay
             .graph
             .nodes
@@ -4016,6 +4249,7 @@ acceptanceCriteria:
         )
         .unwrap();
         add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
 
         let projection = SpecProjection {
             spec: "AUTH-001".to_string(),
@@ -4829,6 +5063,7 @@ migrations:
         )
         .unwrap();
         add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
 
         let spec_path = tmp.path().join("AUTH-001.yaml");
         fs::write(
@@ -4865,7 +5100,7 @@ acceptanceCriteria:
         .unwrap();
 
         let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
-        assert_eq!(replay.events_replayed, 4);
+        assert_eq!(replay.events_replayed, 5);
         assert!(replay
             .graph
             .nodes
@@ -4892,7 +5127,7 @@ acceptanceCriteria:
             .values()
             .find(|node| node.node_type == "GitBranch")
             .unwrap();
-        assert_eq!(branch.attributes.get("baseEventSequence"), Some(&json!(3)));
+        assert_eq!(branch.attributes.get("baseEventSequence"), Some(&json!(4)));
         assert!(branch.attributes.contains_key("baseStateHash"));
 
         let metadata_path = tmp
@@ -4901,7 +5136,7 @@ acceptanceCriteria:
         let metadata: BranchMetadata =
             serde_json::from_slice(&fs::read(metadata_path).unwrap()).unwrap();
         assert_eq!(metadata.branch, "spec/AUTH-001-password-reset");
-        assert_eq!(metadata.base_event_sequence, 3);
+        assert_eq!(metadata.base_event_sequence, 4);
         let branch_report = validate_branch_metadata(tmp.path()).unwrap();
         assert_eq!(branch_report.branches_checked, 1);
         assert!(branch_report.findings.is_empty());
@@ -4923,6 +5158,7 @@ acceptanceCriteria:
         )
         .unwrap();
         add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
 
         let spec_path = tmp.path().join("AUTH-001.yaml");
         fs::write(
@@ -5017,6 +5253,7 @@ acceptanceCriteria:
         )
         .unwrap();
         add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
         let projection = SpecProjection {
             spec: "AUTH-001".to_string(),
             title: "Password reset".to_string(),
@@ -5114,6 +5351,25 @@ acceptanceCriteria:
                     test_runner: "cargo-test".to_string(),
                     ci_provider: "github-actions".to_string(),
                 },
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+    }
+
+    fn add_module_baseline(root: &Path) {
+        upsert_modules(
+            root,
+            UpsertModuleGraphOptions {
+                modules: vec![ModuleDefinition {
+                    name: "Identity".to_string(),
+                    purpose: "Owns identity and password reset workflows".to_string(),
+                    layer: "application".to_string(),
+                    package: "src/identity".to_string(),
+                    capabilities: vec!["password-reset".to_string()],
+                    interfaces: Vec::new(),
+                }],
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },

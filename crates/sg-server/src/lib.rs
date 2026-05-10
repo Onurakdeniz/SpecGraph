@@ -661,7 +661,10 @@ mod tests {
     use serde_json::json;
     use sg_model::Node;
     use sg_spec::SpecProjection;
-    use sg_store::{InitOptions, ProjectProfileInput, UpsertProjectProfileOptions};
+    use sg_store::{
+        InitOptions, ModuleDefinition, ProjectProfileInput, UpsertModuleGraphOptions,
+        UpsertProjectProfileOptions,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -720,7 +723,7 @@ mod tests {
         assert!(receipt.dry_run);
         assert!(receipt.event_ids.is_empty());
         let status = api.status().unwrap();
-        assert_eq!(status.events_replayed, 2);
+        assert_eq!(status.events_replayed, 3);
     }
 
     #[test]
@@ -751,7 +754,7 @@ mod tests {
 
         assert!(error.message.contains("failed"));
         let status = api.status().unwrap();
-        assert_eq!(status.events_replayed, 2);
+        assert_eq!(status.events_replayed, 3);
     }
 
     fn create_spec(api: &SpecGraphApi, spec: &str, dry_run: bool) -> OperationReceipt {
@@ -801,6 +804,20 @@ mod tests {
                     test_runner: "cargo-test".to_string(),
                     ci_provider: "github-actions".to_string(),
                 },
+                actor: "local:test".to_string(),
+                graph_branch: "main".to_string(),
+            })
+            .unwrap();
+        store
+            .upsert_modules(UpsertModuleGraphOptions {
+                modules: vec![ModuleDefinition {
+                    name: "Test".to_string(),
+                    purpose: "Owns server API test specs".to_string(),
+                    layer: "application".to_string(),
+                    package: "crates/sg-server".to_string(),
+                    capabilities: vec!["api-test".to_string()],
+                    interfaces: Vec::new(),
+                }],
                 actor: "local:test".to_string(),
                 graph_branch: "main".to_string(),
             })
