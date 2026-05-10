@@ -16,16 +16,17 @@ Support YAML, Markdown, CLI wizard, and Studio authoring while graph state remai
 - YAML projection format and import are documented
 - CLI spec creation exists
 - `Spec.Create` and `Spec.Import` now require a trusted ProjectGraph profile before append.
+- `Spec.Create` and `Spec.Import` now require a trusted ModuleGraph baseline before append.
 
 ### Partly Implemented
 
 - Rich projection schema is broader than current import
-- ProjectGraph readiness is enforced; ModuleGraph baseline, spec intent splitting, and conditional gates remain planned.
+- ProjectGraph and ModuleGraph readiness are enforced; spec intent splitting and conditional gates remain planned.
 
 ### Not Implemented / Remaining
 
 - Split spec intent into `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph delta.
-- Block spec create/import before append when ModuleGraph baseline or spec intent are incomplete.
+- Block spec create/import before append when spec intent is incomplete.
 - Markdown parsing
 - CLI wizard
 - Studio authoring

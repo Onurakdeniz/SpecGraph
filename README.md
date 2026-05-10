@@ -14,6 +14,11 @@ Implemented commands:
 - `sg project profile upsert`
 - `sg project show`
 - `sg project validate`
+- `sg module import`
+- `sg module declare`
+- `sg module list`
+- `sg module validate`
+- `sg module link-capability`
 - `sg spec create`
 - `sg spec import`
 - `sg spec validate`
@@ -70,6 +75,17 @@ project:
 YAML
 cargo run -p sg-cli -- project profile upsert --file project-profile.yaml
 cargo run -p sg-cli -- project validate --gate spec-authoring
+cat > modules.yaml <<'YAML'
+modules:
+  - name: Identity
+    purpose: Owns identity and password reset workflows.
+    layer: application
+    package: src/identity
+    capabilities:
+      - password-reset
+YAML
+cargo run -p sg-cli -- module import --file modules.yaml
+cargo run -p sg-cli -- module validate --gate spec-authoring
 cargo run -p sg-cli -- spec create \
   --spec AUTH-001 \
   --title "Password reset" \
@@ -107,7 +123,7 @@ cargo run -p sg-cli -- graph replay --check
   validation/runs/
 ```
 
-For v0.1, JSONL events are the canonical history. Snapshots and indexes are derived, rebuildable state. Spec authoring is intentionally project-first: `Spec.Create` and `Spec.Import` are blocked until the ProjectGraph profile is accepted with `sg project profile upsert`.
+For v0.1, JSONL events are the canonical history. Snapshots and indexes are derived, rebuildable state. Spec authoring is intentionally project-first and module-first: `Spec.Create` and `Spec.Import` are blocked until the ProjectGraph profile is accepted with `sg project profile upsert` and at least one complete ModuleGraph baseline is accepted with `sg module import` or `sg module declare`.
 
 ## YAML Spec Projection
 
@@ -129,6 +145,7 @@ acceptanceCriteria:
 
 ```bash
 cargo run -p sg-cli -- project validate --gate spec-authoring
+cargo run -p sg-cli -- module validate --gate spec-authoring
 cargo run -p sg-cli -- spec import specs/AUTH-001.yaml
 cargo run -p sg-cli -- spec validate
 ```

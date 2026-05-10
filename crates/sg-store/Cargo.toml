@@ -12,6 +12,7 @@ serde_yaml.workspace = true
 sg-canonical.workspace = true
 sg-gitgraph.workspace = true
 sg-model.workspace = true
+sg-module-graph.workspace = true
 sg-ontology.workspace = true
 sg-operation.workspace = true
 sg-policy.workspace = true

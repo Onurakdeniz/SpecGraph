@@ -450,8 +450,8 @@ Related areas:
 - [x] Promote project-first system-flow analysis into `docs/workflows/system-flow.md`.
 - [x] Add project baseline validator for spec-authoring readiness.
 - [x] Add `sg project profile upsert/show/validate` commands.
-- [ ] Add module baseline validator for spec-authoring readiness.
-- [ ] Add `sg module import/declare/list/validate/link-capability` commands.
+- [x] Add module baseline validator for spec-authoring readiness.
+- [x] Add `sg module import/declare/list/validate/link-capability` commands.
 - [ ] Split spec intent into `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph delta.
 - [~] Add operation-specific semantic preconditions inside Operation Runtime.
 - [ ] Add agent/wizard detection and required-question planner.
@@ -459,7 +459,7 @@ Related areas:
 ### Gate Checks
 
 - [x] `Spec.Create` and `Spec.Import` fail before append when ProjectGraph baseline is incomplete.
-- [ ] `Spec.Create` and `Spec.Import` fail before append when ModuleGraph baseline is incomplete.
+- [x] `Spec.Create` and `Spec.Import` fail before append when ModuleGraph baseline is incomplete.
 - [ ] Unknown touched modules and incomplete new module declarations fail before append.
 - [~] CLI, API, SDK, and Studio all receive the same runtime findings/receipts for these gates.
 

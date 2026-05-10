@@ -75,11 +75,12 @@ Minimum trusted ProjectGraph profile before spec authoring:
 ### 3. Module baseline acceptance
 
 ```bash
-sg module detect --dry-run
 sg module import modules.yaml
 sg module validate --gate spec-authoring
 sg module list
 ```
+
+`sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, and `sg module link-capability` are implemented. Automatic `sg module detect --dry-run` remains a planned observation command; detected module facts must still be accepted through `ModuleGraph.Upsert` before they are trusted.
 
 Minimum trusted ModuleGraph baseline before spec authoring:
 
@@ -195,7 +196,7 @@ Operation Runtime must own the gates so CLI/API/SDK/Studio cannot bypass them.
 
 | Operation | Required semantic gates |
 |---|---|
-| `Spec.Create` / `Spec.Import` | Project baseline (implemented), Module baseline, spec module consistency, planned object ownership, conditional requirements |
+| `Spec.Create` / `Spec.Import` | Project baseline (implemented), Module baseline (implemented), spec module consistency, planned object ownership, conditional requirements |
 | `Spec.BindBranch` | Spec validity, project/module gates, branch naming, base snapshot |
 | `ActionGraph.Generate` | Valid spec context, module/architecture/data/security scope, no blocking findings |
 | `GitCommit.Record` | CommitPlan scope, active branch, required validation/test evidence |
@@ -247,7 +248,7 @@ Agents must not immediately write specs, invent project/module facts, treat obse
 The canonical implementation plan tracks this as the post-Phase 7 final closure sequence:
 
 1. Project baseline validator and `sg project` CLI. **Implemented for ProjectGraph profile facts and the spec-authoring runtime gate.**
-2. Module baseline validator and `sg module` CLI.
+2. Module baseline validator and `sg module` CLI. **Implemented for ModuleGraph baseline facts and the spec-authoring runtime gate.**
 3. Spec projection separation: `touchesModules`, `moduleChanges`, `plannedObjects`, intended graph delta.
 4. Operation-specific semantic gates for spec, branch, action, commit, validation, and proposal acceptance.
 5. Agent/wizard detection and required-question planner.

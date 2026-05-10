@@ -774,6 +774,7 @@ dependencies = [
 name = "sg-module-graph"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "sg-model",
 ]
@@ -885,6 +886,7 @@ dependencies = [
  "sg-canonical",
  "sg-gitgraph",
  "sg-model",
+ "sg-module-graph",
  "sg-ontology",
  "sg-operation",
  "sg-policy",

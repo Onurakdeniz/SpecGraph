@@ -1,0 +1,11 @@
+modules:
+  - name: Identity
+    purpose: Owns user identity, authentication, and password reset workflows.
+    layer: application
+    package: src/identity
+    capabilities:
+      - password-reset
+    interfaces:
+      - name: PasswordResetService
+        visibility: public
+        surface: service
