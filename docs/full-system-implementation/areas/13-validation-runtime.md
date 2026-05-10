@@ -12,6 +12,7 @@ Run deterministic validators, emit structured findings, record validation runs, 
 
 ### Fully Implemented
 
+- Project-first workflow validators are specified in `docs/workflows/system-flow.md`.
 - MVP validators are listed
 - ci validate --record creates ValidationRun according to README
 - Common `Finding` schema includes validator id, validator version, structured locations, remediation, and related graph objects
@@ -28,6 +29,7 @@ Run deterministic validators, emit structured findings, record validation runs, 
 
 ### Not Implemented / Remaining
 
+- Implement validators for project baseline, module baseline, spec authoring preconditions, module consistency, planned object ownership, conditional requirements, action context, commit plan scope, and traceability completeness.
 - Finding lifecycle
 - Waiver interaction
 - Machine-readable PR/Studio reports

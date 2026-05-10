@@ -2,7 +2,7 @@
 
 **System area:** Spec Authoring  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** workflow review after promoting project-first system flow.
 
 ## Purpose
 
@@ -12,6 +12,7 @@ Support YAML, Markdown, CLI wizard, and Studio authoring while graph state remai
 
 ### Fully Implemented
 
+- `docs/workflows/system-flow.md` defines project-first spec authoring preconditions.
 - YAML projection format and import are documented
 - CLI spec creation exists
 
@@ -21,6 +22,8 @@ Support YAML, Markdown, CLI wizard, and Studio authoring while graph state remai
 
 ### Not Implemented / Remaining
 
+- Split spec intent into `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph delta.
+- Block spec create/import before append when project/module baselines or spec intent are incomplete.
 - Markdown parsing
 - CLI wizard
 - Studio authoring

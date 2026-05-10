@@ -263,6 +263,21 @@ Every area must be closed by this plan. The phase/slice listed below is the prim
 
 **Phase 7 gate:** CLI, server, SDK, Studio, examples, docs, performance, and release artifacts all use the same graph/operation/policy/runtime path.
 
+
+## Post-Phase 7 Final Closure Sequence — Project-First System Flow
+
+This section is part of the canonical plan; it is not a second roadmap. It promotes the project-first / graph-first workflow in [`docs/workflows/system-flow.md`](../workflows/system-flow.md) into the remaining implementation order.
+
+| Slice | Feature | Areas | Commit | Done when |
+|---|---|---|---|---|
+| F.1 | Project baseline validator and CLI | 15, 02, 09, 13 | `feat: enforce project baseline before specs` | `sg project profile upsert/show/validate` exists; `Spec.Create`/`Spec.Import` are blocked until required project profile facts are trusted. |
+| F.2 | Module baseline validator and CLI | 16, 02, 09, 13 | `feat: enforce module baseline before specs` | `sg module import/declare/list/validate/link-capability` exists; at least one valid module with purpose/layer/package/capability is required before spec authoring. |
+| F.3 | Spec intent model separation | 21, 22, 23, 16 | `feat: separate spec module intent and planned objects` | Specs distinguish `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph deltas; unknown/incomplete module intent is rejected before append. |
+| F.4 | Operation-specific semantic gates | 09, 13, 21, 24, 25, 27, 36 | `feat: add operation semantic preconditions` | Spec, branch, action, commit, validation, and proposal acceptance run semantic preconditions inside Operation Runtime, not only CLI. |
+| F.5 | Agent/wizard required-question planner | 02, 15, 16, 22, 40 | `feat: add project-first workflow planner` | Detection output remains untrusted; planner asks required missing project/module/spec context first, separates optional suggestions, and produces dry-run receipts before acceptance. |
+
+**Final closure gate:** a new repository cannot create/import specs until ProjectGraph and ModuleGraph baselines are trusted; all outer surfaces use the same runtime gates.
+
 ## Final Full-System Definition of Done
 
 The project is complete only when all are true:

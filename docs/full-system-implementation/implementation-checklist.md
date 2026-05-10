@@ -430,6 +430,41 @@ Related areas:
 
 ---
 
+
+## Post-Phase 7 Final Closure — Project-First System Flow
+
+Related areas:
+
+- [15. ProjectGraph](areas/15-projectgraph.md)
+- [16. ModuleGraphs](areas/16-modulegraphs.md)
+- [21. SpecGraph](areas/21-specgraph.md)
+- [22. Spec Authoring](areas/22-spec-authoring.md)
+- [23. Spec State Machine](areas/23-spec-state-machine.md)
+- [24. ActionGraph](areas/24-actiongraph.md)
+- [25. CommitPlan](areas/25-commitplan.md)
+- [09. Operation Runtime ABI](areas/09-operation-runtime-abi.md)
+- [13. Validation Runtime](areas/13-validation-runtime.md)
+
+### Implementation Checklist
+
+- [x] Promote project-first system-flow analysis into `docs/workflows/system-flow.md`.
+- [ ] Add project baseline validator for spec-authoring readiness.
+- [ ] Add `sg project profile upsert/show/validate` commands.
+- [ ] Add module baseline validator for spec-authoring readiness.
+- [ ] Add `sg module import/declare/list/validate/link-capability` commands.
+- [ ] Split spec intent into `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph delta.
+- [ ] Add operation-specific semantic preconditions inside Operation Runtime.
+- [ ] Add agent/wizard detection and required-question planner.
+
+### Gate Checks
+
+- [ ] `Spec.Create` and `Spec.Import` fail before append when ProjectGraph baseline is incomplete.
+- [ ] `Spec.Create` and `Spec.Import` fail before append when ModuleGraph baseline is incomplete.
+- [ ] Unknown touched modules and incomplete new module declarations fail before append.
+- [ ] CLI, API, SDK, and Studio all receive the same runtime findings/receipts for these gates.
+
+---
+
 ## Final Full-System Definition of Done
 
 The full project is complete when all of these are checked:
