@@ -27,12 +27,13 @@ Protect trusted core from malicious LLMs, hook bypass, event tampering, secret l
 - Event replay now rejects sequence gaps, previous-event chain breaks, and pre/post hash tampering
 - Ontology pack source/signature metadata is validated and locked; event signatures and sandboxing remain
 - Adapter capability descriptors and adapter-output trust validation prevent direct `Accepted`/`Trusted` promotion by observation adapters
+- Built-in adapter catalog validates signatures and high-risk capabilities such as sandbox, LLM patch proposal, database schema read, provider checks, and CI validation
+- Patch sandbox guardrails deny secret paths, production paths, network/provider/deploy commands, shell chaining, and non-allowlisted commands before execution
+- `sg security audit` validates replay, adapter catalog security capabilities, and event signature metadata warnings/errors
 
 ### Not Implemented / Remaining
 
-- Capability model beyond current adapter descriptor foundation
-- Cryptographic signed events/packs verification beyond pack metadata hardening
-- Secret prevention at tool level
+- Cryptographic signed events verification beyond signature metadata audit
 - Security review workflows
 
 ## Implementation Parts
@@ -43,11 +44,11 @@ Risk, Mitigation, Approval, Waiver, PolicyDecision, Signature, pack trust metada
 
 ### 2. Commands / APIs
 
-Policy checks and `python3 scripts/check_architecture_boundaries.py` now; future signature/trust/security report commands
+Policy checks, `sg security audit`, adapter catalog validation, patch sandbox guardrails, and `python3 scripts/check_architecture_boundaries.py` now; future cryptographic signature verification commands
 
 ### 3. Validation and Policy Gates
 
-CI repeats checks, event hash/previous-event chain validation, architecture boundary checks, deny secrets/production by default, migrations require approval, packs are locked/signed/sandboxed
+CI repeats checks, event hash/previous-event chain validation, architecture boundary checks, adapter capability checks, patch sandbox denials, deny secrets/production by default, migrations require approval, packs are locked/signed/sandboxed
 
 
 ### Pack Supply-Chain Boundary
@@ -59,7 +60,7 @@ CI repeats checks, event hash/previous-event chain validation, architecture boun
 
 ### Adapter Trust Boundary
 
-- Adapter descriptors declare explicit capabilities such as filesystem read, code indexing, and observation emission.
+- Adapter descriptors declare explicit capabilities for Git, filesystem, package manifests, test runners, database schema observation, CI, hosting checks, LLM proposals, and patch sandbox execution.
 - `validate_adapter_delta` rejects adapter-created nodes that attempt to mark themselves `Accepted` or `Trusted`.
 - Current code-index and adoption adapters stamp observations with `trustState: Observed`, `sourceTrust: Observation`, and `observedBy` provenance.
 
@@ -67,9 +68,7 @@ CI repeats checks, event hash/previous-event chain validation, architecture boun
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep trusted-core dependency/import deny lists current as new security-sensitive layers or providers are introduced.
-- Implement or finish: Capability model beyond current adapter descriptor foundation.
-- Implement or finish: Cryptographic signed events/packs verification beyond pack metadata hardening.
-- Implement or finish: Secret prevention at tool level.
+- Implement or finish: cryptographic signed event verification beyond metadata audit.
 - Implement or finish: Security review workflows.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.

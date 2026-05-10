@@ -649,8 +649,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "hex",
  "serde_json",
  "serde_yaml",
+ "sg-adapter-api",
  "sg-adapter-code",
  "sg-adapter-hosting",
  "sg-adoption",
@@ -667,6 +669,7 @@ dependencies = [
  "sg-store",
  "sg-testgraph",
  "sg-validation",
+ "sha2",
 ]
 
 [[package]]
@@ -826,6 +829,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sg-model",
+ "sg-validation",
 ]
 
 [[package]]

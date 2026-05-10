@@ -29,5 +29,12 @@ jobs:
         run: cargo test --workspace --all-targets
       - name: Proof scenario
         run: cargo run -p sg-cli -- proof run
+      - name: SpecGraph CI validation
+        run: |
+          if [ -d .specgraph ]; then
+            cargo run -p sg-cli -- ci validate --report-file .specgraph/validation/ci-report.json
+          else
+            echo "SpecGraph store not initialized in this checkout; skipping sg ci validate"
+          fi
       - name: CLI smoke test
         run: cargo run -p sg-cli -- --version

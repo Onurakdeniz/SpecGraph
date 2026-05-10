@@ -270,6 +270,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "package:crates/sg-core",
     },
     StableKeyFamily {
+        prefix: "patch-sandbox-run",
+        description: "Patch sandbox validation run evidence",
+        example: "patch-sandbox-run:PROP-001/run-001",
+    },
+    StableKeyFamily {
         prefix: "ontology-pack",
         description: "Ontology pack manifest",
         example: "ontology-pack:ddd-backend",
@@ -383,6 +388,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "proposal",
         description: "Untrusted proposal",
         example: "proposal:PROP-001",
+    },
+    StableKeyFamily {
+        prefix: "proposal-acceptance",
+        description: "Proposal acceptance evidence",
+        example: "proposal-acceptance:PROP-001/run-001",
     },
     StableKeyFamily {
         prefix: "revalidation-queue",
