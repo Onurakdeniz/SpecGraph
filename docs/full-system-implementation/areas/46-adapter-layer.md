@@ -1,7 +1,7 @@
 # 46. Adapter Layer
 
-**System area:** Adapter Layer  
-**Implementation status:** 🟡 Partly implemented  
+**System area:** Adapter Layer
+**Implementation status:** 🟡 Partly implemented
 **Status basis:** code audit plus architecture boundary checks and Phase 2.9 adapter capability/trust implementation slice.
 
 ## Purpose
@@ -18,6 +18,8 @@ Connect Git, filesystem, code indexers, test runners, CI, LLMs, package managers
 - Unified adapter descriptor foundation declares adapter ids, kinds, and capabilities
 - Adapter delta validation enforces observed trust state, source trust, and observedBy provenance
 - `sg-adapter-api`, `sg-adapter-code`, `sg-adapter-git`, `sg-adapter-test`, `sg-adapter-ci`, `sg-adapter-hosting`, `sg-adapter-llm`, and `sg-adoption` exist as adapter/observation boundary crates
+- Hosting adapter helpers map SpecGraph findings into provider-native check reports while keeping check runs/annotations observed and untrusted
+- LLM adapter helpers expose typed proposal schemas and validation only; proposals remain untrusted until accepted by operations
 - `scripts/check_architecture_boundaries.py` now checks adapter-facing crates for direct `Accepted`/`Trusted` promotion
 
 ### Partly Implemented
@@ -25,7 +27,7 @@ Connect Git, filesystem, code indexers, test runners, CI, LLMs, package managers
 - Git/filesystem/code/CI foundations exist in owning crates instead of inside `sg-core`
 - Capability and provenance rules are now enforced for current code-index and adoption observation deltas
 - The automated boundary check prevents obvious trust-promotion regressions; provider-specific adapter runtimes remain future work
-- Package/test/DB/LLM adapters incomplete
+- Package/test/DB/provider-publishing adapters incomplete
 
 ### Not Implemented / Remaining
 
@@ -61,7 +63,7 @@ Adapter output is bounded, provenance-tagged, observed, and validated before pro
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep adapter implementations aligned with `docs/architecture/boundaries.md`.
 - Keep architecture-boundary trust-promotion checks aligned with new adapter-facing modules.
-- Implement or finish: Provider-specific adapter runtimes beyond the core descriptor foundation.
+- Implement or finish: Provider-specific adapter runtimes beyond the current observed hosting-report and LLM-proposal foundations.
 - Implement or finish: Capability enforcement across future adapter crates/providers.
 - Implement or finish: Package/test/migration adapters.
 - Implement or finish: Adapter provenance beyond current observedBy/sourceTrust foundation.

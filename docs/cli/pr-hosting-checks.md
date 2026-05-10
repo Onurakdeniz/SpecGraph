@@ -1,0 +1,45 @@
+# PR Hosting Checks
+
+SpecGraph PR integration is provider-neutral. `sg pr validate` emits a portable JSON report that a GitHub Action, GitLab CI job, or future hosting adapter can publish as a required provider check.
+
+## Local/CI flow
+
+```bash
+sg pr sync \
+  --provider github \
+  --number "$PR_NUMBER" \
+  --branch "$HEAD_BRANCH" \
+  --target-branch "$BASE_BRANCH" \
+  --head-sha "$HEAD_SHA" \
+  --base-sha "$BASE_SHA" \
+  --actor local:hosting
+
+sg pr validate \
+  --provider github \
+  --number "$PR_NUMBER" \
+  --repository "$OWNER/$REPO" \
+  --report-file .specgraph/validation/provider-check.json \
+  --record \
+  --actor local:ci
+```
+
+The report schema is `specgraph.hosting-check-report/v1`. It contains a `SpecGraph Validation` check run, conclusion, summary, and line/file annotations derived from SpecGraph findings.
+
+## Protected branch setup
+
+Configure the hosting provider so the required status/check name is:
+
+```text
+SpecGraph Validation
+```
+
+Recommended rules:
+
+- require the SpecGraph validation check before merge;
+- require the branch to be up to date with the base branch;
+- require review/approval policies separately from SpecGraph's graph-native approvals;
+- treat provider facts as observations only; trusted state must still be appended through SpecGraph Operation Runtime receipts.
+
+## Current adapter boundary
+
+This phase writes provider-native check data as JSON and graph evidence. Publishing the check to GitHub/GitLab APIs is intentionally left to CI glue or a future provider adapter so the trusted core never depends on provider SDKs or network APIs.

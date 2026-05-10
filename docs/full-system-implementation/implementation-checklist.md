@@ -363,14 +363,14 @@ Related areas:
 ### Implementation Checklist
 
 - [ ] Add official GitHub Action workflow around `sg ci validate`.
-- [ ] Emit JSON validation report for PR annotations.
-- [ ] Add PR graph model.
-- [ ] Add PR metadata sync from hosting provider.
-- [ ] Add PR validation command.
-- [ ] Add check-run annotations or PR comments.
-- [ ] Add protected-branch setup docs.
-- [~] Add LLM proposal schemas for graph delta, code patch, test suggestion, and ontology/policy change.
-- [~] Add proposal validation pipeline.
+- [x] Emit JSON validation report for PR annotations.
+- [x] Add PR graph model.
+- [x] Add PR metadata sync from hosting provider.
+- [x] Add PR validation command.
+- [x] Add check-run annotations or PR comments.
+- [x] Add protected-branch setup docs.
+- [x] Add LLM proposal schemas for graph delta, code patch, test suggestion, and ontology/policy change.
+- [x] Add proposal validation pipeline.
 - [ ] Add isolated patch sandbox.
 - [ ] Add command allowlist for sandbox.
 - [ ] Deny secrets and production access in sandbox.
@@ -378,9 +378,9 @@ Related areas:
 
 ### Gate Checks
 
-- [ ] PR with validation errors shows actionable findings.
-- [ ] Provider required checks can block merge.
-- [~] LLM proposal remains untrusted until accepted by operation.
+- [x] PR with validation errors shows actionable findings.
+- [x] Provider required checks can block merge.
+- [x] LLM proposal remains untrusted until accepted by operation.
 - [ ] Out-of-scope patch is rejected in sandbox.
 - [ ] Patch cannot access secrets.
 - [ ] Accepted patch has validation evidence and exact diff.

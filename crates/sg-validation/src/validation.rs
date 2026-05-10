@@ -6,6 +6,7 @@ pub const VALIDATOR_CODE_SCOPE: &str = "validator.code_scope";
 pub const VALIDATOR_CROSS_DOMAIN_TRACE: &str = "validator.cross_domain_trace";
 pub const VALIDATOR_BRANCH_METADATA: &str = "validator.branch_metadata";
 pub const VALIDATOR_GIT_BINDING: &str = "validator.git_binding";
+pub const VALIDATOR_PR_HOSTING: &str = "validator.pr_hosting";
 pub const VALIDATOR_ONTOLOGY: &str = "validator.ontology";
 pub const VALIDATOR_ONTOLOGY_PACK: &str = "validator.ontology_pack";
 pub const VALIDATOR_OPERATION_ABI: &str = "validator.operation_abi";
@@ -74,6 +75,12 @@ pub fn built_in_validators() -> Vec<ValidatorDefinition> {
             version: CORE_VALIDATOR_VERSION,
             system_area: "Policy Engine",
             description: "Evaluates built-in and manifest policy rules, approvals, roles, and waivers.",
+        },
+        ValidatorDefinition {
+            id: VALIDATOR_PR_HOSTING,
+            version: CORE_VALIDATOR_VERSION,
+            system_area: "PR and Hosting Integration",
+            description: "Validates observed pull request metadata, hosting check evidence, and links to GitGraph/ValidationRun.",
         },
         ValidatorDefinition {
             id: VALIDATOR_GIT_BINDING,

@@ -590,7 +590,10 @@ dependencies = [
 name = "sg-adapter-hosting"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "sg-gitgraph",
+ "sg-model",
 ]
 
 [[package]]
@@ -649,6 +652,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sg-adapter-code",
+ "sg-adapter-hosting",
  "sg-adoption",
  "sg-gitgraph",
  "sg-impact",
@@ -821,6 +825,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sg-model",
 ]
 
 [[package]]

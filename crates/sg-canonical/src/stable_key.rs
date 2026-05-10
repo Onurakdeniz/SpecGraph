@@ -345,6 +345,41 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "project-type:backend-api",
     },
     StableKeyFamily {
+        prefix: "provider-check-run",
+        description: "Provider-native check run observation",
+        example: "provider-check-run:github/org-repo/1/specgraph-validation",
+    },
+    StableKeyFamily {
+        prefix: "provider-check-annotation",
+        description: "Provider-native check annotation observation",
+        example: "provider-check-annotation:github/org-repo/1/0",
+    },
+    StableKeyFamily {
+        prefix: "proposed-graph-delta",
+        description: "Untrusted proposed graph delta",
+        example: "proposed-graph-delta:PROP-001",
+    },
+    StableKeyFamily {
+        prefix: "proposed-code-patch",
+        description: "Untrusted proposed code patch",
+        example: "proposed-code-patch:PROP-001",
+    },
+    StableKeyFamily {
+        prefix: "proposed-test-suggestion",
+        description: "Untrusted proposed test suggestion",
+        example: "proposed-test-suggestion:PROP-001",
+    },
+    StableKeyFamily {
+        prefix: "proposed-ontology-change",
+        description: "Untrusted proposed ontology change",
+        example: "proposed-ontology-change:PROP-001",
+    },
+    StableKeyFamily {
+        prefix: "proposed-policy-change",
+        description: "Untrusted proposed policy change",
+        example: "proposed-policy-change:PROP-001",
+    },
+    StableKeyFamily {
         prefix: "proposal",
         description: "Untrusted proposal",
         example: "proposal:PROP-001",
