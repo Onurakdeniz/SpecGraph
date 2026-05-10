@@ -1,0 +1,10 @@
+project:
+  name: backend-api-typescript
+  type: backend-api
+  architecture: modular-monolith
+  languages:
+    - javascript
+    - typescript
+  packageManager: npm
+  testRunner: node-test
+  ciProvider: github-actions

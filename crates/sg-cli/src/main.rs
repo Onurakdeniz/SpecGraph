@@ -33,9 +33,10 @@ use sg_server::{
 use sg_spec::{SpecProjection, TextItem};
 use sg_store::{
     ActionLifecycleOptions, AppendOperationOptions, BindBranchOptions, CreateWaiverOptions,
-    GenerateActionGraphOptions, GrantRoleOptions, InitOptions, RecordApprovalOptions,
-    RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions, ReplayReport, SpecGraphStore,
-    TransitionSpecOptions, UpsertActorOptions,
+    GenerateActionGraphOptions, GrantRoleOptions, InitOptions, ProjectProfileInput,
+    RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions, ReplayOptions,
+    ReplayReport, SpecGraphStore, TransitionSpecOptions, UpsertActorOptions,
+    UpsertProjectProfileOptions,
 };
 use sg_testgraph::{
     validate_required_tests_pass, validate_trace_links, LinksManifest, TestCaseResult, TestLink,
@@ -107,6 +108,8 @@ impl OutputConfig {
 enum Commands {
     /// Initialize .specgraph metadata in the current repository.
     Init(InitArgs),
+    /// Project profile and baseline commands.
+    Project(ProjectArgs),
     /// Spec authoring and validation commands.
     Spec(SpecArgs),
     /// Ontology pack commands.
@@ -163,6 +166,55 @@ struct InitArgs {
     actor: String,
     #[arg(long, default_value = "main")]
     graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ProjectArgs {
+    #[command(subcommand)]
+    command: ProjectCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectCommand {
+    /// Upsert the graph-native project profile from a YAML/JSON file.
+    Profile(ProjectProfileArgs),
+    /// Show current project baseline readiness.
+    Show,
+    /// Validate project baseline gates.
+    Validate(ProjectValidateArgs),
+}
+
+#[derive(Debug, Args)]
+struct ProjectProfileArgs {
+    #[command(subcommand)]
+    command: ProjectProfileCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectProfileCommand {
+    /// Accept project profile facts through Operation Runtime.
+    Upsert(ProjectProfileUpsertArgs),
+}
+
+#[derive(Debug, Args)]
+struct ProjectProfileUpsertArgs {
+    #[arg(long)]
+    file: PathBuf,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ProjectValidateArgs {
+    #[arg(long, value_enum, default_value_t = ProjectGate::SpecAuthoring)]
+    gate: ProjectGate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ProjectGate {
+    SpecAuthoring,
 }
 
 #[derive(Debug, Args)]
@@ -1058,6 +1110,7 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Init(args) => handle_init(&store, &root, args)?,
+        Commands::Project(args) => handle_project(&store, &root, args, output)?,
         Commands::Spec(args) => handle_spec(&store, &root, args)?,
         Commands::Ontology(args) => handle_ontology(&store, &root, args)?,
         Commands::Operation(args) => handle_operation(args),
@@ -1099,6 +1152,79 @@ fn handle_init(store: &SpecGraphStore, root: &Path, args: InitArgs) -> anyhow::R
     println!("initialized: {}", store.specgraph_dir().display());
     println!("operationId: {}", receipt.operation_id);
     println!("stateHash: {}", receipt.post_state_hash);
+    Ok(())
+}
+
+fn handle_project(
+    store: &SpecGraphStore,
+    root: &Path,
+    args: ProjectArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
+    match args.command {
+        ProjectCommand::Profile(args) => match args.command {
+            ProjectProfileCommand::Upsert(args) => {
+                let profile = read_project_profile_input(root, &args.file)?;
+                let receipt = store.upsert_project_profile(UpsertProjectProfileOptions {
+                    profile,
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                })?;
+                if output.json() {
+                    print_json(&json!({
+                        "schemaVersion": "specgraph.cli/v1",
+                        "command": "sg project profile upsert",
+                        "status": "accepted",
+                        "receipt": receipt,
+                    }))?;
+                } else if !output.quiet {
+                    println!("projectProfileUpserted: true");
+                    println!("operationId: {}", receipt.operation_id);
+                    println!("stateHash: {}", receipt.post_state_hash);
+                }
+            }
+        },
+        ProjectCommand::Show => {
+            let report = store.project_baseline()?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg project show",
+                    "status": if report.complete { "ready" } else { "incomplete" },
+                    "projectBaseline": report,
+                }))?;
+            } else if !output.quiet {
+                println!("projectBaselineComplete: {}", report.complete);
+                println!(
+                    "projectNodeId: {}",
+                    report.project_node_id.as_deref().unwrap_or("none")
+                );
+                println!("missing: {}", report.missing.join(","));
+                print_findings(&report.findings);
+            }
+        }
+        ProjectCommand::Validate(args) => {
+            let report = store.project_baseline()?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg project validate",
+                    "status": if report.complete { "passed" } else { "failed" },
+                    "gate": format!("{:?}", args.gate),
+                    "projectBaseline": report,
+                }))?;
+            } else if !output.quiet {
+                println!("gate: {:?}", args.gate);
+                println!("projectBaselineComplete: {}", report.complete);
+                println!("missing: {}", report.missing.join(","));
+                print_findings(&report.findings);
+            }
+            fail_on_errors(&report.findings, "project baseline validation")?;
+            if !output.quiet && !output.json() {
+                println!("project: baseline ok");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3055,6 +3181,20 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         graph_branch: "main".to_string(),
     })?;
     println!("proof:init ok");
+    store.upsert_project_profile(UpsertProjectProfileOptions {
+        profile: ProjectProfileInput {
+            project_name: Some("proof-demo".to_string()),
+            project_type: "developer-tooling".to_string(),
+            architecture: "modular-workspace".to_string(),
+            languages: vec!["rust".to_string()],
+            package_manager: "cargo".to_string(),
+            test_runner: "cargo-test".to_string(),
+            ci_provider: "github-actions".to_string(),
+        },
+        actor: "proof".to_string(),
+        graph_branch: "main".to_string(),
+    })?;
+    println!("proof:project-profile ok");
 
     let projection = SpecProjection {
         spec: "AUTH-001".to_string(),
@@ -3560,6 +3700,21 @@ fn validate_git_range(
     fail_on_errors(&all_findings, "git binding validation")?;
     println!("git: bindings ok");
     Ok(())
+}
+
+fn read_project_profile_input(root: &Path, path: &Path) -> anyhow::Result<ProjectProfileInput> {
+    let path = resolve_path(root, path.to_path_buf());
+    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let value: serde_yaml::Value = serde_yaml::from_slice(&bytes)
+        .with_context(|| format!("failed to parse project profile {}", path.display()))?;
+    if let Some(project) = value.get("project") {
+        if project.is_mapping() {
+            return serde_yaml::from_value(project.clone())
+                .with_context(|| format!("failed to parse project profile {}", path.display()));
+        }
+    }
+    serde_yaml::from_value(value)
+        .with_context(|| format!("failed to parse project profile {}", path.display()))
 }
 
 fn read_links_manifest(root: &Path, path: &Path) -> anyhow::Result<LinksManifest> {

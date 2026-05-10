@@ -6,6 +6,8 @@ From the repository root:
 
 ```bash
 cargo run -p sg-cli -- --root examples/backend-api-typescript init --project-name backend-api-typescript
+cargo run -p sg-cli -- --root examples/backend-api-typescript project profile upsert --file project-profile.yaml
+cargo run -p sg-cli -- --root examples/backend-api-typescript project validate --gate spec-authoring
 cargo run -p sg-cli -- --root examples/backend-api-typescript spec import specs/AUTH-001.yaml
 cargo run -p sg-cli -- --root examples/backend-api-typescript spec validate
 cargo run -p sg-cli -- --root examples/backend-api-typescript spec bind-branch \

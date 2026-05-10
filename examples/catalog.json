@@ -7,7 +7,7 @@
       "area": "full-loop",
       "happyPath": "docs/happy-path.md",
       "failurePath": "docs/failure-path.md",
-      "commands": ["sg init", "sg spec import", "sg action generate", "sg code index", "sg trace validate", "sg ci validate"]
+      "commands": ["sg init", "sg project profile upsert", "sg project validate", "sg spec import", "sg action generate", "sg code index", "sg trace validate", "sg ci validate"]
     },
     {
       "id": "architecture-pack-boundary",
