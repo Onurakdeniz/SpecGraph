@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Future SpecGraph OS TypeScript SDK package boundary. Runtime implementation arrives in Phase 7.",
+  "description": "SpecGraph OS TypeScript SDK schema/client surface that talks to the server API and receives Operation Runtime receipts.",
   "exports": {
     ".": "./src/index.ts"
-  }
+  },
+  "types": "./src/index.ts"
 }

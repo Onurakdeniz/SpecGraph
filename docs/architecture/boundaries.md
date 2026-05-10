@@ -105,8 +105,8 @@ The Rust workspace is now split into owning crates. `sg-core` remains only as a 
 | `crates/sg-{store,operation,ontology,policy,validation,query}/**` | Trusted runtime crates | Own store, operation runtime, ontology, policy, validation, and query layers. |
 | `crates/sg-{project,module-graph,architecture,data,spec,action,gitgraph,codegraph,testgraph,impact,merge,issue,proposal}/**` | Domain graph/runtime crates | Own domain-specific graph/runtime implementation. |
 | `crates/sg-adoption/**`, `crates/sg-adapter-*/**` | Adapter and observation boundary crates | Own untrusted observation/proposal APIs and must not gain trusted append authority. |
-| `crates/sg-server/**`, `crates/sg-sdk/**` | Future server/SDK Rust boundaries | Compile-time package boundaries for Phase 7 API/SDK work; they depend inward on runtime/query schemas and not on `sg-core`. |
-| `packages/sdk-typescript/**`, `packages/studio/**` | Future TypeScript SDK and Studio boundaries | Package boundaries only; future implementation must use API/runtime contracts and never mutate `.specgraph` directly. |
+| `crates/sg-server/**`, `crates/sg-sdk/**` | Server/SDK Rust boundaries | Transport-neutral API and SDK client surfaces for Phase 7; they depend inward on runtime/query schemas, route writes through Operation Runtime, and do not depend on `sg-core`. |
+| `packages/sdk-typescript/**`, `packages/studio/**` | TypeScript SDK and Studio boundaries | SDK uses API/runtime contracts and receipts; Studio remains future and must never mutate `.specgraph` directly. |
 | `crates/sg-model/src/lib.rs` | Trusted foundation crate | Graph objects, deltas, findings, receipts, and common data model. |
 | `crates/sg-canonical/src/*.rs` | Trusted foundation crate | Canonical serialization, hashing, and stable-key validation. |
 | `crates/sg-store/src/**` | Trusted runtime with local persistence boundary | Owns event/snapshot operations and local filesystem persistence. Ambient filesystem access must stay behind explicit store/runtime APIs. |

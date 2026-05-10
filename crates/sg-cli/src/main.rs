@@ -1,5 +1,5 @@
 use anyhow::{bail, Context};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::json;
 use sg_adapter_api::{built_in_adapter_catalog, validate_adapter_catalog};
 use sg_adapter_code::{index_source_file, observations_to_delta, CodeIndexObservation};
@@ -26,6 +26,10 @@ use sg_proposal::{
     PatchSandboxPolicy, PatchSandboxReport, PatchSandboxStatus, Proposal, TrustState,
 };
 use sg_query::{GraphQuery, QueryContext, QueryLimits, QueryTarget};
+use sg_server::{
+    ApiGraphTarget, ApiOperationRequest, ApiQueryLimits, ApiQueryRequest, ApiQuerySelector,
+    SpecGraphApi,
+};
 use sg_spec::{SpecProjection, TextItem};
 use sg_store::{
     ActionLifecycleOptions, AppendOperationOptions, BindBranchOptions, CreateWaiverOptions,
@@ -81,6 +85,8 @@ enum Commands {
     Impact(ImpactArgs),
     /// Adapter catalog and capability commands.
     Adapter(AdapterArgs),
+    /// Transport-neutral API server surface commands.
+    Api(ApiArgs),
     /// Pull request and hosting-provider integration commands.
     Pr(PrArgs),
     /// Untrusted proposal commands.
@@ -417,6 +423,62 @@ enum AdapterCommand {
         #[arg(long)]
         check: bool,
     },
+}
+
+#[derive(Debug, Args)]
+struct ApiArgs {
+    #[command(subcommand)]
+    command: ApiCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ApiCommand {
+    /// List stable server API routes and whether they can mutate the graph.
+    Routes,
+    /// Check whether the local .specgraph store exists.
+    Health,
+    /// Read current replay status and node type counts through the server surface.
+    Status,
+    /// Query graph/spec/action/finding views through the read-only server surface.
+    Query(ApiQueryCliArgs),
+    /// Run read-only validation finding queries.
+    Findings,
+    /// Submit a mutating or dry-run operation through the Operation Runtime.
+    Mutate(ApiMutateArgs),
+}
+
+#[derive(Debug, Args)]
+struct ApiQueryCliArgs {
+    #[arg(long, value_enum, default_value_t = ApiQueryView::All)]
+    view: ApiQueryView,
+    #[arg(long = "node-type")]
+    node_type: Option<String>,
+    #[arg(long = "stable-key")]
+    stable_key: Option<String>,
+    #[arg(long)]
+    branch: Option<String>,
+    #[arg(long)]
+    snapshot: Option<String>,
+    #[arg(long = "max-nodes", default_value_t = 1_000)]
+    max_nodes: usize,
+    #[arg(long = "max-edges", default_value_t = 5_000)]
+    max_edges: usize,
+    #[arg(long = "max-depth", default_value_t = 4)]
+    max_depth: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ApiQueryView {
+    All,
+    Specs,
+    Actions,
+    Findings,
+}
+
+#[derive(Debug, Args)]
+struct ApiMutateArgs {
+    /// JSON or YAML ApiOperationRequest file. The request is always routed through Operation Runtime.
+    request: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -903,6 +965,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Adopt(args) => handle_adopt(&store, &root, args)?,
         Commands::Impact(args) => handle_impact(&store, args)?,
         Commands::Adapter(args) => handle_adapter(args)?,
+        Commands::Api(args) => handle_api(&store, &root, args)?,
         Commands::Pr(args) => handle_pr(&store, &root, args)?,
         Commands::Proposal(args) => handle_proposal(&store, &root, args)?,
         Commands::Action(args) => handle_action(&store, args)?,
@@ -1288,6 +1351,132 @@ fn handle_adapter(args: AdapterArgs) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn handle_api(store: &SpecGraphStore, root: &Path, args: ApiArgs) -> anyhow::Result<()> {
+    let api = SpecGraphApi::with_store(store.clone());
+    match args.command {
+        ApiCommand::Routes => {
+            for route in SpecGraphApi::routes() {
+                println!(
+                    "{} {} mutates={} runtime={} {}",
+                    route.method,
+                    route.path,
+                    route.mutates,
+                    route.through_operation_runtime,
+                    route.description
+                );
+            }
+        }
+        ApiCommand::Health => {
+            let health = api.health();
+            println!("ready: {}", health.ready);
+            println!("specgraphDir: {}", health.specgraph_dir);
+            println!("message: {}", health.message);
+        }
+        ApiCommand::Status => {
+            let status = api.status()?;
+            println!("stateHash: {}", status.state_hash);
+            println!("events: {}", status.events_replayed);
+            println!("lastSequence: {}", status.last_sequence);
+            println!("nodes: {}", status.node_count);
+            println!("edges: {}", status.edge_count);
+            for (node_type, count) in status.node_types {
+                println!("{node_type}: {count}");
+            }
+        }
+        ApiCommand::Query(args) => {
+            let target = api_graph_target(args.branch, args.snapshot)?;
+            let selector = api_query_selector(args.view, args.node_type, args.stable_key)?;
+            let response = api.query(ApiQueryRequest {
+                target,
+                selector,
+                limits: ApiQueryLimits {
+                    max_depth: args.max_depth,
+                    max_nodes: args.max_nodes,
+                    max_edges: args.max_edges,
+                },
+                ..ApiQueryRequest::default()
+            })?;
+            println!("stateHash: {}", response.state_hash);
+            println!("nodes: {}", response.nodes.len());
+            println!("edges: {}", response.edges.len());
+            println!("specs: {}", response.specs.len());
+            println!("actions: {}", response.actions.len());
+            println!("findings: {}", response.findings.len());
+            println!("costNodes: {}", response.cost.nodes_scanned);
+            println!("costEdges: {}", response.cost.edges_scanned);
+            for node in response.nodes {
+                println!("{} {} {}", node.id, node.node_type, node.stable_key);
+            }
+        }
+        ApiCommand::Findings => {
+            let response = api.findings()?;
+            println!("stateHash: {}", response.state_hash);
+            println!("snapshots: {}", response.snapshot_count);
+            println!("branches: {}", response.branch_count);
+            print_findings(&response.findings);
+            fail_on_errors(&response.findings, "api findings validation")?;
+        }
+        ApiCommand::Mutate(args) => {
+            let request = read_api_operation_request(root, &args.request)?;
+            let response = api.submit_operation(request)?;
+            println!("operationId: {}", response.receipt.operation_id);
+            println!("operation: {}", response.receipt.operation);
+            println!("accepted: {}", response.receipt.accepted);
+            println!("dryRun: {}", response.receipt.dry_run);
+            println!("stateHash: {}", response.receipt.post_state_hash);
+            println!("events: {}", response.receipt.event_ids.len());
+        }
+    }
+    Ok(())
+}
+
+fn api_graph_target(
+    branch: Option<String>,
+    snapshot: Option<String>,
+) -> anyhow::Result<ApiGraphTarget> {
+    match (snapshot, branch) {
+        (Some(snapshot_id), None) => Ok(ApiGraphTarget::Snapshot { snapshot_id }),
+        (None, Some(graph_branch)) => Ok(ApiGraphTarget::Branch { graph_branch }),
+        (None, None) => Ok(ApiGraphTarget::Current {
+            graph_branch: "main".to_string(),
+        }),
+        (Some(_), Some(_)) => bail!("pass either --snapshot or --branch, not both"),
+    }
+}
+
+fn api_query_selector(
+    view: ApiQueryView,
+    node_type: Option<String>,
+    stable_key: Option<String>,
+) -> anyhow::Result<ApiQuerySelector> {
+    if node_type.is_some() && stable_key.is_some() {
+        bail!("pass either --node-type or --stable-key, not both");
+    }
+    if let Some(node_type) = node_type {
+        return Ok(ApiQuerySelector::NodeType { node_type });
+    }
+    if let Some(stable_key) = stable_key {
+        return Ok(ApiQuerySelector::StableKey { stable_key });
+    }
+    Ok(match view {
+        ApiQueryView::All => ApiQuerySelector::All,
+        ApiQueryView::Specs => ApiQuerySelector::Specs,
+        ApiQueryView::Actions => ApiQuerySelector::Actions,
+        ApiQueryView::Findings => ApiQuerySelector::Findings,
+    })
+}
+
+fn read_api_operation_request(root: &Path, path: &Path) -> anyhow::Result<ApiOperationRequest> {
+    let path = resolve_path(root, path.to_path_buf());
+    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    match path.extension().and_then(|value| value.to_str()) {
+        Some("yaml" | "yml") => serde_yaml::from_slice(&bytes)
+            .with_context(|| format!("failed to parse API operation request {}", path.display())),
+        _ => serde_json::from_slice(&bytes)
+            .with_context(|| format!("failed to parse API operation request {}", path.display())),
+    }
 }
 
 fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Result<()> {
