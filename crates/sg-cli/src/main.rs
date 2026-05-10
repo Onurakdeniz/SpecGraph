@@ -30,7 +30,7 @@ use sg_server::{
     ApiGraphTarget, ApiOperationRequest, ApiQueryLimits, ApiQueryRequest, ApiQuerySelector,
     SpecGraphApi,
 };
-use sg_spec::{SpecProjection, TextItem};
+use sg_spec::{ModuleChange, ModuleChangeAction, PlannedObject, SpecProjection, TextItem};
 use sg_store::{
     ActionLifecycleOptions, AppendOperationOptions, BindBranchOptions, CreateWaiverOptions,
     GenerateActionGraphOptions, GrantRoleOptions, InitOptions, InterfaceVisibility,
@@ -317,6 +317,18 @@ struct SpecCreateArgs {
     title: String,
     #[arg(long)]
     module: Option<String>,
+    #[arg(long = "touches-module")]
+    touches_modules: Vec<String>,
+    #[arg(
+        long = "module-change",
+        value_name = "ACTION:NAME:PURPOSE:LAYER:PACKAGE:CAP1,CAP2"
+    )]
+    module_changes: Vec<String>,
+    #[arg(
+        long = "planned-object",
+        value_name = "KIND:NAME:MODULE[:EXPECTED_FILE]"
+    )]
+    planned_objects: Vec<String>,
     #[arg(long)]
     priority: Option<String>,
     #[arg(long)]
@@ -1432,6 +1444,17 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
                 spec: args.spec.clone(),
                 title: args.title,
                 module: args.module,
+                touches_modules: args.touches_modules,
+                module_changes: args
+                    .module_changes
+                    .iter()
+                    .map(|change| parse_module_change(change))
+                    .collect::<anyhow::Result<Vec<_>>>()?,
+                planned_objects: args
+                    .planned_objects
+                    .iter()
+                    .map(|object| parse_planned_object(object))
+                    .collect::<anyhow::Result<Vec<_>>>()?,
                 priority: args.priority,
                 summary: args.summary,
                 requirements: parse_text_items(&args.requirements)?,
@@ -1442,7 +1465,7 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
                 operation: "Spec.Create".to_string(),
                 actor: args.actor,
                 graph_branch: args.graph_branch,
-                input: json!({ "spec": args.spec }),
+                input: projection.operation_input(),
                 dry_run: false,
                 delta: projection.to_delta(),
             })?;
@@ -1459,10 +1482,7 @@ fn handle_spec(store: &SpecGraphStore, root: &Path, args: SpecArgs) -> anyhow::R
                     operation: "Spec.Import".to_string(),
                     actor: args.actor,
                     graph_branch: args.graph_branch,
-                    input: json!({
-                        "path": path.display().to_string(),
-                        "spec": projection.spec,
-                    }),
+                    input: projection.import_operation_input(path.display().to_string()),
                     dry_run: true,
                     delta: projection.to_delta(),
                 })?
@@ -3416,6 +3436,12 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         module: Some("Identity".to_string()),
         priority: Some("P1".to_string()),
         summary: Some("Proof scenario spec".to_string()),
+        planned_objects: vec![PlannedObject {
+            kind: "function".to_string(),
+            name: "request_password_reset".to_string(),
+            module: "Identity".to_string(),
+            expected_file: Some("crates/proof/src/identity/password_reset.rs".to_string()),
+        }],
         requirements: vec![TextItem {
             id: "REQ-001".to_string(),
             text: "User can request reset".to_string(),
@@ -3430,7 +3456,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         operation: "Spec.Create".to_string(),
         actor: "proof".to_string(),
         graph_branch: "main".to_string(),
-        input: json!({"spec": "AUTH-001"}),
+        input: projection.operation_input(),
         delta: projection.to_delta(),
         dry_run: false,
     })?;
@@ -3981,6 +4007,52 @@ fn parse_module_interface(value: &str) -> anyhow::Result<ModuleInterface> {
         visibility,
         surface: parts[2].to_string(),
     })
+}
+
+fn parse_module_change(value: &str) -> anyhow::Result<ModuleChange> {
+    let parts = value.splitn(6, ':').collect::<Vec<_>>();
+    if parts.len() != 6 {
+        bail!("module change `{value}` must use ACTION:NAME:PURPOSE:LAYER:PACKAGE:CAP1,CAP2");
+    }
+    let action = match parts[0] {
+        "create" => ModuleChangeAction::Create,
+        "update" => ModuleChangeAction::Update,
+        other => bail!("module change action `{other}` must be create or update"),
+    };
+    Ok(ModuleChange {
+        action,
+        name: parts[1].to_string(),
+        purpose: non_empty_string(parts[2]),
+        layer: non_empty_string(parts[3]),
+        package: non_empty_string(parts[4]),
+        capabilities: parts[5]
+            .split(',')
+            .filter(|capability| !capability.trim().is_empty())
+            .map(|capability| capability.trim().to_string())
+            .collect(),
+    })
+}
+
+fn parse_planned_object(value: &str) -> anyhow::Result<PlannedObject> {
+    let parts = value.splitn(4, ':').collect::<Vec<_>>();
+    if parts.len() < 3 {
+        bail!("planned object `{value}` must use KIND:NAME:MODULE[:EXPECTED_FILE]");
+    }
+    Ok(PlannedObject {
+        kind: parts[0].to_string(),
+        name: parts[1].to_string(),
+        module: parts[2].to_string(),
+        expected_file: parts.get(3).and_then(|value| non_empty_string(value)),
+    })
+}
+
+fn non_empty_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn read_links_manifest(root: &Path, path: &Path) -> anyhow::Result<LinksManifest> {

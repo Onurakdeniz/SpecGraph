@@ -102,7 +102,7 @@ Status values:
 | `sg architecture` | `declare-layer`, `declare-port`, `validate`, `drift`, `pack validate` | Planned | Architecture report/findings; mutations return receipts. |
 | `sg data` | `declare-table`, `declare-contract`, `validate`, `owners` | Planned | DataGraph report/items/findings; mutations return receipts. |
 | `sg migration` | `plan`, `record`, `validate`, `rollback-evidence` | Planned | Migration plan/report/findings; accepted evidence returns receipts. |
-| `sg spec` | `create`, `import`, `bind-branch`, `validate`, future `transition`, `release` | Partial | Validation reports for reads; mutating commands return operation receipts. |
+| `sg spec` | `create`, `import`, `bind-branch`, `validate`, `transition`, `status`, future `release` | Partial | Validation reports for reads; mutating commands return operation receipts; create/import carry spec intent (`touchesModules`, `moduleChanges`, `plannedObjects`, `intendedGraphDelta`) into Operation Runtime. |
 | `sg action` | `generate`, `list`, future `start`, `complete`, `replan`, `attempt` | Partial | Action/CommitPlan items or receipts; lifecycle blockers return findings. |
 | `sg commit` | future `plan`, `validate`, `complete` | Planned | CommitPlan report/findings; mutations return receipts. Existing commit checks currently live under `sg git`. |
 | `sg git` | `install-hooks`, `validate-message`, `validate-bindings`, `record-commit`, future `branch`, `merge`, `rebase` | Partial | Hook install summary, validation report/findings, or receipts for accepted GitGraph facts. |
@@ -222,3 +222,14 @@ The module-first closure adds the trusted ModuleGraph command group:
 - `sg module link-capability --module <NAME> --capability <NAME>` adds a capability to an existing module through Operation Runtime.
 
 `Spec.Create` and `Spec.Import` now use both ProjectGraph and ModuleGraph runtime gates before event append.
+
+## F.3 Implemented Spec Intent Separation
+
+Spec authoring now separates:
+
+- existing touched modules: `touchesModules` / `sg spec create --touches-module`;
+- new or updated module intent: `moduleChanges` / `--module-change ACTION:NAME:PURPOSE:LAYER:PACKAGE:CAP1,CAP2`;
+- planned implementation objects: `plannedObjects` / `--planned-object KIND:NAME:MODULE[:EXPECTED_FILE]`;
+- optional intended graph delta metadata: `intendedGraphDelta`.
+
+`Spec.Create` and `Spec.Import` pass the full projection through Operation Runtime input. Unknown touched modules, incomplete new-module declarations, and planned objects without a valid owning module intent fail before event append.

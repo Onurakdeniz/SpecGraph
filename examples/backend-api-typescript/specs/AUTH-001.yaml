@@ -1,6 +1,16 @@
 spec: AUTH-001
 title: Password reset
 module: Identity
+touchesModules:
+  - Identity
+plannedObjects:
+  - kind: function
+    name: requestPasswordReset
+    module: Identity
+    expectedFile: src/identity/password-reset.js
+intendedGraphDelta:
+  createNodes: []
+  createEdges: []
 priority: P1
 summary: Allow users to request a password reset email without exposing account existence.
 requirements:

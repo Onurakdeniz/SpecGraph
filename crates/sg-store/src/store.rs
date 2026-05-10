@@ -24,7 +24,7 @@ use sg_policy::{
 };
 use sg_project::{validate_project_baseline, ProjectBaselineReport, ProjectProfileInput};
 use sg_query::{QueryContext, QueryCost, QueryTarget};
-use sg_spec::SpecProjection;
+use sg_spec::{validate_spec_authoring_intent, SpecProjection};
 use sg_validation::{CORE_VALIDATOR_VERSION, VALIDATOR_BRANCH_METADATA, VALIDATOR_SNAPSHOT};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -1008,7 +1008,6 @@ pub fn import_spec_file(
             path: path.to_path_buf(),
             source,
         })?;
-    let spec_id = projection.spec.clone();
     let delta = projection.to_delta();
 
     append_operation(
@@ -1017,10 +1016,7 @@ pub fn import_spec_file(
             operation: "Spec.Import".to_string(),
             actor,
             graph_branch,
-            input: json!({
-                "path": path.display().to_string(),
-                "spec": spec_id,
-            }),
+            input: projection.import_operation_input(path.display().to_string()),
             delta,
             dry_run: false,
         },
@@ -1803,7 +1799,8 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         ));
     }
 
-    let semantic_findings = validate_operation_semantic_preconditions(&graph, &request);
+    let semantic_findings =
+        validate_operation_semantic_preconditions(&graph, &request, &options.delta);
     let semantic_error_count = semantic_findings
         .iter()
         .filter(|finding| finding.severity == FindingSeverity::Error)
@@ -2434,13 +2431,18 @@ fn active_ontology(root: &Path) -> Result<MvpOntology> {
 fn validate_operation_semantic_preconditions(
     graph: &Graph,
     request: &OperationRequest,
+    delta: &GraphDelta,
 ) -> Vec<Finding> {
     if matches!(request.operation.as_str(), "Spec.Create" | "Spec.Import") {
         let project_findings = validate_project_baseline(graph).findings;
         if !project_findings.is_empty() {
             return project_findings;
         }
-        return validate_module_baseline(graph).findings;
+        let module_findings = validate_module_baseline(graph).findings;
+        if !module_findings.is_empty() {
+            return module_findings;
+        }
+        return validate_spec_authoring_intent(graph, &request.input, delta);
     }
     Vec::new()
 }
@@ -3726,6 +3728,179 @@ acceptanceCriteria:
             .nodes
             .values()
             .any(|node| node.node_type == "Spec"));
+    }
+
+    #[test]
+    fn append_operation_rejects_unknown_touched_module_intent() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
+        let projection = SpecProjection {
+            spec: "BILLING-001".to_string(),
+            title: "Billing".to_string(),
+            touches_modules: vec!["Billing".to_string()],
+            requirements: vec![sg_spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "System can bill users".to_string(),
+            }],
+            acceptance_criteria: vec![sg_spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Billing is tested".to_string(),
+            }],
+            ..SpecProjection::default()
+        };
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: projection.operation_input(),
+                dry_run: false,
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "Spec.Create"
+        ));
+    }
+
+    #[test]
+    fn append_operation_rejects_incomplete_new_module_intent() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
+        let projection = SpecProjection {
+            spec: "BILLING-001".to_string(),
+            title: "Billing".to_string(),
+            touches_modules: vec!["Billing".to_string()],
+            module_changes: vec![sg_spec::ModuleChange {
+                action: sg_spec::ModuleChangeAction::Create,
+                name: "Billing".to_string(),
+                purpose: None,
+                layer: Some("domain-runtime".to_string()),
+                package: None,
+                capabilities: Vec::new(),
+            }],
+            requirements: vec![sg_spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "System can bill users".to_string(),
+            }],
+            acceptance_criteria: vec![sg_spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Billing is tested".to_string(),
+            }],
+            ..SpecProjection::default()
+        };
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: projection.operation_input(),
+                dry_run: false,
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 2,
+            } if operation == "Spec.Create"
+        ));
+    }
+
+    #[test]
+    fn append_operation_accepts_complete_new_module_intent_without_trusted_module_fact() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(tmp.path());
+        add_module_baseline(tmp.path());
+        let projection = SpecProjection {
+            spec: "BILLING-001".to_string(),
+            title: "Billing".to_string(),
+            touches_modules: vec!["Billing".to_string()],
+            module_changes: vec![sg_spec::ModuleChange {
+                action: sg_spec::ModuleChangeAction::Create,
+                name: "Billing".to_string(),
+                purpose: Some("Owns billing workflows".to_string()),
+                layer: Some("domain-runtime".to_string()),
+                package: Some("crates/billing".to_string()),
+                capabilities: vec!["billing-session".to_string()],
+            }],
+            planned_objects: vec![sg_spec::PlannedObject {
+                kind: "function".to_string(),
+                name: "create_billing_session".to_string(),
+                module: "Billing".to_string(),
+                expected_file: Some("crates/billing/src/lib.rs".to_string()),
+            }],
+            requirements: vec![sg_spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "System can bill users".to_string(),
+            }],
+            acceptance_criteria: vec![sg_spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Billing is tested".to_string(),
+            }],
+            ..SpecProjection::default()
+        };
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: projection.operation_input(),
+                dry_run: false,
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap();
+
+        assert!(receipt.accepted);
+        assert!(!receipt
+            .created_edges
+            .iter()
+            .any(|edge_id| edge_id.contains("touches_module")));
     }
 
     #[test]

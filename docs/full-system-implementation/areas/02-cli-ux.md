@@ -2,7 +2,7 @@
 
 **System area:** CLI UX  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code/docs audit after F.1 project CLI implementation.
+**Status basis:** code/docs audit after F.3 spec intent CLI implementation.
 
 ## Purpose
 
@@ -22,6 +22,7 @@ Provide the complete sg command surface for project setup, ontology, specs, acti
 - `sg release evidence` and `sg perf budgets --check` provide stable JSON outputs for release/performance automation
 - `sg project profile upsert`, `sg project show`, and `sg project validate --gate spec-authoring` exist and support JSON envelopes.
 - `sg module import`, `sg module declare`, `sg module list`, `sg module validate --gate spec-authoring`, and `sg module link-capability` exist and support JSON envelopes.
+- `sg spec create` accepts explicit spec-intent flags for `--touches-module`, `--module-change`, and `--planned-object`, and sends the full projection through Operation Runtime input.
 
 ### Partly Implemented
 
@@ -29,6 +30,7 @@ Provide the complete sg command surface for project setup, ontology, specs, acti
 - Legacy command groups keep their established human output while newly closed Phase 7 product-surface commands support JSON automation envelopes
 - Project profile commands exist, while automatic project detection and finer-grained profile editing remain planned.
 - Module baseline commands exist, while automatic module detection/inference and richer lifecycle commands remain planned.
+- Spec intent flags exist on create, while richer interactive guidance and generated templates remain planned.
 
 ### Not Implemented / Remaining
 
@@ -58,6 +60,7 @@ Mutating commands must pass operation ABI, ontology validation, policy checks, a
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Keep `docs/cli/ux-contract.md` aligned when command groups, output schemas, or exit-code semantics change.
 - Implement or finish: automatic project/module detection and richer lifecycle commands.
+- Implement or finish: interactive/spec-template guidance for `touchesModules`, `moduleChanges`, `plannedObjects`, and intended graph deltas.
 - Implement or finish: Action lifecycle start/complete/replan.
 - Implement or finish: PR validation.
 - Implement or finish: Test runner recording.

@@ -2,7 +2,7 @@
 
 **System area:** Spec State Machine  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** F.3 spec intent separation plus current state-machine foundation audit.
 
 ## Purpose
 
@@ -19,16 +19,16 @@ Enforce lifecycle from Draft through Validated, Planned, BranchBound, Implementi
 - `Spec.Transition` operation updates Spec state through the Operation Runtime.
 - `sg spec status` reports current state, next states, and evidence blockers.
 - Implementing/Review/Released transitions are evidence-gated by branch binding, ActionGraph, commits, and validation evidence.
+- Spec nodes now retain authoring intent metadata (`touchesModules`, `moduleChanges`, `plannedObjects`, `intendedGraphDelta`) that later state transitions and ActionGraph generation can use as planning context.
 
 - Validators enforce pieces such as branch/action requirements
 - Full transition enforcement is not implemented
 
 ### Not Implemented / Remaining
 
-- Transition operation definitions
-- Ontology state-machine enforcement
-- Invalid transition findings
-- Status command
+- Full transition operation definitions beyond the current foundation
+- Complete ontology state-machine enforcement
+- Complete invalid transition findings
 
 ## Implementation Parts
 
@@ -71,4 +71,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-
