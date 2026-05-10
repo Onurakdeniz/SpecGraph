@@ -2,7 +2,7 @@
 
 **System area:** ProjectGraph  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** fresh Phase 3.1 implementation audit after adding graph-native project profile facts.
+**Status basis:** fresh Phase 3.1 implementation audit plus workflow review after promoting project-first system flow.
 
 ## Purpose
 
@@ -12,6 +12,7 @@ Represent project identity, type, languages, architecture style, runtime topolog
 
 ### Fully Implemented
 
+- `docs/workflows/system-flow.md` defines the ProjectGraph baseline required before spec authoring.
 - sg init creates .specgraph metadata and Project node per MVP backlog
 - ProjectGraph is documented
 - Project profile fact ontology now includes `ProjectType`, `Language`, `ArchitectureStyle`, `PackageManager`, `TestRunner`, and `CIProvider` nodes.
@@ -26,6 +27,8 @@ Represent project identity, type, languages, architecture style, runtime topolog
 
 ### Not Implemented / Remaining
 
+- Project baseline validator that blocks `Spec.Create` / `Spec.Import` until required profile facts are trusted.
+- `sg project profile upsert/show/validate` commands.
 - Automatic project type/language/package/test/CI detection
 - Commands to update architecture/profile facts
 - Pack/profile compatibility validation

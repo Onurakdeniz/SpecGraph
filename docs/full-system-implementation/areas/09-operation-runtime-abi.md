@@ -12,6 +12,7 @@ Force every graph mutation through a stable operation ABI with preconditions, po
 
 ### Fully Implemented
 
+- `docs/workflows/system-flow.md` identifies Operation Runtime as the required home for project-first semantic gates.
 - Request, definition, receipt, and operation categories are documented
 - `OperationRequest`, built-in `OperationDefinition`, and `OperationReceipt` schemas carry explicit v1 schema versions with legacy deserialization defaults for requests and receipts
 - README says built-in operation contracts can be listed and checked
@@ -27,6 +28,7 @@ Force every graph mutation through a stable operation ABI with preconditions, po
 
 ### Not Implemented / Remaining
 
+- Operation-specific semantic preconditions for Spec.Create, Spec.Import, Spec.BindBranch, ActionGraph.Generate, GitCommit.Record, Validation.Record, and Proposal.Accept.
 - Dry-run receipts everywhere
 - Transactions and rollback
 - SDK/server ABI compatibility

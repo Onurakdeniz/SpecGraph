@@ -2,7 +2,7 @@
 
 **System area:** ModuleGraphs  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** fresh Phase 3.2 implementation audit after adding graph-native ModuleGraph model facts.
+**Status basis:** fresh Phase 3.2 implementation audit plus workflow review after promoting project-first system flow.
 
 ## Purpose
 
@@ -12,6 +12,7 @@ Represent bounded capability areas such as modules, frontend areas, CLI command 
 
 ### Fully Implemented
 
+- `docs/workflows/system-flow.md` defines the ModuleGraph baseline required before spec authoring.
 - MVP includes Module and TOUCHES_MODULE
 - Spec examples use Identity module
 - Built-in ontology now includes `Layer`, `Package`, `Capability`, and `PublicInterface` graph facts.
@@ -26,6 +27,8 @@ Represent bounded capability areas such as modules, frontend areas, CLI command 
 
 ### Not Implemented / Remaining
 
+- Module baseline validator requiring at least one module with purpose, layer, package/path, and capability before spec authoring.
+- `sg module import/declare/list/validate/link-capability` commands.
 - Module lifecycle commands
 - Layer/package/capability/interface ontology is partially implemented; richer boundary rules remain
 - Architecture-pack validators
