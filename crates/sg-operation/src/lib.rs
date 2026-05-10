@@ -358,7 +358,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             name: "GitCommit.Record",
             category: "git",
             description: "Record a validated Git commit and changed files.",
-            required_input_fields: &["commit", "changedFiles"],
+            required_input_fields: &["commit", "message", "changedFiles"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
             allowed_create_node_types: &["GitCommit", "CodeFile"],
             allowed_create_edge_types: &[

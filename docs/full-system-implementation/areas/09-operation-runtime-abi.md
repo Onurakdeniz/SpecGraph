@@ -2,7 +2,7 @@
 
 **System area:** Operation Runtime ABI  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code audit plus deterministic core and identity-foundation implementation slices.
+**Status basis:** F.4 operation-specific semantic gate implementation plus current code/docs audit.
 
 ## Purpose
 
@@ -19,20 +19,21 @@ Force every graph mutation through a stable operation ABI with preconditions, po
 - Operation receipts include actor, state hashes, changed graph objects, event ids, dry-run flag, and findings
 - Missing/invalid operation actors are rejected by ABI validation
 - Identity, policy evidence, and policy decision persistence operations are registered in the built-in operation ABI
-- Operation Runtime now runs operation-specific semantic preconditions before policy/ontology/event append for spec authoring.
+- Operation Runtime now runs operation-specific semantic preconditions before policy/ontology/event append for spec authoring, branch binding, ActionGraph generation, Git commit recording, validation-run recording, and proposal acceptance.
 - `Spec.Create` and `Spec.Import` fail before append when `validator.project_baseline` reports an incomplete ProjectGraph profile or `validator.module_baseline` reports an incomplete ModuleGraph baseline.
 - `Spec.Create` and `Spec.Import` also run spec-intent semantic preconditions for unknown touched modules, incomplete new-module declarations, and planned-object ownership.
+- `Spec.BindBranch`, `ActionGraph.Generate`, `GitCommit.Record`, `Validation.Record`, and `Proposal.Accept` now have runtime semantic findings so API/SDK/direct callers cannot bypass CLI-only checks.
 
 ### Partly Implemented
 
 - Required inputs and allowed node/edge types exist as foundation
 - Generic mutation preconditions and postconditions exist for create/update/delete deltas
-- Operation-specific semantic preconditions exist for ProjectGraph, ModuleGraph, and spec-intent portions of `Spec.Create` / `Spec.Import`.
+- Operation-specific semantic preconditions cover the project-first closure operations listed in F.4; conditional data/security/architecture requirements remain partial.
 - Full precondition/effect/postcondition DSL needs completion
 
 ### Not Implemented / Remaining
 
-- Remaining operation-specific semantic preconditions for conditional data/security/architecture requirements plus Spec.BindBranch, ActionGraph.Generate, GitCommit.Record, Validation.Record, and Proposal.Accept.
+- Remaining conditional data/security/architecture semantic requirements.
 - Dry-run receipts everywhere
 - Transactions and rollback
 - SDK/server ABI compatibility

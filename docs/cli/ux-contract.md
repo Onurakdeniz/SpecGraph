@@ -233,3 +233,8 @@ Spec authoring now separates:
 - optional intended graph delta metadata: `intendedGraphDelta`.
 
 `Spec.Create` and `Spec.Import` pass the full projection through Operation Runtime input. Unknown touched modules, incomplete new-module declarations, and planned objects without a valid owning module intent fail before event append.
+
+
+## F.4 Implemented Operation Semantic Preconditions
+
+Operation Runtime now owns semantic gates for `Spec.BindBranch`, `ActionGraph.Generate`, `GitCommit.Record`, `Validation.Record`, and `Proposal.Accept`, so CLI/API/SDK/Studio callers receive the same findings and receipts instead of relying on CLI-only checks.

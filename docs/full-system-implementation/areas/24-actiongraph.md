@@ -2,7 +2,7 @@
 
 **System area:** ActionGraph  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** F.4 ActionGraph.Generate runtime semantic gate implementation.
 
 ## Purpose
 
@@ -14,6 +14,7 @@ Generate executable work graphs from validated specs before implementation start
 
 - README documents deterministic MVP groups: graph, tests, implementation, interface, validation
 - MVP requires ActionGroups, ActionNodes, CommitPlans
+- `ActionGraph.Generate` is now blocked inside Operation Runtime unless the target spec is complete, ProjectGraph/ModuleGraph baselines are ready, the spec is branch-bound, and the generated delta includes ActionGraph/ActionGroup/CommitPlan facts.
 
 ### Partly Implemented
 
@@ -24,13 +25,12 @@ Generate executable work graphs from validated specs before implementation start
 - Policy/impact invalidation can mark affected actions as needing replan before continuation.
 
 - Template generation exists
-- Pack templates, dependencies, execution attempts, replan, lifecycle are future
+- Pack templates and richer dependency ordering remain future.
 
 ### Not Implemented / Remaining
 
 - Pack-specific templates
-- Action dependencies/order
-- start/complete/replan commands
+- Rich pack-specific action dependency ordering
 - Forbidden effects validation
 
 ## Implementation Parts

@@ -2,7 +2,7 @@
 
 **System area:** Validation Runtime  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** code audit plus common finding schema, validator registry, and Phase 2.8 ValidatorExecution implementation slice.
+**Status basis:** F.4 operation semantic preconditions plus validation-runtime foundation audit.
 
 ## Purpose
 
@@ -23,17 +23,18 @@ Run deterministic validators, emit structured findings, record validation runs, 
 - `validator.project_baseline` emits structured findings for missing ProjectGraph profile facts and is reused by `sg project validate` and the Operation Runtime spec-authoring gate.
 - `validator.module_baseline` emits structured findings for missing ModuleGraph baseline facts and is reused by `sg module validate` and the Operation Runtime spec-authoring gate.
 - `validator.spec_authoring_preconditions` emits structured findings for unknown touched modules, incomplete `moduleChanges`, and planned objects without valid owning module intent.
+- `validator.operation_semantic_preconditions` emits structured findings for branch/action/commit/validation/proposal runtime gates before append.
 
 ### Partly Implemented
 
 - ValidationRun and Finding shapes are documented
 - Structured locations and remediation foundation exists
-- Project/module baseline validation and first spec-intent validation are implemented; conditional data/security/architecture requirements remain planned.
+- Project/module baseline validation, spec-intent validation, and F.4 operation-specific runtime gates are implemented; conditional data/security/architecture requirements remain planned.
 - Full finding lifecycle transitions and waiver interaction still need work
 
 ### Not Implemented / Remaining
 
-- Implement validators for remaining conditional requirements, action context, commit plan scope, and traceability completeness.
+- Implement validators for remaining conditional requirements and broader traceability completeness.
 - Finding lifecycle
 - Waiver interaction
 - Machine-readable PR/Studio reports

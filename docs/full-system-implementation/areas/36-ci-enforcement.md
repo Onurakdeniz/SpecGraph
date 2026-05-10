@@ -2,7 +2,7 @@
 
 **System area:** CI Enforcement
 **Implementation status:** 🟡 Partly implemented
-**Status basis:** code audit after Phase 6.2 provider-check report integration.
+**Status basis:** F.4 Validation.Record runtime semantic gate plus Phase 6.2 provider-check report integration.
 
 ## Purpose
 
@@ -17,6 +17,7 @@ Make CI the enforcement boundary by replaying graph state and running all valida
 - `sg pr validate --report-file` emits provider-native check report JSON for PR annotations
 - Provider check evidence can be recorded as `ProviderCheckRun` / `ProviderCheckAnnotation` graph facts linked to `ValidationRun`
 - `.github/workflows/ci.yml` includes an official `sg ci validate --report-file` step when `.specgraph` is present in the checkout
+- `Validation.Record` now verifies run id, checks, Passed/replay evidence, error findings, current state hash, duplicate runs, and Project `VALIDATED_BY` linkage inside Operation Runtime.
 
 ### Partly Implemented
 
@@ -24,7 +25,7 @@ Make CI the enforcement boundary by replaying graph state and running all valida
 - CI now includes test evidence closure by validating that required linked tests have non-failing `TestResult` evidence before recording validation output.
 - Installed pre-push hook runs the same CI validation path and writes `.specgraph/validation/ci-report.json`.
 
-- Aggregate MVP validation exists
+- Aggregate MVP validation exists with runtime recording gates
 - Provider annotation JSON exists; direct provider API publishing and full policy/data/security pipeline remain
 
 ### Not Implemented / Remaining

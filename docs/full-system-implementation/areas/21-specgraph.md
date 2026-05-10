@@ -2,7 +2,7 @@
 
 **System area:** SpecGraph  
 **Implementation status:** 🟡 Partly implemented  
-**Status basis:** F.3 spec intent model separation implementation plus current code/docs audit.
+**Status basis:** F.4 semantic gate implementation plus current code/docs audit.
 
 ## Purpose
 
@@ -17,6 +17,7 @@ Represent requested changes as typed subgraphs including requirements, ACs, beha
 - Spec projections now distinguish `touchesModules`, `moduleChanges`, `plannedObjects`, and `intendedGraphDelta`.
 - `Spec.Create` / `Spec.Import` carry the full projection in Operation Runtime input so semantic gates can inspect spec intent before append.
 - Unknown touched modules, unknown planned-object owner modules, and incomplete new module declarations are rejected before event append.
+- `Spec.BindBranch` now runs runtime semantic gates for ProjectGraph/ModuleGraph readiness, branch naming, spec completeness, duplicate binding, and base snapshot linkage.
 
 ### Partly Implemented
 
