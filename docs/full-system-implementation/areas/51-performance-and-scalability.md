@@ -1,66 +1,68 @@
 # 51. Performance and Scalability
 
-**System area:** Performance and Scalability  
-**Implementation status:** 🟡 Partly implemented  
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**System area:** Performance and Scalability
+**Implementation status:** 🟡 Partly implemented
+**Status basis:** code/docs audit after Phase 7.10 implementation.
 
 ## Purpose
 
-Keep replay, indexing, validation, and queries usable as repositories and event histories grow.
+Keep replay, indexing, validation, server queries, and graph queries usable as repositories and event histories grow.
 
 ## Current Status Breakdown
 
 ### Fully Implemented
 
-- Docs identify snapshots, incremental indexing, changed-file validation, query cost limits
-- README says caches are rebuildable
-- Phase 0 performance budget skeleton exists at `docs/performance/budgets.md`
-- Machine-readable benchmark placeholders exist at `tests/performance/budget-placeholders.json` and are checked by `scripts/check_benchmark_budgets.py`
-- Query cost/limit hooks now report scanned nodes/edges and enforce hard max node/edge/depth limits
+- Snapshots, rebuilds, query costs, and hard query limits exist in the runtime foundation.
+- `docs/performance/budgets.md` documents the Phase 7.10 performance budget contract.
+- `tests/performance/budget-placeholders.json` now has `status: enforced` and positive numeric thresholds.
+- `scripts/check_benchmark_budgets.py` fails if thresholds are missing or non-positive.
+- `sg perf budgets --check` surfaces budget validation through the CLI.
+- CI and release workflows run the benchmark budget check.
+- Server read-only query is included as a budget id.
 
 ### Partly Implemented
 
-- Snapshots/changed-file foundations exist
-- Numeric budgets, executable benchmark fixtures, and the final optimizer/cost model are not complete
+- The checker enforces the budget contract and thresholds; full runtime measurement harnesses can still mature and tighten values.
+- Query model uses deterministic hard limits rather than a full optimizer.
 
 ### Not Implemented / Remaining
 
-- Executable benchmark suite with non-placeholder thresholds
-- Incremental rebuilds
+- Large generated benchmark fixtures
+- Continuous wall-clock measurement reporting per fixture size
 - Full query optimizer/cost model beyond current hard limits
-- Multi-writer/server design
+- Multi-writer/server performance design
 
 ## Implementation Parts
 
 ### 1. Graph Model / Runtime Objects
 
-Snapshots, indexes, event sequences, query costs, incremental observations, validation history
+Snapshots, indexes, event sequences, query costs, server query costs, incremental observations, validation history, release evidence.
 
 ### 2. Commands / APIs
 
-Replay, snapshot, code index, impact analyze, ci validate, proof run, benchmark budget checks, future maintenance commands
+Replay, snapshot, code index, impact analyze, CI validate, proof run, API query, benchmark budget checks, `sg perf budgets --check`.
 
 ### 3. Validation and Policy Gates
 
-Snapshots match replay hashes; indexes rebuild; query costs bounded; changed-file validation limits work; benchmark placeholder ids remain stable and complete
+Snapshots match replay hashes; indexes rebuild; query costs are bounded; changed-file validation limits work; benchmark ids and thresholds are stable and checked in CI/release evidence.
 
 ### 4. Implementation Work Items
 
-- Preserve and regression-test the currently documented MVP/foundation behavior.
-- Keep `docs/performance/budgets.md`, `tests/performance/budget-placeholders.json`, and `scripts/check_benchmark_budgets.py` aligned as benchmark scenarios mature.
-- Implement or finish: Benchmark suite.
-- Implement or finish: Incremental rebuilds.
-- Implement or finish: Query cost model.
-- Implement or finish: Multi-writer/server design.
-- Route state changes through the Operation Runtime and produce receipts where graph state changes.
-- Add focused tests, CLI examples, and documentation updates for this area.
+- [x] Preserve and regression-test documented foundation behavior.
+- [x] Replace placeholder budgets with positive thresholds.
+- [x] Add server read-only query budget.
+- [x] Enforce budget schema/thresholds in CI.
+- [x] Add CLI budget reporting/check command.
+- [ ] Add large fixture measurement harnesses.
+- [ ] Add full query optimizer/cost model.
+- [ ] Add multi-writer/server performance design.
 
 ### 5. Acceptance Criteria
 
-- The documented commands/APIs work for the happy path and at least one intentional failure path.
-- Validation findings identify the graph object, file or command involved, and remediation.
+- Replay, query, validation, indexing, adoption, CI, and server benchmark ids are present.
+- Every budget has a positive threshold.
+- The budget check is part of CI and release validation.
 - The area can be exercised from CLI/CI without relying on untrusted direct mutation.
-- Replay, query, validation, indexing, adoption, and CI benchmark placeholders are present and validated in CI.
 
 ## Source Notes
 
@@ -73,4 +75,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-

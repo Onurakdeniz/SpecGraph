@@ -3,8 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Future SpecGraph Studio UI package boundary. Runtime implementation arrives in Phase 7.",
+  "description": "SpecGraph Studio read-only dashboard and operation dry-run UI boundary.",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "check": "python3 ../../scripts/check_phase7_assets.py --studio-only"
   }
 }

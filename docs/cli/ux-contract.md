@@ -16,11 +16,13 @@ SpecGraph OS is the full system, not the historical MVP. Current commands may st
 
 ## Global Invocation Contract
 
-Current global option:
+Current global options:
 
 - `--root <DIR>` selects the repository root. Default: current directory.
+- `--format human|json` and `--json` are accepted globally. Phase 7 closure applies JSON envelopes first to docs/release/performance/API surfaces while legacy command groups keep their established human output until their area-specific finalization.
+- `--quiet` and `--no-color` are accepted globally. Current human output is non-colored by default.
 
-Full-system global options to standardize across commands:
+Full-system global options:
 
 | Option | Applies to | Contract |
 |---|---|---|
@@ -120,8 +122,9 @@ Status values:
 | `sg proposal` | `create`, `transition`, future `validate`, `accept`, `reject`, `sandbox` | Partial | Proposal report/findings; accepted proposal deltas must go through Operation Runtime receipts. |
 | `sg adapter` | `list`, `capabilities`, `test`, `sync` | Planned | Adapter capability/provenance report; observations remain untrusted. |
 | `sg proof` | `run`, future named proof scenarios | Partial | Human progress lines; JSON proof report with passed/failed scenario steps. |
-| `sg release` | `check`, `evidence`, `package`, `verify` | Planned | Release evidence/checksum/signature report; release graph mutations return receipts. |
-| `sg docs` | `check`, `generate-cli-reference`, `links` | Planned | Documentation validation/generation report. |
+| `sg docs` | `check`, `cli-reference` | Current | Documentation validation/generation report. |
+| `sg release` | `check`, `evidence` | Current | Release evidence/checksum/signature report; release graph mutations return receipts. |
+| `sg perf` | `budgets` | Current | Performance budget inventory and threshold validation report. |
 
 ## Command-Specific Output Families
 
@@ -183,3 +186,17 @@ The future API server, SDK, and Studio UI must match this CLI contract at the ru
 - Operation receipts must be shared across CLI, API, SDK, and Studio.
 - Query/report shapes may be rendered differently by Studio, but the source data must come from the same query/runtime contracts.
 - No outer surface may accept adapter observations or proposals in a way the CLI could not reproduce through Operation Runtime.
+
+
+## Phase 7 Implemented CLI Closure
+
+Phase 7 adds the final product-surface command groups needed by release/docs/performance closure:
+
+- `sg api ...` exercises the server API surface.
+- `sg docs check` validates required full-system reference docs.
+- `sg docs cli-reference` emits a clap-generated CLI reference.
+- `sg release check` validates local release prerequisites without publishing.
+- `sg release evidence` emits release evidence JSON with source commit, graph state when present, artifact checksums, and validation commands.
+- `sg perf budgets --check` enforces that every performance budget has a positive threshold.
+
+These commands support the global `--format json` / `--json` envelope convention.

@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example v0.1.0
+        required: true
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release artifacts and evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Validate workspace
+        run: |
+          cargo fmt --all -- --check
+          python3 scripts/check_architecture_boundaries.py
+          python3 scripts/check_docs_source_of_truth.py
+          python3 scripts/check_examples_catalog.py
+          python3 scripts/check_benchmark_budgets.py
+          python3 scripts/check_phase7_assets.py
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace --all-targets
+          cargo run -p sg-cli -- proof run
+      - name: Build CLI binary
+        run: cargo build --release -p sg-cli
+      - name: Package CLI archive
+        run: |
+          mkdir -p target/release-artifacts
+          cp target/release/sg target/release-artifacts/sg-linux-x86_64
+          tar -C target/release-artifacts -czf target/release-artifacts/specgraph-${{ inputs.version || github.ref_name }}-linux-x86_64.tar.gz sg-linux-x86_64
+          shasum -a 256 target/release-artifacts/* > target/release-artifacts/checksums.txt
+      - name: Prepare release evidence
+        run: python3 scripts/prepare_release_evidence.py --version "${{ inputs.version || github.ref_name }}" --output target/release-artifacts/specgraph-release-evidence.json
+      - name: Optional GPG signature
+        if: ${{ secrets.SPECGRAPH_RELEASE_GPG_PRIVATE_KEY != '' }}
+        env:
+          SPECGRAPH_RELEASE_GPG_PRIVATE_KEY: ${{ secrets.SPECGRAPH_RELEASE_GPG_PRIVATE_KEY }}
+        run: |
+          echo "$SPECGRAPH_RELEASE_GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --yes --armor --detach-sign target/release-artifacts/checksums.txt
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: specgraph-release-artifacts
+          path: target/release-artifacts
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release-artifacts/*
+          draft: true

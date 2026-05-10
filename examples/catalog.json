@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "specgraph.examples-catalog/v1",
+  "scenarios": [
+    {
+      "id": "backend-api-full-loop",
+      "path": "examples/backend-api-typescript",
+      "area": "full-loop",
+      "happyPath": "docs/happy-path.md",
+      "failurePath": "docs/failure-path.md",
+      "commands": ["sg init", "sg spec import", "sg action generate", "sg code index", "sg trace validate", "sg ci validate"]
+    },
+    {
+      "id": "architecture-pack-boundary",
+      "path": "examples/architecture-pack-boundary",
+      "area": "architecture-packs",
+      "happyPath": "happy-path.md",
+      "failurePath": "failure-path.md",
+      "commands": ["sg ontology validate-pack", "sg ontology install-pack", "sg ci validate"]
+    },
+    {
+      "id": "existing-repo-adoption",
+      "path": "examples/existing-repo-adoption",
+      "area": "adoption",
+      "happyPath": "happy-path.md",
+      "failurePath": "failure-path.md",
+      "commands": ["sg adopt scan --mode observe", "sg adopt scan --mode strict"]
+    },
+    {
+      "id": "issue-fix-regression",
+      "path": "examples/issue-fix-regression",
+      "area": "issuegraph",
+      "happyPath": "happy-path.md",
+      "failurePath": "failure-path.md",
+      "commands": ["sg spec create", "sg test record-run", "sg ci validate"]
+    },
+    {
+      "id": "data-migration",
+      "path": "examples/data-migration",
+      "area": "datagraph-migration",
+      "happyPath": "happy-path.md",
+      "failurePath": "failure-path.md",
+      "commands": ["sg spec create", "sg ci validate"]
+    },
+    {
+      "id": "llm-proposal",
+      "path": "examples/llm-proposal",
+      "area": "proposal-runtime",
+      "happyPath": "happy-path.md",
+      "failurePath": "failure-path.md",
+      "commands": ["sg proposal validate", "sg proposal sandbox", "sg proposal accept"]
+    }
+  ]
+}

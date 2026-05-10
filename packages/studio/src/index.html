@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SpecGraph Studio</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <span class="badge">runtime-only mutations</span>
+      <h1>SpecGraph Studio</h1>
+      <p>Read graph/spec/action/finding/impact views from the API. Preview mutations as Operation Runtime dry-runs.</p>
+    </div>
+    <label>API base URL <input id="baseUrl" /></label>
+  </header>
+  <main>
+    <section class="panel">
+      <label>Graph branch <input id="graphBranch" value="main" /></label>
+      <button id="refresh">Refresh read-only views</button>
+      <p id="status">Not loaded.</p>
+    </section>
+
+    <section class="panel-grid" aria-label="Read-only graph views">
+      <article class="panel"><h2>Specs</h2><ul id="specs"></ul></article>
+      <article class="panel"><h2>Actions</h2><ul id="actions"></ul></article>
+      <article class="panel"><h2>Findings</h2><ul id="findings"></ul></article>
+      <article class="panel"><h2>Graph</h2><ul id="graph"></ul></article>
+      <article class="panel"><h2>Impact</h2><p id="impact"></p></article>
+    </section>
+
+    <section class="panel">
+      <h2>Operation dry-run form</h2>
+      <p>Studio does not write trusted files. This form posts to <code>/operations</code> with <code>dryRun: true</code>.</p>
+      <form onsubmit="return false;">
+        <label>Operation <input id="operation" value="Spec.Create" /></label>
+        <label>Actor <input id="actor" value="local:studio" /></label>
+        <label>Input JSON <textarea id="input">{"spec":"STUDIO-001"}</textarea></label>
+        <label>Delta JSON <textarea id="delta">{"createNodes":[{"id":"node_spec_studio_001","stableKey":"spec:STUDIO-001","nodeType":"Spec","attributes":{"spec":"STUDIO-001","title":"Studio preview"}}]}</textarea></label>
+        <button id="previewButton" class="secondary">Build preview</button>
+        <button id="dryRunButton">Dry-run through runtime</button>
+      </form>
+      <p id="formStatus"></p>
+      <h3>Preview request</h3><pre id="preview"></pre>
+      <h3>Receipt</h3><pre id="receipt"></pre>
+    </section>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -53,7 +53,7 @@ The split is intentionally staged:
 | Package | Boundary | Rule |
 |---|---|---|
 | `packages/sdk-typescript` | TypeScript SDK | Uses server API query/operation contracts and receipts; no direct `.specgraph` mutation. |
-| `packages/studio` | Future Studio UI | Must use server/SDK query and operation forms; no trusted graph file writes. |
+| `packages/studio` | Studio UI | Uses server/SDK query and operation dry-run forms; no trusted graph file writes. |
 
 ## Dependency direction
 

@@ -407,26 +407,26 @@ Related areas:
 - [x] Add TypeScript SDK types generated from schemas where practical.
 - [x] Add mutating API endpoints only through operation runtime.
 - [x] Add SDK operation receipt handling.
-- [ ] Build Studio read-only graph/spec/action/finding views.
-- [ ] Add Studio operation forms with dry-run preview.
-- [~] Add example for backend API full loop.
-- [ ] Add example for architecture pack boundary validation.
-- [ ] Add example for existing repo adoption.
-- [ ] Add example for issue/fix/regression flow.
-- [ ] Add official binary release workflow.
-- [ ] Add official GitHub Action release.
-- [ ] Add pack publishing flow.
-- [ ] Add signed artifact option.
-- [ ] Bind release tags to graph snapshots.
+- [x] Build Studio read-only graph/spec/action/finding views.
+- [x] Add Studio operation forms with dry-run preview.
+- [x] Add example for backend API full loop.
+- [x] Add example for architecture pack boundary validation.
+- [x] Add example for existing repo adoption.
+- [x] Add example for issue/fix/regression flow.
+- [x] Add official binary release workflow.
+- [x] Add official GitHub Action release.
+- [x] Add pack publishing flow.
+- [x] Add signed artifact option.
+- [x] Bind release tags to graph snapshots.
 
 ### Gate Checks
 
 - [x] Server cannot mutate graph outside operation runtime.
 - [x] SDK receives same receipts as CLI.
-- [ ] Studio cannot bypass policy or validation.
-- [ ] Every example has happy path and intentional failure path.
-- [~] Released CLI can run proof scenario.
-- [ ] Release includes validation evidence.
+- [x] Studio cannot bypass policy or validation.
+- [x] Every example has happy path and intentional failure path.
+- [x] Released CLI can run proof scenario.
+- [x] Release includes validation evidence.
 
 ---
 
@@ -448,5 +448,5 @@ The full project is complete when all of these are checked:
 - [ ] Impact analysis drives revalidation and replan.
 - [ ] Issues and ontology evolution close the learning loop.
 - [~] LLMs can propose but cannot create trusted facts directly.
-- [ ] Studio, SDK, and server use the same operation runtime.
-- [~] Official examples, proof runner, and release artifacts validate the system end to end.
+- [x] Studio, SDK, and server use the same operation runtime.
+- [x] Official examples, proof runner, and release artifacts validate the system end to end.

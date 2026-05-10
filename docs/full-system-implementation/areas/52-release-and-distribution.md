@@ -1,62 +1,71 @@
 # 52. Release and Distribution
 
-**System area:** Release and Distribution  
+**System area:** Release and Distribution
 **Implementation status:** 🟡 Partly implemented
-**Status basis:** inferred from the existing Markdown sources, not from a fresh code audit.
+**Status basis:** code/docs audit after Phase 7.9 implementation.
 
 ## Purpose
 
-Ship SpecGraph OS as reliable open-source binaries, hooks, GitHub Action, packs, signed releases, docs, and examples.
+Ship SpecGraph OS as reliable open-source binaries, hooks, GitHub Action, packs, signed releases, docs, examples, SDK, Studio, and release evidence.
 
 ## Current Status Breakdown
 
 ### Fully Implemented
 
-- v1.0 deliverables are documented
-- Phase 0 release/distribution baseline exists at `docs/release/distribution.md`
-- Required artifact families are named: CLI binaries, Rust crates, GitHub Action, ontology packs, policy packs, docs bundle, examples, future server/SDK/Studio artifacts, and release evidence
+- `docs/release/distribution.md` documents implemented release workflow, evidence, artifacts, checksums, signing option, and graph snapshot binding.
+- `.github/workflows/release.yml` validates, builds the CLI, packages archives, writes checksums, prepares release evidence, optionally signs checksums, uploads artifacts, and drafts GitHub releases on tags.
+- `action.yml` provides the official composite GitHub Action validation surface.
+- `scripts/prepare_release_evidence.py` emits release evidence JSON.
+- `sg release check` and `sg release evidence` expose release validation/evidence locally.
+- Release evidence includes source commit, graph state when `.specgraph` exists, validation commands, artifact checksums, and signing option metadata.
 
 ### Partly Implemented
 
-- Release/distribution requirements and evidence gates are documented, but publishing workflows and signed artifacts are not implemented
+- Release publishing is implemented as a draft GitHub Release workflow; human approval is still required before final publishing.
+- Multi-target binary archives and package registries can be added without changing the release evidence schema.
 
 ### Not Implemented / Remaining
 
-- Binary release workflow and produced archives
-- Official GitHub Action package and marketplace/repo publishing
-- Installer/package channels
-- Signed artifacts, checksums, release evidence bundle, and pack publishing
+- Multi-platform binary matrix
+- Cargo registry publish dry-run/publish steps
+- Hosted pack registry publishing
+- Installer package channels
 
 ## Implementation Parts
 
 ### 1. Graph Model / Runtime Objects
 
-Release, Tag, GraphSnapshot, PackVersion, ValidationRun, Signature
+Release, Tag, GraphSnapshot, PackVersion, ValidationRun, Signature, release evidence bundle, artifact checksum.
 
 ### 2. Commands / APIs
 
-Future release workflow for CLI binaries, Rust crates, GitHub Action, ontology/policy packs, docs bundle, examples, server/SDK/Studio artifacts, tags, and release evidence
+- `sg release check`
+- `sg release evidence`
+- `scripts/prepare_release_evidence.py`
+- `.github/workflows/release.yml`
+- `action.yml`
 
 ### 3. Validation and Policy Gates
 
-Release requires tests, proof, architecture checks, docs source-of-truth checks, benchmark budget checks, docs/examples validation, signatures if enabled, compatibility checks, changelog, source commit, graph snapshot/state hash, and artifact checksums
+Release requires tests, proof, architecture checks, docs checks, example checks, benchmark budget checks, Phase 7 asset checks, changelog/source commit, graph snapshot/state hash when present, artifact checksums, and optional signatures.
 
 ### 4. Implementation Work Items
 
-- Keep `docs/release/distribution.md` aligned with future release workflow implementation.
-- Implement or finish: Binary releases.
-- Implement or finish: Official GitHub Action package.
-- Implement or finish: Installer channels.
-- Implement or finish: Signed artifacts and pack publishing.
-- Route state changes through the Operation Runtime and produce receipts where graph state changes.
-- Add focused tests, CLI examples, and documentation updates for this area.
+- [x] Implement binary release workflow.
+- [x] Add official GitHub Action package.
+- [x] Add pack/docs/examples/SDK/Studio artifact evidence checksums.
+- [x] Add signed artifact option.
+- [x] Bind release evidence to source commit and graph snapshot/state hash when present.
+- [ ] Add multi-platform binary matrix.
+- [ ] Add Cargo/package registry publishing.
+- [ ] Add installer channels.
 
 ### 5. Acceptance Criteria
 
-- The documented commands/APIs work for the happy path and at least one intentional failure path.
-- Validation findings identify the graph object, file or command involved, and remediation.
-- The area can be exercised from CLI/CI without relying on untrusted direct mutation.
-- Release/distribution requirements name binary, action, pack, docs, examples, future API/SDK/Studio, and evidence artifacts before release workflow implementation begins.
+- Release/distribution workflow can be exercised without publishing by generating evidence.
+- Release includes validation evidence and artifact checksums.
+- Release tags bind to source commit and graph snapshot/state hash when graph state is present.
+- Release tooling is outer tooling and does not bypass Operation Runtime.
 
 ## Source Notes
 
@@ -69,4 +78,3 @@ This file was derived from the full-system matrix built from these Markdown sour
 - `docs/full-system-foundation.md`
 - `examples/backend-api-typescript/README.md`
 - `examples/backend-api-typescript/docs/validation-output.md`
-
