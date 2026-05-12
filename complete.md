@@ -121,8 +121,9 @@ Current completed slices:
 - **Phase 0.1A — Workflow intent/no-op planner** added runtime intent clarification models, ambiguity questions, safe/risky assumption reporting, feature duplicate detection, `no-op`/`docs-only`/reference guidance for workflow plans, code-plan no-op/docs-only exits, CLI output, and tests.
 - **Phase 0.1B — Persisted intent decisions and wider existing-feature evidence** added `Intent.RecordDecision`, ontology/stable-key support for intent clarification facts, scoped approval enforcement for risky assumptions, and broader existing-feature evidence from endpoints, tests, PRs, docs, and CodeGraph-linked symbols.
 - **Phase 0.2A — Code object lifecycle ABI and change classification** added distinct `CodeObject.Update/Rename/Move/Deprecate/Delete` operation ABI entries, lifecycle semantic validation for declaration identity and placement, `sg workflow code-plan` change type classification, and tests for update, rename evidence, move placement, and lifecycle classification.
+- **Phase 0.2B — Impact, delete/refactor safety, and stale permit foundations** added update impact evidence, referenced-object delete blockers, refactor-only graph facts, work-permit state/hash metadata, and stale expected-state rejection tests.
 
-Next focus: **Phase 0.2B — Impact, delete/refactor safety, and stale permit foundations**. Start from the latest `development`, add impact/delete safety evidence and stale-permit checks before marking Phase 0.2 complete.
+Next focus: **Phase 0.2C — Scope expansion, bugfix targeting, and failure/correction lifecycle**. Start from the latest `development`, add scope-expansion replan blockers plus bugfix/failure evidence before marking Phase 0.2 complete.
 
 ---
 
@@ -351,19 +352,19 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [x] **Add change type classification.** Every work permit must classify the requested change as `create`, `update`, `rename`, `move`, `delete`, `deprecate`, `refactor`, `bugfix`, `docs-only`, `config-change`, `dependency-change`, `migration-change`, or `release-change`.
 
-- [ ] **Add update impact analysis.** Updating an existing function/type/method/route must identify all linked specs, tests, endpoints, modules, public interfaces, consumers, and releases that may be impacted.
+- [x] **Add update impact analysis.** Updating an existing function/type/method/route must identify all linked specs, tests, endpoints, modules, public interfaces, consumers, and releases that may be impacted.
 
-- [ ] **Add rename/move safety checks.** Rename or move operations must update graph stable references or create migration/alias facts. Public symbols require compatibility evidence or approval.
+- [~] **Add rename/move safety checks.** Rename or move operations must update graph stable references or create migration/alias facts. Public symbols require compatibility evidence or approval.
 
-- [ ] **Add delete safety checks.** Delete operations must be blocked if the object is referenced by specs, tests, public interfaces, endpoints, migrations, docs, or releases unless a deprecation/removal plan and approval exist.
+- [~] **Add delete safety checks.** Delete operations must be blocked if the object is referenced by specs, tests, public interfaces, endpoints, migrations, docs, or releases unless a deprecation/removal plan and approval exist.
 
-- [ ] **Add refactor-only workflow.** Add `RefactorSpec`, `PreservedBehavior`, `RefactorPlan`, and `EquivalenceValidation` facts. Refactors must declare no intended behavior change, preserve public APIs unless approved, and revalidate existing behavior links.
+- [~] **Add refactor-only workflow.** Add `RefactorSpec`, `PreservedBehavior`, `RefactorPlan`, and `EquivalenceValidation` facts. Refactors must declare no intended behavior change, preserve public APIs unless approved, and revalidate existing behavior links.
 
 - [ ] **Add bugfix workflow targeting.** Bugfix work must link IssueGraph root cause to exact module/function/type/route/data object. Fixes should update existing root-cause objects rather than create duplicate workaround implementations.
 
 - [ ] **Add scope expansion detector.** If a coding agent discovers a new DTO, entity, dependency, config variable, module, migration, public API change, or file outside the current CommitPlan, the system must block coding and require `Spec.Intent.Update` plus `Action.Replan`.
 
-- [ ] **Add stale work permit validation.** Work permits must include graph state hash, branch id, action id, commit plan id, and file content hashes for all intended edits. If graph or file hashes change, the permit expires and `sg workflow code-plan` must be rerun.
+- [~] **Add stale work permit validation.** Work permits must include graph state hash, branch id, action id, commit plan id, and file content hashes for all intended edits. If graph or file hashes change, the permit expires and `sg workflow code-plan` must be rerun.
 
 - [ ] **Add failure/correction lifecycle.** Extend `ExecutionAttempt` with `FailureCause`, `CorrectionPlan`, `Retry`, and `EscalationRequired`. Repeated failures should suggest replan or human intervention instead of endless retries.
 
@@ -373,8 +374,8 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [~] Create/update/rename/move/delete/deprecate are distinct graph operations with different gates.
 - [ ] Agent cannot expand scope silently.
-- [ ] Stale work permits are rejected before edit/commit validation.
-- [ ] Refactor-only and bugfix flows have explicit graph evidence.
+- [~] Stale work permits are rejected before edit/commit validation.
+- [~] Refactor-only and bugfix flows have explicit graph evidence.
 
 ---
 

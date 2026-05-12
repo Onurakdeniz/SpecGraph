@@ -210,6 +210,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "graph-snapshot:sha256:abc123",
     },
     StableKeyFamily {
+        prefix: "impact-analysis",
+        description: "Impact analysis report for changed graph/code facts",
+        example: "impact-analysis:AUTH-001/requestPasswordReset",
+    },
+    StableKeyFamily {
         prefix: "layer",
         description: "Module or architecture layer fact",
         example: "layer:application",
@@ -360,6 +365,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "policy-requirement:security/no-secret-leak",
     },
     StableKeyFamily {
+        prefix: "preserved-behavior",
+        description: "Behavior preserved by a refactor-only plan",
+        example: "preserved-behavior:AUTH-001/refactor-1/password-reset-response",
+    },
+    StableKeyFamily {
         prefix: "policy-decision",
         description: "Persisted policy decision",
         example: "policy-decision:run-001/policy.secret",
@@ -473,6 +483,21 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "query",
         description: "DataGraph query or read access fact",
         example: "query:user-list",
+    },
+    StableKeyFamily {
+        prefix: "refactor-plan",
+        description: "Concrete implementation plan for behavior-preserving refactor work",
+        example: "refactor-plan:AUTH-001/refactor-1",
+    },
+    StableKeyFamily {
+        prefix: "refactor-spec",
+        description: "Refactor-only intent that must preserve behavior",
+        example: "refactor-spec:AUTH-001/refactor-1",
+    },
+    StableKeyFamily {
+        prefix: "equivalence-validation",
+        description: "Validation evidence that a refactor preserved behavior",
+        example: "equivalence-validation:AUTH-001/refactor-1/tests",
     },
     StableKeyFamily {
         prefix: "read-model",

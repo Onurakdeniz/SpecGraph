@@ -21,6 +21,7 @@ sg-project.workspace = true
 sg-query.workspace = true
 sg-spec.workspace = true
 sg-validation.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 time.workspace = true
 uuid.workspace = true

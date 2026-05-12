@@ -896,6 +896,7 @@ dependencies = [
  "sg-query",
  "sg-spec",
  "sg-validation",
+ "sha2",
  "tempfile",
  "thiserror",
  "time",

@@ -664,6 +664,8 @@ struct WorkflowCodePlanArgs {
     wants: Vec<String>,
     #[arg(long)]
     file: Option<String>,
+    #[arg(long = "expected-state-hash")]
+    expected_state_hash: Option<String>,
     #[arg(long, default_value = "local:planner")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -2196,6 +2198,7 @@ fn handle_workflow(
                 action: args.action,
                 wants: args.wants,
                 file: args.file,
+                expected_state_hash: args.expected_state_hash,
                 actor: args.actor,
                 graph_branch: args.graph_branch,
             })?;
@@ -2211,11 +2214,25 @@ fn handle_workflow(
                 println!("blocked: {}", plan.blocked);
                 println!("decision: {}", plan.decision);
                 println!("changeType: {}", plan.change_type);
+                println!("graphBranch: {}", plan.graph_branch);
+                println!("actionId: {}", plan.action_id.as_deref().unwrap_or(""));
+                println!(
+                    "commitPlanId: {}",
+                    plan.commit_plan_id.as_deref().unwrap_or("")
+                );
                 println!("duplicateRisk: {}", plan.duplicate_risk);
                 println!("needsUserChoice: {}", plan.needs_user_choice);
                 println!("requiredOperations: {}", plan.required_operations.join(","));
                 println!("allowedFiles: {}", plan.allowed_files.join(","));
                 println!("allowedSymbols: {}", plan.allowed_symbols.join(","));
+                for file_hash in &plan.file_hashes {
+                    println!(
+                        "fileHash: {} sha256={} missing={}",
+                        file_hash.file,
+                        file_hash.sha256.as_deref().unwrap_or(""),
+                        file_hash.missing
+                    );
+                }
                 println!("humanMessage: {}", plan.human_message);
                 for candidate in &plan.existing_candidates {
                     println!(

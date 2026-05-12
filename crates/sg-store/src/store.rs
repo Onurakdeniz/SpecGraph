@@ -30,6 +30,7 @@ use sg_spec::{
     validate_spec_authoring_intent, ModuleChange, PlannedObject, SpecProjection, TextItem,
 };
 use sg_validation::{CORE_VALIDATOR_VERSION, VALIDATOR_BRANCH_METADATA, VALIDATOR_SNAPSHOT};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -275,6 +276,7 @@ pub struct WorkflowCodePlanOptions {
     pub action: String,
     pub wants: Vec<String>,
     pub file: Option<String>,
+    pub expected_state_hash: Option<String>,
     pub actor: String,
     pub graph_branch: String,
 }
@@ -287,6 +289,10 @@ pub struct WorkflowCodePlan {
     pub blocked: bool,
     pub decision: String,
     pub change_type: String,
+    pub graph_branch: String,
+    pub action_id: Option<String>,
+    pub commit_plan_id: Option<String>,
+    pub file_hashes: Vec<WorkflowFileHash>,
     pub state_hash: String,
     pub existing_candidates: Vec<ExistingCodeObjectCandidate>,
     pub selected_existing_object: Option<ExistingCodeObjectCandidate>,
@@ -299,6 +305,14 @@ pub struct WorkflowCodePlan {
     pub allowed_symbols: Vec<String>,
     pub missing_graph_facts: Vec<String>,
     pub human_message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowFileHash {
+    pub file: String,
+    pub sha256: Option<String>,
+    pub missing: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1272,6 +1286,29 @@ pub fn plan_code_workflow(
 ) -> Result<WorkflowCodePlan> {
     let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
     let change_type = classify_code_change_type(&options);
+    let action_binding = workflow_action_binding(&replay.graph, &options);
+    let requested_files = requested_workflow_files(&options);
+    let file_hashes = workflow_file_hashes(root, &requested_files);
+    if options
+        .expected_state_hash
+        .as_deref()
+        .is_some_and(|expected| expected != replay.state_hash)
+    {
+        return Ok(blocked_code_plan(BlockedCodePlan {
+            state_hash: replay.state_hash,
+            decision: "stale-work-permit".to_string(),
+            change_type,
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
+            required_operations: vec!["Implementation.Authorize".to_string()],
+            missing_graph_facts: vec!["stateHash".to_string()],
+            human_message:
+                "Work permit is stale; rerun sg workflow code-plan against the current graph state."
+                    .to_string(),
+        }));
+    }
     if docs_only_code_intent(&options) {
         return Ok(WorkflowCodePlan {
             schema_version: "specgraph.workflow-code-plan/v1".to_string(),
@@ -1279,6 +1316,10 @@ pub fn plan_code_workflow(
             blocked: false,
             decision: "docs-only".to_string(),
             change_type,
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
             state_hash: replay.state_hash,
             existing_candidates: Vec::new(),
             selected_existing_object: None,
@@ -1296,17 +1337,21 @@ pub fn plan_code_workflow(
         });
     }
     let Some(spec_node) = find_spec_node(&replay.graph, &options.spec) else {
-        return Ok(blocked_code_plan(
-            replay.state_hash,
-            "missing-spec",
+        return Ok(blocked_code_plan(BlockedCodePlan {
+            state_hash: replay.state_hash,
+            decision: "missing-spec".to_string(),
             change_type,
-            vec!["Spec.Create".to_string()],
-            vec![format!("spec:{}", options.spec)],
-            format!(
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
+            required_operations: vec!["Spec.Create".to_string()],
+            missing_graph_facts: vec![format!("spec:{}", options.spec)],
+            human_message: format!(
                 "Spec `{}` is missing. Create/import the spec before requesting a code permit.",
                 options.spec
             ),
-        ));
+        }));
     };
     if spec_has_release(&replay.graph, Some(&options.spec))
         || node_attr(spec_node, "state") == Some("Released")
@@ -1317,6 +1362,10 @@ pub fn plan_code_workflow(
             blocked: false,
             decision: "no-op".to_string(),
             change_type,
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
             state_hash: replay.state_hash,
             existing_candidates: Vec::new(),
             selected_existing_object: None,
@@ -1338,14 +1387,18 @@ pub fn plan_code_workflow(
         .first()
         .and_then(|want| parse_wanted_object(want))
     else {
-        return Ok(blocked_code_plan(
-            replay.state_hash,
-            "missing-wanted-object",
+        return Ok(blocked_code_plan(BlockedCodePlan {
+            state_hash: replay.state_hash,
+            decision: "missing-wanted-object".to_string(),
             change_type,
-            vec!["CodeObject.Declare".to_string()],
-            vec!["wantedObject".to_string()],
-            "Code plan requires --wants KIND:NAME.".to_string(),
-        ));
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
+            required_operations: vec!["CodeObject.Declare".to_string()],
+            missing_graph_facts: vec!["wantedObject".to_string()],
+            human_message: "Code plan requires --wants KIND:NAME.".to_string(),
+        }));
     };
 
     let module = code_object_module_for_request(&replay.graph, spec_node, &kind, &name, &options);
@@ -1364,6 +1417,10 @@ pub fn plan_code_workflow(
             blocked: true,
             decision: "ambiguous-existing-candidates".to_string(),
             change_type,
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
             state_hash: replay.state_hash,
             existing_candidates: resolution.existing_candidates,
             selected_existing_object: None,
@@ -1388,6 +1445,10 @@ pub fn plan_code_workflow(
             blocked: true,
             decision: "link-existing".to_string(),
             change_type,
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
             state_hash: replay.state_hash,
             existing_candidates: resolution.existing_candidates,
             selected_existing_object: Some(selected),
@@ -1412,22 +1473,26 @@ pub fn plan_code_workflow(
         &name,
         module.as_deref(),
     ) else {
-        return Ok(blocked_code_plan(
-            replay.state_hash,
-            "declare-code-object",
+        return Ok(blocked_code_plan(BlockedCodePlan {
+            state_hash: replay.state_hash,
+            decision: "declare-code-object".to_string(),
             change_type,
-            vec!["CodeObject.Declare".to_string()],
-            vec![format!(
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
+            required_operations: vec!["CodeObject.Declare".to_string()],
+            missing_graph_facts: vec![format!(
                 "code-object:{}/{}/{}/{}",
                 options.spec,
                 module.clone().unwrap_or_else(|| "<module>".to_string()),
                 kind,
                 name
             )],
-            format!(
+            human_message: format!(
                 "No CodeObjectDeclaration exists for `{kind}:{name}`. Declare ownership and placement before editing."
             ),
-        ));
+        }));
     };
     let allowed_file = options
         .file
@@ -1440,6 +1505,10 @@ pub fn plan_code_workflow(
         blocked: false,
         decision: "edit-permit".to_string(),
         change_type,
+        graph_branch: options.graph_branch,
+        action_id: action_binding.0,
+        commit_plan_id: action_binding.1,
+        file_hashes,
         state_hash: replay.state_hash,
         existing_candidates: Vec::new(),
         selected_existing_object: None,
@@ -1456,32 +1525,42 @@ pub fn plan_code_workflow(
     })
 }
 
-fn blocked_code_plan(
+struct BlockedCodePlan {
     state_hash: String,
-    decision: &str,
+    decision: String,
     change_type: String,
+    graph_branch: String,
+    action_id: Option<String>,
+    commit_plan_id: Option<String>,
+    file_hashes: Vec<WorkflowFileHash>,
     required_operations: Vec<String>,
     missing_graph_facts: Vec<String>,
     human_message: String,
-) -> WorkflowCodePlan {
+}
+
+fn blocked_code_plan(blocked: BlockedCodePlan) -> WorkflowCodePlan {
     WorkflowCodePlan {
         schema_version: "specgraph.workflow-code-plan/v1".to_string(),
         allowed: false,
         blocked: true,
-        decision: decision.to_string(),
-        change_type,
-        state_hash,
+        decision: blocked.decision,
+        change_type: blocked.change_type,
+        graph_branch: blocked.graph_branch,
+        action_id: blocked.action_id,
+        commit_plan_id: blocked.commit_plan_id,
+        file_hashes: blocked.file_hashes,
+        state_hash: blocked.state_hash,
         existing_candidates: Vec::new(),
         selected_existing_object: None,
         duplicate_risk: false,
         create_allowed: false,
         link_existing_allowed: false,
         needs_user_choice: false,
-        required_operations,
+        required_operations: blocked.required_operations,
         allowed_files: Vec::new(),
         allowed_symbols: Vec::new(),
-        missing_graph_facts,
-        human_message,
+        missing_graph_facts: blocked.missing_graph_facts,
+        human_message: blocked.human_message,
     }
 }
 
@@ -1546,6 +1625,66 @@ fn classify_code_change_type(options: &WorkflowCodePlanOptions) -> String {
         "create"
     };
     change_type.to_string()
+}
+
+fn requested_workflow_files(options: &WorkflowCodePlanOptions) -> Vec<String> {
+    options.file.clone().into_iter().collect()
+}
+
+fn workflow_file_hashes(root: &Path, files: &[String]) -> Vec<WorkflowFileHash> {
+    files
+        .iter()
+        .map(|file| {
+            let path = root.join(file);
+            match fs::read(&path) {
+                Ok(bytes) => {
+                    let mut hasher = Sha256::new();
+                    hasher.update(bytes);
+                    WorkflowFileHash {
+                        file: file.clone(),
+                        sha256: Some(format!("sha256:{:x}", hasher.finalize())),
+                        missing: false,
+                    }
+                }
+                Err(_) => WorkflowFileHash {
+                    file: file.clone(),
+                    sha256: None,
+                    missing: true,
+                },
+            }
+        })
+        .collect()
+}
+
+fn workflow_action_binding(
+    graph: &Graph,
+    options: &WorkflowCodePlanOptions,
+) -> (Option<String>, Option<String>) {
+    let action = graph.nodes.values().find(|node| {
+        node.node_type == "ActionNode"
+            && (node.id == options.action
+                || node_attr(node, "name").is_some_and(|name| name == options.action))
+    });
+    let action_id = action.map(|node| node.id.clone());
+    let commit_plan_id = action.and_then(|action| {
+        graph
+            .edges
+            .values()
+            .find(|edge| {
+                edge.edge_type == "HAS_ACTION"
+                    && edge.to == action.id
+                    && graph.edges.values().any(|candidate| {
+                        candidate.from == edge.from && candidate.edge_type == "HAS_COMMIT_PLAN"
+                    })
+            })
+            .and_then(|group_edge| {
+                graph.edges.values().find(|edge| {
+                    edge.from == group_edge.from && edge.edge_type == "HAS_COMMIT_PLAN"
+                })
+            })
+            .map(|edge| edge.to.clone())
+    });
+    (action_id, commit_plan_id)
 }
 
 fn parse_wanted_object(value: &str) -> Option<(String, String)> {
@@ -5691,6 +5830,12 @@ fn validate_code_object_lifecycle_semantic_preconditions(
                     "CodeObject.Update requires input.change evidence.",
                 ));
             }
+            if !lifecycle_has_impact_analysis(delta, &updated.id) {
+                findings.push(semantic_finding(
+                    "semantic.code_object.update_impact_required",
+                    "CodeObject.Update requires ImpactAnalysis evidence linked with IMPACTS to the updated CodeObjectDeclaration.",
+                ));
+            }
         }
         "CodeObject.Rename" => {
             let old_name = node_attr(existing, "name").unwrap_or("");
@@ -5753,11 +5898,50 @@ fn validate_code_object_lifecycle_semantic_preconditions(
                     "CodeObject.Delete must record deletionReason and impact.",
                 ));
             }
+            if code_object_has_delete_blocking_references(graph, &updated.id)
+                && (node_attr(updated, "removalPlan").is_none_or(str::is_empty)
+                    || node_attr(updated, "approvalId").is_none_or(str::is_empty))
+            {
+                findings.push(semantic_finding(
+                    "semantic.code_object.delete_reference_safety_required",
+                    "CodeObject.Delete is blocked for referenced objects unless removalPlan and approvalId are recorded.",
+                ));
+            }
         }
         _ => {}
     }
 
     findings
+}
+
+fn lifecycle_has_impact_analysis(delta: &GraphDelta, target_id: &str) -> bool {
+    delta
+        .create_nodes
+        .iter()
+        .any(|node| node.node_type == "ImpactAnalysis")
+        && delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "IMPACTS" && edge.to == target_id)
+}
+
+fn code_object_has_delete_blocking_references(graph: &Graph, declaration_id: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        (edge.from == declaration_id
+            && matches!(
+                edge.edge_type.as_str(),
+                "CODE_OBJECT_REALIZED_BY"
+                    | "CODE_OBJECT_FOR_ENDPOINT"
+                    | "CODE_OBJECT_FOR_USE_CASE"
+                    | "CODE_OBJECT_IMPLEMENTS"
+                    | "CODE_OBJECT_EXPECTS_FILE"
+            ))
+            || (edge.to == declaration_id
+                && matches!(
+                    edge.edge_type.as_str(),
+                    "CODE_OBJECT_IMPLEMENTS" | "CODE_OBJECT_PARENT_OBJECT" | "IMPACTS"
+                ))
+    })
 }
 
 fn validate_git_commit_semantic_preconditions(
@@ -10962,6 +11146,7 @@ acceptanceCriteria:
             "changeSummary".to_string(),
             json!("Tighten password reset response handling"),
         );
+        let impact = impact_analysis_delta(&declaration.id, "AUTH-001/update-password-reset");
 
         let receipt = append_operation(
             tmp.path(),
@@ -10976,6 +11161,8 @@ acceptanceCriteria:
                 dry_run: false,
                 delta: GraphDelta {
                     update_nodes: vec![declaration],
+                    create_nodes: impact.create_nodes,
+                    create_edges: impact.create_edges,
                     ..GraphDelta::default()
                 },
             },
@@ -11064,6 +11251,133 @@ acceptanceCriteria:
                 count: 1,
             } if operation == "CodeObject.Move"
         ));
+    }
+
+    #[test]
+    fn code_object_delete_blocks_referenced_object_without_removal_plan_and_approval() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration
+            .attributes
+            .insert("status".to_string(), json!("Deleted"));
+        declaration
+            .attributes
+            .insert("deletionReason".to_string(), json!("No longer needed"));
+        declaration.attributes.insert(
+            "impact".to_string(),
+            json!("Impacts password reset implementation"),
+        );
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Delete".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "reason": "No longer needed",
+                    "impact": "Impacts password reset implementation",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "CodeObject.Delete"
+        ));
+    }
+
+    #[test]
+    fn refactor_record_requires_preserved_behavior_and_equivalence_validation() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        let declaration = current_password_reset_declaration(tmp.path());
+        let refactor_id = "AUTH-001/refactor-password-reset";
+        let refactor_node_id = node_id("refactor_spec", refactor_id);
+        let plan_id = node_id("refactor_plan", refactor_id);
+        let behavior_id = node_id(
+            "preserved_behavior",
+            &format!("{refactor_id}/generic-response"),
+        );
+        let validation_id = node_id("equivalence_validation", &format!("{refactor_id}/tests"));
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Refactor.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"refactor": refactor_id}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![
+                        Node {
+                            id: refactor_node_id.clone(),
+                            stable_key: format!("refactor-spec:{refactor_id}"),
+                            node_type: "RefactorSpec".to_string(),
+                            attributes: BTreeMap::from([
+                                ("refactorId".to_string(), json!(refactor_id)),
+                                ("behaviorChange".to_string(), json!(false)),
+                            ]),
+                        },
+                        Node {
+                            id: plan_id.clone(),
+                            stable_key: format!("refactor-plan:{refactor_id}"),
+                            node_type: "RefactorPlan".to_string(),
+                            attributes: BTreeMap::from([(
+                                "summary".to_string(),
+                                json!("Restructure without behavior change"),
+                            )]),
+                        },
+                        Node {
+                            id: behavior_id.clone(),
+                            stable_key: format!(
+                                "preserved-behavior:{refactor_id}/generic-response"
+                            ),
+                            node_type: "PreservedBehavior".to_string(),
+                            attributes: BTreeMap::from([(
+                                "behavior".to_string(),
+                                json!("Password reset response stays generic"),
+                            )]),
+                        },
+                        Node {
+                            id: validation_id.clone(),
+                            stable_key: format!("equivalence-validation:{refactor_id}/tests"),
+                            node_type: "EquivalenceValidation".to_string(),
+                            attributes: BTreeMap::from([
+                                ("status".to_string(), json!("Passed")),
+                                ("checks".to_string(), json!(["unit", "trace"])),
+                            ]),
+                        },
+                    ],
+                    create_edges: vec![
+                        edge(&refactor_node_id, "HAS_REFACTOR_PLAN", &plan_id),
+                        edge(&refactor_node_id, "PRESERVES_BEHAVIOR", &behavior_id),
+                        edge(
+                            &refactor_node_id,
+                            "HAS_EQUIVALENCE_VALIDATION",
+                            &validation_id,
+                        ),
+                        edge(&refactor_node_id, "REFACTORS_CODE_OBJECT", &declaration.id),
+                    ],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "Refactor.Record");
     }
 
     #[test]
@@ -11288,6 +11602,7 @@ acceptanceCriteria:
                 action: "implementation".to_string(),
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11323,6 +11638,7 @@ acceptanceCriteria:
                 action: "implementation".to_string(),
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11441,6 +11757,7 @@ acceptanceCriteria:
                 action: "implementation".to_string(),
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: None,
+                expected_state_hash: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11615,6 +11932,7 @@ acceptanceCriteria:
                 action: "implementation".to_string(),
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11661,6 +11979,7 @@ acceptanceCriteria:
                 action: "implementation".to_string(),
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: None,
+                expected_state_hash: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11694,6 +12013,7 @@ acceptanceCriteria:
                 action: "rename".to_string(),
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: None,
+                expected_state_hash: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11702,6 +12022,45 @@ acceptanceCriteria:
 
         assert_eq!(plan.change_type, "rename");
         assert!(plan.allowed);
+    }
+
+    #[test]
+    fn workflow_code_plan_rejects_stale_expected_state_hash_and_reports_file_hashes() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        fs::create_dir_all(tmp.path().join("src/identity")).unwrap();
+        fs::write(
+            tmp.path().join("src/identity/password-reset.rs"),
+            "fn requestPasswordReset() {}",
+        )
+        .unwrap();
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: Some("sha256:stale".to_string()),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(plan.blocked);
+        assert_eq!(plan.decision, "stale-work-permit");
+        assert_eq!(plan.graph_branch, "main");
+        assert!(plan.file_hashes.iter().any(|hash| {
+            hash.file == "src/identity/password-reset.rs"
+                && hash
+                    .sha256
+                    .as_deref()
+                    .is_some_and(|value| value.starts_with("sha256:"))
+                && !hash.missing
+        }));
     }
 
     #[test]
@@ -11752,6 +12111,7 @@ acceptanceCriteria:
                 action: "implementation".to_string(),
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11779,6 +12139,7 @@ acceptanceCriteria:
                 action: "docs".to_string(),
                 wants: vec!["README password reset documentation".to_string()],
                 file: None,
+                expected_state_hash: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11803,6 +12164,7 @@ acceptanceCriteria:
                 action: "implementation".to_string(),
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11909,6 +12271,26 @@ acceptanceCriteria:
         )
         .unwrap()
         .clone()
+    }
+
+    fn impact_analysis_delta(target_id: &str, impact_id: &str) -> GraphDelta {
+        let impact_node_id = node_id("impact_analysis", impact_id);
+        GraphDelta {
+            create_nodes: vec![Node {
+                id: impact_node_id.clone(),
+                stable_key: format!("impact-analysis:{impact_id}"),
+                node_type: "ImpactAnalysis".to_string(),
+                attributes: BTreeMap::from([
+                    ("impactId".to_string(), json!(impact_id)),
+                    (
+                        "summary".to_string(),
+                        json!("Code object lifecycle impact reviewed"),
+                    ),
+                ]),
+            }],
+            create_edges: vec![edge(&impact_node_id, "IMPACTS", target_id)],
+            ..GraphDelta::default()
+        }
     }
 
     fn add_release_for_spec(root: &Path, spec: &str) {
