@@ -9,6 +9,7 @@ use sg_architecture::{
 use sg_canonical::state_hash;
 use sg_codegraph::{resolve_code_object, CodeObjectQuery, ExistingCodeObjectCandidate};
 use sg_gitgraph::{parse_commit_trailers, validate_commit_binding, CommitValidationInput};
+use sg_impact::{revalidation_queue_delta, RevalidationQueue};
 use sg_model::{
     Edge, Event, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt,
     OperationRequest, Snapshot, EVENT_SCHEMA_VERSION, OPERATION_RECEIPT_SCHEMA_VERSION,
@@ -287,6 +288,14 @@ pub struct GenerateActionGraphOptions {
 #[derive(Debug, Clone)]
 pub struct ActionLifecycleOptions {
     pub action: String,
+    pub actor: String,
+    pub graph_branch: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionImpactReplanOptions {
+    pub queue: RevalidationQueue,
     pub actor: String,
     pub graph_branch: String,
     pub reason: Option<String>,
@@ -896,6 +905,13 @@ impl SpecGraphStore {
 
     pub fn replan_action(&self, options: ActionLifecycleOptions) -> Result<OperationReceipt> {
         transition_action(self.root(), options, "Action.Replan", "Replanned")
+    }
+
+    pub fn replan_actions_from_impact_queue(
+        &self,
+        options: ActionImpactReplanOptions,
+    ) -> Result<OperationReceipt> {
+        replan_actions_from_impact_queue(self.root(), options)
     }
 
     pub fn record_git_commit(&self, options: RecordCommitOptions) -> Result<OperationReceipt> {
@@ -5328,37 +5344,13 @@ pub fn transition_action(
     let mut create_edges = vec![edge(&action.id, "HAS_EXECUTION_ATTEMPT", &attempt_id)];
     let mut delete_edges = Vec::new();
     if operation == "Action.Replan" {
-        let replan_uuid = Uuid::new_v4();
-        let replacement_id = node_id(
-            "action_node",
-            &format!("{}/replanned/{replan_uuid}", action.id),
+        append_replanned_action_replacement(
+            &replay.graph,
+            action,
+            &mut create_nodes,
+            &mut create_edges,
+            &mut delete_edges,
         );
-        let mut replacement = action.clone();
-        replacement.id = replacement_id.clone();
-        replacement.stable_key = format!("action-node:{}/replanned/{replan_uuid}", action.id);
-        replacement
-            .attributes
-            .insert("state".to_string(), json!("Ready"));
-        replacement
-            .attributes
-            .insert("replansAction".to_string(), json!(action.id.clone()));
-        create_nodes.push(replacement);
-        create_edges.push(edge(&action.id, "REPLANNED_BY", &replacement_id));
-        for existing_edge in replay.graph.edges.values() {
-            match existing_edge.edge_type.as_str() {
-                "HAS_ACTION" if existing_edge.to == action.id => {
-                    create_edges.push(edge(&existing_edge.from, "HAS_ACTION", &replacement_id));
-                }
-                "DEPENDS_ON" if existing_edge.from == action.id => {
-                    create_edges.push(edge(&replacement_id, "DEPENDS_ON", &existing_edge.to));
-                }
-                "DEPENDS_ON" if existing_edge.to == action.id => {
-                    delete_edges.push(existing_edge.id.clone());
-                    create_edges.push(edge(&existing_edge.from, "DEPENDS_ON", &replacement_id));
-                }
-                _ => {}
-            }
-        }
     }
 
     append_operation(
@@ -5378,6 +5370,148 @@ pub fn transition_action(
             dry_run: false,
         },
     )
+}
+
+pub fn replan_actions_from_impact_queue(
+    root: &Path,
+    options: ActionImpactReplanOptions,
+) -> Result<OperationReceipt> {
+    let replay = replay_events(root, ReplayOptions::checking())?;
+    let mut queue_delta = revalidation_queue_delta(&options.queue);
+    let mut update_nodes = Vec::new();
+    let mut create_nodes = Vec::new();
+    let mut create_edges = Vec::new();
+    let mut delete_edges = Vec::new();
+    let mut replanned_actions = Vec::new();
+    for action_id in &options.queue.invalidated_actions {
+        let Some(action) = replay.graph.nodes.get(action_id) else {
+            continue;
+        };
+        if action.node_type != "ActionNode" {
+            continue;
+        }
+        let blockers = action_lifecycle_blockers(&replay.graph, &action.id, "Replanned");
+        if !blockers.is_empty() {
+            return Err(StoreError::OperationValidationFailed(blockers.len()));
+        }
+        let mut updated = action.clone();
+        updated
+            .attributes
+            .insert("state".to_string(), json!("Replanned"));
+        updated.attributes.insert(
+            "impactQueue".to_string(),
+            json!(options.queue.queue_id.clone()),
+        );
+        updated.attributes.insert(
+            "invalidatedBy".to_string(),
+            json!(options.queue.roots.clone()),
+        );
+        if let Some(reason) = &options.reason {
+            updated
+                .attributes
+                .insert("reason".to_string(), json!(reason));
+        }
+        update_nodes.push(updated);
+
+        let attempt_uuid = Uuid::new_v4();
+        let attempt_id = node_id(
+            "execution_attempt",
+            &format!("{}/impact-replan/{attempt_uuid}", action.id),
+        );
+        create_nodes.push(Node {
+            id: attempt_id.clone(),
+            stable_key: format!(
+                "execution-attempt:{}/impact-replan/{attempt_uuid}",
+                action.id
+            ),
+            node_type: "ExecutionAttempt".to_string(),
+            attributes: BTreeMap::from([
+                ("action".to_string(), json!(action.id)),
+                ("state".to_string(), json!("Replanned")),
+                ("operation".to_string(), json!("Impact.Revalidate")),
+                (
+                    "reason".to_string(),
+                    json!(options
+                        .reason
+                        .clone()
+                        .unwrap_or_else(|| "impact queue replan".to_string())),
+                ),
+                (
+                    "impactQueue".to_string(),
+                    json!(options.queue.queue_id.clone()),
+                ),
+            ]),
+        });
+        create_edges.push(edge(&action.id, "HAS_EXECUTION_ATTEMPT", &attempt_id));
+        append_replanned_action_replacement(
+            &replay.graph,
+            action,
+            &mut create_nodes,
+            &mut create_edges,
+            &mut delete_edges,
+        );
+        replanned_actions.push(action.id.clone());
+    }
+    queue_delta.create_nodes.append(&mut create_nodes);
+    queue_delta.update_nodes.append(&mut update_nodes);
+    queue_delta.create_edges.append(&mut create_edges);
+    queue_delta.delete_edges.append(&mut delete_edges);
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Impact.Revalidate".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "roots": options.queue.roots.clone(),
+                "queue": options.queue.queue_id.clone(),
+                "replannedActions": replanned_actions,
+            }),
+            delta: queue_delta,
+            dry_run: false,
+        },
+    )
+}
+
+fn append_replanned_action_replacement(
+    graph: &Graph,
+    action: &Node,
+    create_nodes: &mut Vec<Node>,
+    create_edges: &mut Vec<Edge>,
+    delete_edges: &mut Vec<String>,
+) {
+    let replan_uuid = Uuid::new_v4();
+    let replacement_id = node_id(
+        "action_node",
+        &format!("{}/replanned/{replan_uuid}", action.id),
+    );
+    let mut replacement = action.clone();
+    replacement.id = replacement_id.clone();
+    replacement.stable_key = format!("action-node:{}/replanned/{replan_uuid}", action.id);
+    replacement
+        .attributes
+        .insert("state".to_string(), json!("Ready"));
+    replacement
+        .attributes
+        .insert("replansAction".to_string(), json!(action.id.clone()));
+    create_nodes.push(replacement);
+    create_edges.push(edge(&action.id, "REPLANNED_BY", &replacement_id));
+    for existing_edge in graph.edges.values() {
+        match existing_edge.edge_type.as_str() {
+            "HAS_ACTION" if existing_edge.to == action.id => {
+                create_edges.push(edge(&existing_edge.from, "HAS_ACTION", &replacement_id));
+            }
+            "DEPENDS_ON" if existing_edge.from == action.id => {
+                create_edges.push(edge(&replacement_id, "DEPENDS_ON", &existing_edge.to));
+            }
+            "DEPENDS_ON" if existing_edge.to == action.id => {
+                delete_edges.push(existing_edge.id.clone());
+                create_edges.push(edge(&existing_edge.from, "DEPENDS_ON", &replacement_id));
+            }
+            _ => {}
+        }
+    }
 }
 
 fn action_lifecycle_blockers(graph: &Graph, action_id: &str, target_state: &str) -> Vec<String> {
@@ -14872,6 +15006,81 @@ acceptanceCriteria:
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
                 reason: Some("Try to continue stale action".to_string()),
+            },
+            "Action.Start",
+            "InProgress",
+        )
+        .unwrap_err();
+        assert!(matches!(blocked, StoreError::OperationValidationFailed(_)));
+    }
+
+    #[test]
+    fn action_replan_accepts_impact_queue_and_replans_invalidated_actions() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_action_graph_for_valid_spec(tmp.path());
+
+        let graph_action_id = node_id("action_node", "AUTH-001/graph");
+        let implementation_action_id = node_id("action_node", "AUTH-001/implementation");
+        let queue = sg_impact::RevalidationQueue {
+            queue_id: "revalidation-queue:AUTH-001/impact".to_string(),
+            roots: vec![node_id("spec", "AUTH-001")],
+            entries: vec![sg_impact::RevalidationQueueEntry {
+                target_id: implementation_action_id.clone(),
+                target_kind: sg_impact::RevalidationTargetKind::ActionNode,
+                reason: sg_impact::ImpactInvalidationReason::DirectImpact,
+                impacted_by: vec![node_id("spec", "AUTH-001")],
+                requires_replan: true,
+            }],
+            invalidated_actions: vec![implementation_action_id.clone()],
+            invalidated_validations: Vec::new(),
+            replan_required: true,
+        };
+        replan_actions_from_impact_queue(
+            tmp.path(),
+            ActionImpactReplanOptions {
+                queue: queue.clone(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                reason: Some("Impact queue invalidated implementation".to_string()),
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        assert!(
+            replay
+                .graph
+                .nodes
+                .values()
+                .any(|node| node.node_type == "RevalidationQueue"
+                    && node.stable_key == queue.queue_id)
+        );
+        let original = replay.graph.nodes.get(&implementation_action_id).unwrap();
+        assert_eq!(node_attr(original, "state"), Some("Replanned"));
+        assert_eq!(
+            node_attr(original, "impactQueue"),
+            Some(queue.queue_id.as_str())
+        );
+        let replacement_edge = replay
+            .graph
+            .edges
+            .values()
+            .find(|edge| edge.from == implementation_action_id && edge.edge_type == "REPLANNED_BY")
+            .unwrap();
+        assert!(replay.graph.edges.values().any(|edge| {
+            edge.from == replacement_edge.to
+                && edge.to == graph_action_id
+                && edge.edge_type == "DEPENDS_ON"
+        }));
+
+        let blocked = transition_action(
+            tmp.path(),
+            ActionLifecycleOptions {
+                action: implementation_action_id,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                reason: Some("Try stale impacted action".to_string()),
             },
             "Action.Start",
             "InProgress",

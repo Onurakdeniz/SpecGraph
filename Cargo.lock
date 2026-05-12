@@ -891,6 +891,7 @@ dependencies = [
  "sg-canonical",
  "sg-codegraph",
  "sg-gitgraph",
+ "sg-impact",
  "sg-model",
  "sg-module-graph",
  "sg-ontology",

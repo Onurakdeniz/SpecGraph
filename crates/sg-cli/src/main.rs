@@ -21,7 +21,7 @@ use sg_gitgraph::{
     validation_run_node_id, CommitValidationInput, GitGraphProjection, GitMergeFact,
     GitReleaseFact, PullRequestFact, ReleaseArtifactFact,
 };
-use sg_impact::analyze_impact;
+use sg_impact::{analyze_impact, RevalidationQueue};
 use sg_merge::{
     detect_merge_conflicts, diff_graphs, dry_run_graph_merge, dry_run_graph_rebase,
     GraphIntegrationMode, GraphIntegrationStatus,
@@ -49,13 +49,13 @@ use sg_spec::{ModuleChange, ModuleChangeAction, PlannedObject, SpecProjection, T
 use sg_store::{
     code_index_reconciliation_delta, code_index_strict_findings, mark_code_index_delta_as_baseline,
     post_release_gate_findings, release_governance_gate_findings, review_gate_findings,
-    validation_recipe_gate_findings, ActionLifecycleOptions, AppendOperationOptions,
-    BindBranchOptions, CreateWaiverOptions, GenerateActionGraphOptions, GrantRoleOptions,
-    GraphBranchCreateOptions, InitOptions, InterfaceVisibility, LinkModuleCapabilityOptions,
-    ModuleDefinition, ModuleInterface, ModuleLifecycleOptions, ModuleLifecycleState,
-    ProjectProfileInput, RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions,
-    ReleaseWorkReservationOptions, ReplayOptions, ReplayReport, SpecGraphStore,
-    TransitionSpecOptions, UpsertActorOptions, UpsertModuleGraphOptions,
+    validation_recipe_gate_findings, ActionImpactReplanOptions, ActionLifecycleOptions,
+    AppendOperationOptions, BindBranchOptions, CreateWaiverOptions, GenerateActionGraphOptions,
+    GrantRoleOptions, GraphBranchCreateOptions, InitOptions, InterfaceVisibility,
+    LinkModuleCapabilityOptions, ModuleDefinition, ModuleInterface, ModuleLifecycleOptions,
+    ModuleLifecycleState, ProjectProfileInput, RecordApprovalOptions, RecordCommitOptions,
+    RecordPolicyReportOptions, ReleaseWorkReservationOptions, ReplayOptions, ReplayReport,
+    SpecGraphStore, TransitionSpecOptions, UpsertActorOptions, UpsertModuleGraphOptions,
     UpsertProjectProfileOptions, WorkflowCodePlanOptions, WorkflowExpectedFileHash,
     WorkflowPlanOptions,
 };
@@ -1044,7 +1044,7 @@ enum ActionCommand {
     Blockers(ActionStatusArgs),
     Start(ActionLifecycleArgs),
     Complete(ActionLifecycleArgs),
-    Replan(ActionLifecycleArgs),
+    Replan(ActionReplanArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1073,6 +1073,20 @@ struct ActionStatusArgs {
 struct ActionLifecycleArgs {
     #[arg(long)]
     action: String,
+    #[arg(long)]
+    reason: Option<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ActionReplanArgs {
+    #[arg(long)]
+    action: Option<String>,
+    #[arg(long = "impact-queue")]
+    impact_queue: Option<PathBuf>,
     #[arg(long)]
     reason: Option<String>,
     #[arg(long, default_value = "local:user")]
@@ -3194,7 +3208,7 @@ fn handle_action(
             println!("stateHash: {}", receipt.post_state_hash);
         }
         ActionCommand::Replan(args) => {
-            let receipt = store.replan_action(action_lifecycle_options(args))?;
+            let receipt = replan_action_from_args(store, args)?;
             println!("actionReplanned: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
         }
@@ -3208,6 +3222,46 @@ fn action_lifecycle_options(args: ActionLifecycleArgs) -> ActionLifecycleOptions
         actor: args.actor,
         graph_branch: args.graph_branch,
         reason: args.reason,
+    }
+}
+
+fn replan_action_from_args(
+    store: &SpecGraphStore,
+    args: ActionReplanArgs,
+) -> anyhow::Result<OperationReceipt> {
+    let receipt = match (args.action, args.impact_queue) {
+        (Some(action), None) => store.replan_action(ActionLifecycleOptions {
+            action,
+            actor: args.actor,
+            graph_branch: args.graph_branch,
+            reason: args.reason,
+        })?,
+        (None, Some(path)) => {
+            let queue = read_revalidation_queue(&path)?;
+            store.replan_actions_from_impact_queue(ActionImpactReplanOptions {
+                queue,
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                reason: args.reason,
+            })?
+        }
+        (Some(_), Some(_)) => {
+            bail!("use either --action or --impact-queue for action replan, not both")
+        }
+        (None, None) => bail!("action replan requires --action or --impact-queue"),
+    };
+    Ok(receipt)
+}
+
+fn read_revalidation_queue(path: &Path) -> anyhow::Result<RevalidationQueue> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read impact queue {}", path.display()))?;
+    if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
+        serde_json::from_str(&raw)
+            .with_context(|| format!("failed to parse impact queue JSON {}", path.display()))
+    } else {
+        serde_yaml::from_str(&raw)
+            .with_context(|| format!("failed to parse impact queue YAML {}", path.display()))
     }
 }
 

@@ -148,8 +148,9 @@ Current completed slices:
 - **Phase 5 — Hosting provider integration foundations** added a hosting provider trait, GitHub provider fetch/check/comment/webhook support, config-gated GitLab webhook mapping, `sg pr sync --from-provider`, `sg pr publish-check`, GitHub webhook HTTP endpoint, structured provider error mapping, and mock-provider tests that keep provider facts observed/untrusted.
 - **Phase 6A — Action template planning foundations** added a versioned built-in action template schema/registry foundation, template-generated `DEPENDS_ON` edges with start blockers, CommitPlan expected GraphDelta type/effect matching, and replan replacement evidence that blocks stale action continuation.
 - **Phase 6B — Pack templates and action blocker CLI** added architecture-pack-provided action templates, pack selection from the project architecture profile, `sg action status`, `sg action blockers`, blocker-category JSON output, and tests proving pack-generated ActionGraphs differ from the built-in default.
+- **Phase 6C — Impact queue replan closure** wired impact queue input into `sg action replan`, records `RevalidationQueue` evidence through `Impact.Revalidate`, replans invalidated actions with replacement ActionNodes, and tests impact-driven stale action blockers.
 
-Next focus: **Phase 6C — Impact queue replan closure**. Keep the five-checklist-item branch policy: wire impact queue input into `sg action replan`, add impact-driven replan tests if needed, and then close the remaining partial Phase 6 replan/test checklist items.
+Next focus: **Phase 7 — Production Code Indexing and Drift Detection**. Start from the latest `development` and continue the five-checklist-item branch policy with semantic indexer trait and the first language indexer/cache slice.
 
 ---
 
@@ -719,11 +720,11 @@ Replace fixed MVP action templates with pack-aware planning, dependency ordering
 
 - [x] **Implement expected delta matching.** Extend CommitPlan validation so recorded commits and graph deltas are checked against expected node types, expected edge types, allowed files, required validation, and forbidden effects.
 
-- [~] **Add replan lifecycle.** `sg action replan` should accept impact queue input, update affected actions to `Replanned`, create `REPLANNED_BY` evidence, and block continuation until a new valid plan exists.
+- [x] **Add replan lifecycle.** `sg action replan` should accept impact queue input, update affected actions to `Replanned`, create `REPLANNED_BY` evidence, and block continuation until a new valid plan exists.
 
 - [x] **Add action status/blockers commands.** Add `sg action status` and `sg action blockers` with JSON output. Include dependency blockers, validation blockers, policy blockers, impact blockers, and expected-delta blockers.
 
-- [~] **Add tests.** Cover pack template selection, dependency enforcement, expected-delta success/failure, forbidden effect failure, impact-driven replan, and action continuation blocked until replan.
+- [x] **Add tests.** Cover pack template selection, dependency enforcement, expected-delta success/failure, forbidden effect failure, impact-driven replan, and action continuation blocked until replan.
 
 ## Phase Gate
 
