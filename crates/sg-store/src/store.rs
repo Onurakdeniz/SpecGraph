@@ -1243,6 +1243,297 @@ fn find_code_object_declaration<'a>(
     })
 }
 
+pub fn mark_code_index_delta_as_baseline(delta: &mut GraphDelta, relationship: &str) {
+    for node in delta
+        .create_nodes
+        .iter_mut()
+        .chain(delta.update_nodes.iter_mut())
+        .filter(|node| {
+            matches!(
+                node.node_type.as_str(),
+                "CodeFile" | "CodeSymbol" | "CodeRoute"
+            )
+        })
+    {
+        node.attributes
+            .insert("acceptedBaseline".to_string(), json!(true));
+        node.attributes.insert(
+            "baselineRelationship".to_string(),
+            json!(if relationship.trim().is_empty() {
+                "REUSES_EXISTING_SYMBOL"
+            } else {
+                relationship
+            }),
+        );
+        node.attributes
+            .insert("trustState".to_string(), json!("Accepted"));
+        node.attributes
+            .insert("sourceTrust".to_string(), json!("AcceptedBaseline"));
+    }
+}
+
+pub fn code_index_reconciliation_delta(graph: &Graph, indexed_delta: &GraphDelta) -> GraphDelta {
+    let mut create_edges = Vec::new();
+    let mut update_nodes = Vec::new();
+
+    for indexed_symbol in indexed_delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "CodeSymbol")
+    {
+        let symbol = graph
+            .nodes
+            .get(&indexed_symbol.id)
+            .unwrap_or(indexed_symbol);
+        let Some(declaration) = matching_declaration_for_symbol(graph, symbol, true) else {
+            continue;
+        };
+        if graph.edges.values().any(|edge| {
+            edge.edge_type == "CODE_OBJECT_REALIZED_BY"
+                && edge.from == declaration.id
+                && edge.to == symbol.id
+        }) {
+            continue;
+        }
+
+        let relationship = if node_bool_attr(symbol, "acceptedBaseline") {
+            node_attr(symbol, "baselineRelationship").unwrap_or("REUSES_EXISTING_SYMBOL")
+        } else {
+            "IMPLEMENTS_NEW_SYMBOL"
+        };
+        let mut realized_edge = edge(&declaration.id, "CODE_OBJECT_REALIZED_BY", &symbol.id);
+        realized_edge
+            .attributes
+            .insert("relationship".to_string(), json!(relationship));
+        realized_edge
+            .attributes
+            .insert("reconciledBy".to_string(), json!("CodeObject.Reconcile"));
+        create_edges.push(realized_edge);
+
+        let mut updated_declaration = declaration.clone();
+        updated_declaration
+            .attributes
+            .insert("status".to_string(), json!("Implemented"));
+        updated_declaration
+            .attributes
+            .insert("realizedRelationship".to_string(), json!(relationship));
+        update_nodes.push(updated_declaration);
+
+        let mut updated_symbol = symbol.clone();
+        updated_symbol
+            .attributes
+            .insert("trustState".to_string(), json!("Accepted"));
+        updated_symbol
+            .attributes
+            .insert("sourceTrust".to_string(), json!("OperationRuntime"));
+        updated_symbol
+            .attributes
+            .insert("acceptedBy".to_string(), json!("CodeObject.Reconcile"));
+        update_nodes.push(updated_symbol);
+    }
+
+    GraphDelta {
+        update_nodes,
+        create_edges,
+        ..GraphDelta::default()
+    }
+}
+
+pub fn code_index_strict_findings(graph: &Graph, indexed_delta: &GraphDelta) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    for symbol in indexed_delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "CodeSymbol")
+    {
+        if !is_governed_code_symbol(graph, symbol) || node_bool_attr(symbol, "acceptedBaseline") {
+            continue;
+        }
+
+        if let Some(declaration) = matching_declaration_for_symbol(graph, symbol, true) {
+            if !graph.edges.values().any(|edge| {
+                edge.edge_type == "CODE_OBJECT_REALIZED_BY"
+                    && edge.from == declaration.id
+                    && edge.to == symbol.id
+            }) {
+                // Declared symbols are allowed during the same indexing pass; reconciliation may
+                // append the realization edge immediately after Code.Index.
+                continue;
+            }
+            continue;
+        }
+
+        if let Some(declaration) = matching_declaration_for_symbol(graph, symbol, false) {
+            findings.push(code_index_finding(
+                "code_object.wrong_placement",
+                format!(
+                    "Observed symbol `{}` is declared for `{}` but was indexed from `{}`. Remediation: move the symbol to the declared file or update Spec.Intent and replan.",
+                    node_attr(symbol, "name").unwrap_or("<unknown>"),
+                    node_attr(declaration, "expectedFile").unwrap_or("<unknown>"),
+                    node_attr(symbol, "file").unwrap_or("<unknown>")
+                ),
+            ));
+        } else {
+            findings.push(code_index_finding(
+                "code_object.unplanned_symbol",
+                format!(
+                    "Observed governed symbol `{}` in `{}` is not declared, linked, or accepted as existing baseline. Remediation: run CodeObject.Declare, CodeObject.LinkExisting, or re-index with explicit baseline acceptance for legacy code.",
+                    node_attr(symbol, "name").unwrap_or("<unknown>"),
+                    node_attr(symbol, "file").unwrap_or("<unknown>")
+                ),
+            ));
+        }
+    }
+
+    for import in indexed_delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "CodeImport")
+    {
+        let Some(source_file) = node_attr(import, "file") else {
+            continue;
+        };
+        let Some(imported_file) = node_attr(import, "imported") else {
+            continue;
+        };
+        let Some(source_module) = module_for_file_path(graph, source_file) else {
+            continue;
+        };
+        let Some(target_module) = module_for_file_path(graph, imported_file) else {
+            continue;
+        };
+        if source_module.id != target_module.id && !is_public_interface_import(graph, imported_file)
+        {
+            findings.push(code_index_finding(
+                "code_object.private_boundary_violation",
+                format!(
+                    "Observed import from `{source_file}` to private cross-module file `{imported_file}`. Remediation: expose a PublicInterface/port or move the dependency inside an allowed module boundary."
+                ),
+            ));
+        }
+    }
+
+    findings.extend(code_graph_declared_missing_findings(graph));
+    findings
+}
+
+pub fn code_graph_declared_missing_findings(graph: &Graph) -> Vec<Finding> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "CodeObjectDeclaration")
+        .filter(|node| matches!(node_attr(node, "status"), Some("Implemented" | "Accepted")))
+        .filter(|declaration| declaration_realization_missing(graph, declaration))
+        .map(|declaration| {
+            code_index_finding(
+                "code_object.declared_symbol_missing",
+                format!(
+                    "CodeObjectDeclaration `{}` is marked implemented but no matching CodeSymbol/realization exists in `{}`. Remediation: run sg code index on the expected file or fix the implementation placement.",
+                    declaration.stable_key,
+                    node_attr(declaration, "expectedFile").unwrap_or("<unknown>")
+                ),
+            )
+        })
+        .collect()
+}
+
+fn declaration_realization_missing(graph: &Graph, declaration: &Node) -> bool {
+    if graph.edges.values().any(|edge| {
+        edge.edge_type == "CODE_OBJECT_REALIZED_BY"
+            && edge.from == declaration.id
+            && graph.nodes.contains_key(&edge.to)
+    }) {
+        return false;
+    }
+    let Some(expected_file) = node_attr(declaration, "expectedFile") else {
+        return false;
+    };
+    let Some(kind) = node_attr(declaration, "kind") else {
+        return false;
+    };
+    let Some(name) = node_attr(declaration, "name") else {
+        return false;
+    };
+    !graph.nodes.values().any(|node| {
+        node.node_type == "CodeSymbol"
+            && node_attr(node, "kind") == Some(kind)
+            && node_attr(node, "name") == Some(name)
+            && node_attr(node, "file") == Some(expected_file)
+    })
+}
+
+fn is_governed_code_symbol(graph: &Graph, symbol: &Node) -> bool {
+    node_attr(symbol, "file").is_some_and(|file| {
+        module_for_file_path(graph, file).is_some()
+            || graph.nodes.values().any(|node| {
+                node.node_type == "CodeObjectDeclaration"
+                    && node_attr(node, "expectedFile") == Some(file)
+            })
+    })
+}
+
+fn matching_declaration_for_symbol<'a>(
+    graph: &'a Graph,
+    symbol: &Node,
+    require_file_match: bool,
+) -> Option<&'a Node> {
+    let name = node_attr(symbol, "name")?;
+    let kind = node_attr(symbol, "kind")?;
+    let file = node_attr(symbol, "file");
+    graph.nodes.values().find(|node| {
+        node.node_type == "CodeObjectDeclaration"
+            && node_attr(node, "name") == Some(name)
+            && declaration_kind_matches_symbol(node_attr(node, "kind").unwrap_or_default(), kind)
+            && (!require_file_match
+                || node_attr(node, "expectedFile").is_none_or(|expected| Some(expected) == file))
+    })
+}
+
+fn declaration_kind_matches_symbol(declaration_kind: &str, symbol_kind: &str) -> bool {
+    declaration_kind == symbol_kind
+        || matches!(
+            (declaration_kind, symbol_kind),
+            (
+                "domainEntity" | "dto" | "requestType" | "responseType" | "valueObject",
+                "type"
+            ) | ("routeHandler" | "service", "function")
+        )
+}
+
+fn module_for_file_path<'a>(graph: &'a Graph, file: &str) -> Option<&'a Node> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "Module")
+        .find(|node| {
+            module_package_path(node).is_some_and(|package| path_is_inside_package(file, package))
+        })
+}
+
+fn is_public_interface_import(graph: &Graph, imported_file: &str) -> bool {
+    graph.nodes.values().any(|node| {
+        node.node_type == "PublicInterface"
+            && ["path", "file", "package"].iter().any(|key| {
+                node_attr(node, key).is_some_and(|value| {
+                    path_is_inside_package(imported_file, value) || imported_file == value
+                })
+            })
+    })
+}
+
+fn node_bool_attr(node: &Node, key: &str) -> bool {
+    node.attributes
+        .get(key)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn code_index_finding(code: &str, message: String) -> Finding {
+    Finding::new(code, FindingSeverity::Error, message)
+        .with_validator("validator.code_index_strict", CORE_VALIDATOR_VERSION)
+}
+
 fn detect_workflow_observations(
     root: &Path,
     options: &WorkflowPlanOptions,
@@ -3057,7 +3348,8 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
 
 pub fn validate_specs(root: &Path) -> Result<SpecValidationReport> {
     let report = replay_events(root, ReplayOptions { check_hashes: true })?;
-    let findings = active_ontology(root)?.validate_graph(&report.graph);
+    let mut findings = active_ontology(root)?.validate_graph(&report.graph);
+    findings.extend(code_graph_declared_missing_findings(&report.graph));
     Ok(SpecValidationReport {
         state_hash: report.state_hash,
         findings,
@@ -3761,7 +4053,7 @@ fn validate_operation_semantic_preconditions(
             validate_action_graph_semantic_preconditions(graph, request, delta)
         }
         "CodeObject.Declare" => validate_code_object_declare_semantic_preconditions(graph, delta),
-        "CodeObject.LinkExisting" => {
+        "CodeObject.LinkExisting" | "CodeObject.Reconcile" => {
             validate_code_object_link_existing_semantic_preconditions(graph, delta)
         }
         "GitCommit.Record" => validate_git_commit_semantic_preconditions(graph, request, delta),
@@ -8741,6 +9033,206 @@ acceptanceCriteria:
         .unwrap();
 
         assert_eq!(receipt.operation, "CodeObject.LinkExisting");
+    }
+
+    #[test]
+    fn code_index_reconciles_observed_symbol_to_declaration() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+
+        let index_delta = code_symbol_delta(
+            "src/identity/password-reset.rs",
+            "function",
+            "requestPasswordReset",
+        );
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Code.Index".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"changedFiles": ["src/identity/password-reset.rs"]}),
+                dry_run: false,
+                delta: index_delta.clone(),
+            },
+        )
+        .unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let reconcile_delta = code_index_reconciliation_delta(&replay.graph, &index_delta);
+        assert_eq!(reconcile_delta.create_edges.len(), 1);
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Reconcile".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObjects": 1}),
+                dry_run: false,
+                delta: reconcile_delta,
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "CODE_OBJECT_REALIZED_BY"));
+        let declaration = replay
+            .graph
+            .nodes
+            .values()
+            .find(|node| node.node_type == "CodeObjectDeclaration")
+            .unwrap();
+        assert_eq!(node_attr(declaration, "status"), Some("Implemented"));
+        assert!(code_graph_declared_missing_findings(&replay.graph).is_empty());
+    }
+
+    #[test]
+    fn strict_code_index_blocks_unplanned_symbol_unless_baseline() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let mut delta =
+            code_symbol_delta("src/identity/unplanned.rs", "function", "unplannedReset");
+        let mut projected = replay.graph.clone();
+        projected.apply_delta(&delta);
+        let findings = code_index_strict_findings(&projected, &delta);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "code_object.unplanned_symbol"));
+
+        mark_code_index_delta_as_baseline(&mut delta, "REUSES_EXISTING_SYMBOL");
+        let mut projected = replay.graph.clone();
+        projected.apply_delta(&delta);
+        let findings = code_index_strict_findings(&projected, &delta);
+        assert!(!findings
+            .iter()
+            .any(|finding| finding.code == "code_object.unplanned_symbol"));
+    }
+
+    #[test]
+    fn strict_code_index_blocks_wrong_placement_and_private_imports() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let wrong_symbol_delta =
+            code_symbol_delta("src/identity/other.rs", "function", "requestPasswordReset");
+        let mut projected = replay.graph.clone();
+        projected.apply_delta(&wrong_symbol_delta);
+        let findings = code_index_strict_findings(&projected, &wrong_symbol_delta);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "code_object.wrong_placement"));
+
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "module_identity".to_string(),
+            Node {
+                id: "module_identity".to_string(),
+                stable_key: "module:identity".to_string(),
+                node_type: "Module".to_string(),
+                attributes: BTreeMap::from([("package".to_string(), json!("src/identity"))]),
+            },
+        );
+        graph.nodes.insert(
+            "module_billing".to_string(),
+            Node {
+                id: "module_billing".to_string(),
+                stable_key: "module:billing".to_string(),
+                node_type: "Module".to_string(),
+                attributes: BTreeMap::from([("package".to_string(), json!("src/billing"))]),
+            },
+        );
+        let import_delta = GraphDelta {
+            create_nodes: vec![Node {
+                id: "import_private".to_string(),
+                stable_key: "code-import:src/identity/a.rs->src/billing/private.rs".to_string(),
+                node_type: "CodeImport".to_string(),
+                attributes: BTreeMap::from([
+                    ("file".to_string(), json!("src/identity/a.rs")),
+                    ("imported".to_string(), json!("src/billing/private.rs")),
+                ]),
+            }],
+            ..GraphDelta::default()
+        };
+        let findings = code_index_strict_findings(&graph, &import_delta);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "code_object.private_boundary_violation"));
+    }
+
+    #[test]
+    fn validation_reports_implemented_declaration_missing_symbol() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let mut graph = replay_events(tmp.path(), ReplayOptions { check_hashes: true })
+            .unwrap()
+            .graph;
+        let mut delta = code_object_declaration_delta(
+            "AUTH-001",
+            "Identity",
+            "function",
+            "requestPasswordReset",
+            "application",
+            Some("src/identity/password-reset.rs"),
+            None,
+        );
+        let declaration = delta
+            .create_nodes
+            .iter_mut()
+            .find(|node| node.node_type == "CodeObjectDeclaration")
+            .unwrap();
+        declaration
+            .attributes
+            .insert("status".to_string(), json!("Implemented"));
+        graph.apply_delta(&delta);
+
+        let findings = code_graph_declared_missing_findings(&graph);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "code_object.declared_symbol_missing"));
     }
 
     #[test]

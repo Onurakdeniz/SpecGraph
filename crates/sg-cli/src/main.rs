@@ -43,6 +43,7 @@ use sg_server::{
 };
 use sg_spec::{ModuleChange, ModuleChangeAction, PlannedObject, SpecProjection, TextItem};
 use sg_store::{
+    code_index_reconciliation_delta, code_index_strict_findings, mark_code_index_delta_as_baseline,
     ActionLifecycleOptions, AppendOperationOptions, BindBranchOptions, CreateWaiverOptions,
     GenerateActionGraphOptions, GrantRoleOptions, InitOptions, InterfaceVisibility,
     LinkModuleCapabilityOptions, ModuleDefinition, ModuleInterface, ModuleLifecycleOptions,
@@ -1054,6 +1055,17 @@ struct CodeIndexArgs {
     changed_files: Vec<String>,
     #[arg(long)]
     base: Option<String>,
+    /// Fail if indexed governed symbols are undeclared, misplaced, or violate private module boundaries.
+    #[arg(long)]
+    strict: bool,
+    /// Do not append CodeObject.Reconcile for observed symbols that match declarations.
+    #[arg(long = "no-reconcile")]
+    no_reconcile: bool,
+    /// Accept indexed symbols as existing baseline facts instead of new implementation.
+    #[arg(long)]
+    accept_baseline: bool,
+    #[arg(long, default_value = "REUSES_EXISTING_SYMBOL")]
+    baseline_relationship: String,
     #[arg(long, default_value = "local:user")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -2772,22 +2784,69 @@ fn handle_code(store: &SpecGraphStore, root: &Path, args: CodeArgs) -> anyhow::R
                 .iter()
                 .map(|observation| observation.symbols.len())
                 .sum::<usize>();
-            let delta = observations_to_delta(&observations);
+            let mut delta = observations_to_delta(&observations);
+            if args.accept_baseline {
+                mark_code_index_delta_as_baseline(&mut delta, &args.baseline_relationship);
+            }
+
+            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let mut projected_graph = replay.graph.clone();
+            projected_graph.apply_delta(&delta);
+            let reconcile_delta = if args.no_reconcile {
+                Default::default()
+            } else {
+                code_index_reconciliation_delta(&projected_graph, &delta)
+            };
+            projected_graph.apply_delta(&reconcile_delta);
+
+            if args.strict {
+                let findings = code_index_strict_findings(&projected_graph, &delta);
+                print_findings(&findings);
+                fail_on_errors(&findings, "strict code index validation")?;
+            }
+
             let receipt = store.append_operation(AppendOperationOptions {
                 operation: "Code.Index".to_string(),
-                actor: args.actor,
-                graph_branch: args.graph_branch,
+                actor: args.actor.clone(),
+                graph_branch: args.graph_branch.clone(),
                 input: json!({
                     "changedFiles": files,
                     "observedSymbols": symbol_count,
+                    "strict": args.strict,
+                    "acceptBaseline": args.accept_baseline,
                 }),
                 delta,
                 dry_run: false,
             })?;
+
+            let reconcile_receipt = if reconcile_delta.create_edges.is_empty()
+                && reconcile_delta.update_nodes.is_empty()
+                && reconcile_delta.update_edges.is_empty()
+            {
+                None
+            } else {
+                Some(store.append_operation(AppendOperationOptions {
+                    operation: "CodeObject.Reconcile".to_string(),
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                    input: json!({
+                        "codeObjects": reconcile_delta.create_edges.len(),
+                    }),
+                    delta: reconcile_delta,
+                    dry_run: false,
+                })?)
+            };
+
             println!("codeFilesIndexed: {}", files.len());
             println!("codeSymbolsIndexed: {symbol_count}");
             println!("operationId: {}", receipt.operation_id);
-            println!("stateHash: {}", receipt.post_state_hash);
+            if let Some(receipt) = reconcile_receipt {
+                println!("codeObjectsReconciled: {}", receipt.created_edges.len());
+                println!("reconcileOperationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            } else {
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
         }
         CodeCommand::ResolveObject(args) => {
             let replay = store.replay(ReplayOptions { check_hashes: true })?;

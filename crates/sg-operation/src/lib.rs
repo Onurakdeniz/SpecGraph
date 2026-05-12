@@ -531,6 +531,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "CodeObject.Reconcile",
+            category: "code",
+            description: "Reconcile observed CodeGraph facts to declared or accepted-baseline code objects after indexing.",
+            required_input_fields: &["codeObjects"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["CodeObjectDeclaration", "CodeSymbol", "CodeFile", "CodeRoute"],
+            allowed_create_edge_types: &["CODE_OBJECT_REALIZED_BY"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Trace.Import",
             category: "trace",
             description: "Import manifest, annotation, and inferred traceability links.",

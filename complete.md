@@ -88,7 +88,7 @@ Important consistency rules:
 
 ## Current Repo Baseline
 
-As of the latest `development` baseline after the Phase 0D ActionGraph/CommitPlan integration slice, the repository already contains several foundations that later phases should reuse instead of rebuilding:
+As of the latest `development` baseline after the Phase 0E index reconciliation and strict-mode blocker slice, the repository already contains several foundations that later phases should reuse instead of rebuilding:
 
 - Operation Runtime receipts, dry-run behavior, ABI validation, policy gate, approval/waiver facts, and actor/identity foundations.
 - Project profile and module baseline enforcement before spec authoring.
@@ -97,6 +97,7 @@ As of the latest `development` baseline after the Phase 0D ActionGraph/CommitPla
 - CodeObjectDeclaration, `CodeObject.Declare`, discovery resolver, and `CodeObject.LinkExisting` foundations for spec/module-owned implementation objects.
 - `Implementation.Authorize` dry-run ABI plus `sg workflow code-plan` permit decisions with duplicate/link guidance, ambiguity blockers, required operations, allowed files/symbols, and human remediation output.
 - ActionGraph/CommitPlan generation consumes accepted `CodeObjectDeclaration` facts for allowed files/symbols and records scope-expansion replan requirements; commit validation can reject out-of-plan changed symbols.
+- Code indexing can run strict governed-symbol checks, accept existing-baseline symbols explicitly, reconcile observed symbols back to declarations through `CodeObject.Reconcile`, and report declared-but-missing implemented objects.
 - DataGraph and migration runtime foundations.
 - GitGraph facts for branches, commits, tags, merges, PR placeholders, and basic release records.
 - Graph diff/conflict reports, graph merge/rebase dry-run, and `sg graph integrate` acceptance path.
@@ -114,8 +115,9 @@ Current completed slices:
 - **Phase 0B — Discovery-before-create resolver** introduced candidate extraction, graph/source resolution, duplicate/ambiguity decision fields, `sg code resolve-object`, and `CodeObject.LinkExisting`.
 - **Phase 0C — Work permit command** introduced `Implementation.Authorize`, `sg workflow code-plan`, permit/block decisions, duplicate/link guidance, ambiguity blockers, allowed files/symbols, and tests.
 - **Phase 0D — ActionGraph and CommitPlan integration** made generated action groups and commit plans consume code object declarations, allowed files, allowed symbols, and scope-expansion replan requirements. Commit validation now accepts changed-symbol evidence and rejects undeclared/out-of-plan symbols.
+- **Phase 0E — Index reconciliation and strict-mode blockers** added strict code-index findings for undeclared symbols, wrong placement, and private cross-module imports; explicit existing-baseline acceptance; `CodeObject.Reconcile`; and declared-but-missing validation for implemented declarations.
 
-Next focus: **Phase 0E — Index reconciliation and strict-mode blockers**. This should reconcile observed symbols back to declarations or accepted baseline facts, and block undeclared/new symbols, declared-but-missing symbols, wrong placement, and private boundary violations in strict mode.
+Next focus: **Phase 0F — Scenario tests and documentation examples**. This should add the full happy/failure scenario suite and update examples so coding agents know when to declare, link, extend, replan, or stop.
 
 ---
 
@@ -201,13 +203,13 @@ Next operation: CodeObject.LinkExisting or CodeGraph.Upsert to accept/link the e
 
 - [ ] **Add blocker categories for agent guidance.** Findings must distinguish `missing_module`, `missing_code_object_declaration`, `existing_candidate_found`, `duplicate_candidate_exists`, `ambiguous_existing_candidates`, `missing_parent_type`, `wrong_module_path`, `private_boundary_violation`, `needs_spec_intent_update`, `needs_action_replan`, `needs_approval`, and `outside_commit_plan`. Each finding must include a remediation command.
 
-- [ ] **Add strict-mode unplanned symbol detection.** After `sg code index`, any observed function/type/method/route in governed paths that is not declared, linked to a spec, or accepted as existing baseline must produce a blocking finding in strict mode.
+- [x] **Add strict-mode unplanned symbol detection.** After `sg code index`, any observed function/type/method/route in governed paths that is not declared, linked to a spec, or accepted as existing baseline must produce a blocking finding in strict mode.
 
-- [ ] **Add declared-but-missing detection.** If a `CodeObjectDeclaration` says a function/type/method should exist in a file but the semantic indexer does not observe it, validation must emit `code_object.declared_symbol_missing`.
+- [x] **Add declared-but-missing detection.** If a `CodeObjectDeclaration` says a function/type/method should exist in a file but the semantic indexer does not observe it, validation must emit `code_object.declared_symbol_missing`.
 
-- [ ] **Add observed-to-declared reconciliation.** When code indexing observes a symbol that matches a declaration, create or update accepted `CodeGraph` facts through Operation Runtime and link the declaration to the observed/accepted symbol.
+- [x] **Add observed-to-declared reconciliation.** When code indexing observes a symbol that matches a declaration, create or update accepted `CodeGraph` facts through Operation Runtime and link the declaration to the observed/accepted symbol.
 
-- [ ] **Add existing-baseline reconciliation.** During existing-repo adoption or first strict-mode pass, allow existing symbols to be accepted as baseline facts and linked to future specs without pretending they were newly implemented for that spec. Store relationship type clearly, for example `REUSES_EXISTING_SYMBOL`, `EXTENDS_EXISTING_SYMBOL`, or `IMPLEMENTS_NEW_SYMBOL`.
+- [x] **Add existing-baseline reconciliation.** During existing-repo adoption or first strict-mode pass, allow existing symbols to be accepted as baseline facts and linked to future specs without pretending they were newly implemented for that spec. Store relationship type clearly, for example `REUSES_EXISTING_SYMBOL`, `EXTENDS_EXISTING_SYMBOL`, or `IMPLEMENTS_NEW_SYMBOL`.
 
 - [ ] **Add ambiguity handling.** If discovery finds several possible existing functions/entities, the system must not guess silently. It must return a blocker requiring either a user selection, a more specific planned object declaration, or a disambiguating source annotation.
 
@@ -263,7 +265,7 @@ Phase 0 is too large to implement safely as one unreviewable change. Keep the ph
 - [x] **Phase 0B — Discovery-before-create resolver.** Add text/spec candidate extraction, trusted graph search, observed CodeGraph search, source/index fallback, duplicate findings, ambiguity findings, and `CodeObject.LinkExisting`.
 - [x] **Phase 0C — Work permit command.** Implement `Implementation.Authorize` and `sg workflow code-plan` with `existingCandidates`, `requiredOperations`, `allowedFiles`, `allowedSymbols`, and human-readable remediation output.
 - [x] **Phase 0D — ActionGraph and CommitPlan integration.** Make generated action groups and commit validation consume code object declarations, discovered existing objects, allowed files, allowed symbols, and scope-expansion/replan decisions.
-- [ ] **Phase 0E — Index reconciliation and strict-mode blockers.** Reconcile observed symbols back to declarations or accepted baseline facts, and block undeclared/new symbols, declared-but-missing symbols, wrong placement, and private boundary violations in strict mode.
+- [x] **Phase 0E — Index reconciliation and strict-mode blockers.** Reconcile observed symbols back to declarations or accepted baseline facts, and block undeclared/new symbols, declared-but-missing symbols, wrong placement, and private boundary violations in strict mode.
 - [ ] **Phase 0F — Scenario tests and documentation examples.** Add the full happy/failure scenario suite and update examples so coding agents know when to declare, link, extend, replan, or stop.
 
 Phase 0 must not be checked off until every slice above passes its local tests and the full Phase 0 gate.
