@@ -20,6 +20,7 @@ sg-adapter-api.workspace = true
 sg-adapter-code.workspace = true
 sg-adapter-hosting.workspace = true
 sg-adoption.workspace = true
+sg-codegraph.workspace = true
 sg-gitgraph.workspace = true
 sg-impact.workspace = true
 sg-merge.workspace = true

@@ -118,9 +118,11 @@ pub use architecture_pack::{
     ArchitecturePackValidationReport, ForbiddenDependencyRule,
 };
 pub use code_graph::{
-    code_file_node_id, code_import_node_id, code_route_node_id, code_symbol_node_id,
-    validate_code_graph, CodeBehaviorLink, CodeFileFact, CodeGraphProjection, CodeImportFact,
-    CodeOwnershipFact, CodeRiskLink, CodeRouteFact, CodeSymbolFact, SourceLocation,
+    code_file_node_id, code_import_node_id, code_object_declaration_node_id,
+    code_object_declaration_stable_key, code_object_default_layer, code_route_node_id,
+    code_symbol_node_id, validate_code_graph, CodeBehaviorLink, CodeFileFact, CodeGraphProjection,
+    CodeImportFact, CodeObjectDeclaration, CodeOwnershipFact, CodeRiskLink, CodeRouteFact,
+    CodeSymbolFact, SourceLocation, CODE_OBJECT_KINDS,
 };
 pub use code_indexer::{
     framework_for_source, index_source_file, language_for_path, observations_to_delta,

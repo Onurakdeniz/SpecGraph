@@ -7,6 +7,7 @@ use sg_adapter_hosting::{validate_provider_check_report, ProviderCheckReport};
 use sg_adoption::{
     adoption_report_delta, adoption_report_from_delta, scan_repository, AdoptionMode,
 };
+use sg_codegraph::{code_object_default_layer, CodeGraphProjection, CodeObjectDeclaration};
 use sg_gitgraph::{
     git_graph_stable, pull_request_node_id, validate_commit_binding, validate_pr_hosting_graph,
     validation_run_node_id, CommitValidationInput, GitGraphProjection, GitReleaseFact,
@@ -1008,9 +1009,12 @@ struct CodeArgs {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum CodeCommand {
     /// Index changed files as CodeFile graph facts.
     Index(CodeIndexArgs),
+    /// Declare a planned implementation object before editing code.
+    DeclareObject(CodeDeclareObjectArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1019,6 +1023,42 @@ struct CodeIndexArgs {
     changed_files: Vec<String>,
     #[arg(long)]
     base: Option<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct CodeDeclareObjectArgs {
+    #[arg(long)]
+    spec: String,
+    #[arg(long)]
+    module: String,
+    #[arg(long)]
+    kind: String,
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    file: Option<String>,
+    #[arg(long)]
+    layer: Option<String>,
+    #[arg(long, default_value = "private")]
+    visibility: String,
+    #[arg(long, default_value = "Declared")]
+    status: String,
+    #[arg(long)]
+    parent_symbol: Option<String>,
+    #[arg(long)]
+    endpoint: Option<String>,
+    #[arg(long)]
+    use_case: Option<String>,
+    #[arg(long)]
+    implements: Option<String>,
+    #[arg(long)]
+    rationale: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
     #[arg(long, default_value = "local:user")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -2628,6 +2668,42 @@ fn handle_code(store: &SpecGraphStore, root: &Path, args: CodeArgs) -> anyhow::R
             })?;
             println!("codeFilesIndexed: {}", files.len());
             println!("codeSymbolsIndexed: {symbol_count}");
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        CodeCommand::DeclareObject(args) => {
+            let object = CodeObjectDeclaration {
+                spec: args.spec.clone(),
+                module: args.module.clone(),
+                kind: args.kind.clone(),
+                name: args.name.clone(),
+                layer: args
+                    .layer
+                    .unwrap_or_else(|| code_object_default_layer(&args.kind).to_string()),
+                visibility: args.visibility,
+                status: args.status,
+                expected_file: args.file,
+                parent_symbol: args.parent_symbol,
+                endpoint: args.endpoint,
+                use_case: args.use_case,
+                implements: args.implements,
+                rationale: args.rationale,
+            };
+            let projection = CodeGraphProjection {
+                code_objects: vec![object.clone()],
+                ..CodeGraphProjection::default()
+            };
+            let delta = projection.to_delta();
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({ "codeObject": object }),
+                delta,
+                dry_run: args.dry_run,
+            })?;
+            println!("codeObjectDeclared: {}:{}", object.kind, object.name);
+            println!("dryRun: {}", receipt.dry_run);
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
         }

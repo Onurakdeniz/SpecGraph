@@ -107,7 +107,7 @@ Status values:
 | `sg commit` | future `plan`, `validate`, `complete` | Planned | CommitPlan report/findings; mutations return receipts. Existing commit checks currently live under `sg git`. |
 | `sg git` | `install-hooks`, `validate-message`, `validate-bindings`, `record-commit`, future `branch`, `merge`, `rebase` | Partial | Hook install summary, validation report/findings, or receipts for accepted GitGraph facts. |
 | `sg pr` | `sync`, `validate`, `annotate`, `checks` | Planned | Hosting observations/report/findings; provider outputs remain untrusted until accepted. |
-| `sg code` | `index`, future `query`, `validate-scope`, `drift` | Partial | Code observations/report/findings; accepted CodeGraph facts return receipts. |
+| `sg code` | `index`, `declare-object`, future `query`, `validate-scope`, `drift` | Partial | Code observations/declarations/report/findings; accepted CodeGraph and CodeObject facts return receipts. |
 | `sg trace` | `import`, `validate` | Partial | Trace validation report/findings; imports return receipts. |
 | `sg test` | `map`, `record-run`, `validate`, `required` | Planned | Test mapping/report/findings; accepted TestRun evidence returns receipts. |
 | `sg ci` | `validate`, future `report`, `annotations` | Partial | Machine-readable aggregate report; `--record` returns ValidationRun receipt. |
@@ -237,6 +237,24 @@ Spec authoring now separates:
 - optional intended graph delta metadata: `intendedGraphDelta`.
 
 `Spec.Create` and `Spec.Import` pass the full projection through Operation Runtime input. Unknown touched modules, incomplete new-module declarations, and planned objects without a valid owning module intent fail before event append.
+
+## F.3a Implemented Code Object Declaration Foundation
+
+`sg code declare-object` records first-class `CodeObjectDeclaration` facts through `CodeObject.Declare` before implementation edits. The declaration includes spec, module, kind, name, layer, visibility, status, optional expected file, parent symbol, endpoint/use-case/interface links, and rationale.
+
+Example:
+
+```bash
+sg code declare-object \
+  --spec AUTH-001 \
+  --module Identity \
+  --kind function \
+  --name requestPasswordReset \
+  --file src/identity/password-reset.rs \
+  --dry-run
+```
+
+The Operation Runtime validates module ownership, type placement defaults, expected-file package placement, and parent-child requirements such as methods requiring a declared or existing parent type.
 
 
 ## F.4 Implemented Operation Semantic Preconditions

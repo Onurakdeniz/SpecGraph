@@ -18,11 +18,13 @@ pub struct SourceLocation {
     pub end_column: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeGraphProjection {
     #[serde(default)]
     pub files: Vec<CodeFileFact>,
+    #[serde(default)]
+    pub code_objects: Vec<CodeObjectDeclaration>,
     #[serde(default)]
     pub symbols: Vec<CodeSymbolFact>,
     #[serde(default)]
@@ -44,6 +46,30 @@ pub struct CodeFileFact {
     pub language: String,
     #[serde(default)]
     pub generated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeObjectDeclaration {
+    pub spec: String,
+    pub module: String,
+    pub kind: String,
+    pub name: String,
+    pub layer: String,
+    pub visibility: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_symbol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_case: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implements: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +133,84 @@ impl CodeGraphProjection {
 
         for file in &self.files {
             insert_node(&mut nodes_by_id, code_file_node(file));
+        }
+
+        for object in &self.code_objects {
+            let object_id = code_object_declaration_node_id(
+                &object.spec,
+                &object.module,
+                &object.kind,
+                &object.name,
+            );
+            insert_node(&mut nodes_by_id, code_object_declaration_node(object));
+            insert_edge(
+                &mut edges_by_id,
+                graph_edge(
+                    &spec_node_id(&object.spec),
+                    "DECLARES_CODE_OBJECT",
+                    &object_id,
+                ),
+            );
+            insert_edge(
+                &mut edges_by_id,
+                graph_edge(
+                    &object_id,
+                    "OWNED_BY_MODULE",
+                    &module_node_id(&object.module),
+                ),
+            );
+            if let Some(expected_file) = object.expected_file.as_deref() {
+                insert_node(
+                    &mut nodes_by_id,
+                    code_file_node(&CodeFileFact {
+                        path: expected_file.to_string(),
+                        language: language_for_path(expected_file).to_string(),
+                        generated: false,
+                    }),
+                );
+                insert_edge(
+                    &mut edges_by_id,
+                    graph_edge(
+                        &object_id,
+                        "CODE_OBJECT_EXPECTS_FILE",
+                        &code_file_node_id(expected_file),
+                    ),
+                );
+            }
+            if let Some(parent) = object.parent_symbol.as_deref() {
+                insert_edge(
+                    &mut edges_by_id,
+                    graph_edge(
+                        &object_id,
+                        "CODE_OBJECT_PARENT_SYMBOL",
+                        &code_symbol_node_id(
+                            object.expected_file.as_deref().unwrap_or("unknown"),
+                            "class",
+                            parent,
+                        ),
+                    ),
+                );
+            }
+            if let Some(endpoint) = object.endpoint.as_deref() {
+                insert_edge(
+                    &mut edges_by_id,
+                    graph_edge(
+                        &object_id,
+                        "CODE_OBJECT_FOR_ENDPOINT",
+                        &endpoint_node_id(endpoint),
+                    ),
+                );
+            }
+            if let Some(use_case) = object.use_case.as_deref() {
+                insert_edge(
+                    &mut edges_by_id,
+                    graph_edge(
+                        &object_id,
+                        "CODE_OBJECT_FOR_USE_CASE",
+                        &use_case_node_id(use_case),
+                    ),
+                );
+            }
         }
 
         for symbol in &self.symbols {
@@ -258,7 +362,211 @@ pub fn validate_code_graph(graph: &Graph) -> Vec<Finding> {
         }
     }
 
+    for object in graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "CodeObjectDeclaration")
+    {
+        validate_code_object_declaration_node(graph, object, &mut findings);
+    }
+
     findings
+}
+
+fn validate_code_object_declaration_node(
+    graph: &Graph,
+    object: &Node,
+    findings: &mut Vec<Finding>,
+) {
+    let spec = attr_str(object, "spec");
+    let module = attr_str(object, "module");
+    let kind = attr_str(object, "kind");
+    let name = attr_str(object, "name");
+    let layer = attr_str(object, "layer");
+    let visibility = attr_str(object, "visibility");
+    let status = attr_str(object, "status");
+
+    for (field, value) in [
+        ("spec", spec),
+        ("module", module),
+        ("kind", kind),
+        ("name", name),
+        ("layer", layer),
+        ("visibility", visibility),
+        ("status", status),
+    ] {
+        if value.is_none_or(str::is_empty) {
+            findings.push(
+                finding(
+                    "code_object.declaration_field_required",
+                    format!(
+                        "CodeObjectDeclaration `{}` requires non-empty `{field}`. Remediation: declare the code object with spec, module, kind, name, layer, visibility, and status.",
+                        object.id
+                    ),
+                )
+                .with_related_nodes([object.id.clone()]),
+            );
+        }
+    }
+
+    let Some(kind) = kind else {
+        return;
+    };
+
+    if !known_code_object_kind(kind) {
+        findings.push(
+            finding(
+                "code_object.unknown_kind",
+                format!(
+                    "CodeObjectDeclaration `{}` has unsupported kind `{kind}`. Remediation: use one of {}.",
+                    object.id,
+                    CODE_OBJECT_KINDS.join(", ")
+                ),
+            )
+            .with_related_nodes([object.id.clone()]),
+        );
+    }
+
+    if let Some(layer) = layer {
+        let allowed = allowed_layers_for_kind(kind);
+        if !allowed.contains(&layer) {
+            findings.push(
+                finding(
+                    "code_object.layer_not_allowed",
+                    format!(
+                        "CodeObjectDeclaration `{}` kind `{kind}` cannot be placed in layer `{layer}`. Remediation: use one of {} or update the object kind.",
+                        object.id,
+                        allowed.join(", ")
+                    ),
+                )
+                .with_related_nodes([object.id.clone()]),
+            );
+        }
+    }
+
+    let spec_edges = graph
+        .edges
+        .values()
+        .filter(|edge| edge.to == object.id && edge.edge_type == "DECLARES_CODE_OBJECT")
+        .count();
+    if spec_edges != 1 {
+        findings.push(
+            finding(
+                "code_object.spec_owner_required",
+                format!(
+                    "CodeObjectDeclaration `{}` must be declared by exactly one Spec with DECLARES_CODE_OBJECT.",
+                    object.id
+                ),
+            )
+            .with_related_nodes([object.id.clone()]),
+        );
+    }
+
+    let module_edges = graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == object.id && edge.edge_type == "OWNED_BY_MODULE")
+        .count();
+    if module_edges != 1 {
+        findings.push(
+            finding(
+                "code_object.module_owner_required",
+                format!(
+                    "CodeObjectDeclaration `{}` must resolve to exactly one Module with OWNED_BY_MODULE.",
+                    object.id
+                ),
+            )
+            .with_related_nodes([object.id.clone()]),
+        );
+    }
+
+    if attr_str(object, "expectedFile").is_some_and(|value| !value.is_empty()) {
+        let file_edges = graph
+            .edges
+            .values()
+            .filter(|edge| edge.from == object.id && edge.edge_type == "CODE_OBJECT_EXPECTS_FILE")
+            .count();
+        if file_edges != 1 {
+            findings.push(
+                finding(
+                    "code_object.expected_file_link_required",
+                    format!(
+                        "CodeObjectDeclaration `{}` has expectedFile but no CODE_OBJECT_EXPECTS_FILE edge.",
+                        object.id
+                    ),
+                )
+                .with_related_nodes([object.id.clone()]),
+            );
+        }
+    }
+
+    if kind == "method" {
+        let has_parent_attr =
+            attr_str(object, "parentSymbol").is_some_and(|value| !value.is_empty());
+        let has_parent_edge = graph.edges.values().any(|edge| {
+            edge.from == object.id
+                && matches!(
+                    edge.edge_type.as_str(),
+                    "CODE_OBJECT_PARENT_SYMBOL" | "CODE_OBJECT_PARENT_OBJECT"
+                )
+        });
+        if !has_parent_attr || !has_parent_edge {
+            findings.push(
+                finding(
+                    "code_object.missing_parent_type",
+                    format!(
+                        "Method declaration `{}` requires parentSymbol and a parent CodeSymbol/CodeObjectDeclaration link. Remediation: declare or link the parent class/trait/interface first.",
+                        object.id
+                    ),
+                )
+                .with_related_nodes([object.id.clone()]),
+            );
+        }
+    }
+
+    if kind == "routeHandler" && !has_outgoing(graph, object, "CODE_OBJECT_FOR_ENDPOINT") {
+        findings.push(
+            finding(
+                "code_object.route_handler_endpoint_required",
+                format!(
+                    "Route handler declaration `{}` must link to an Endpoint. Remediation: set endpoint and create CODE_OBJECT_FOR_ENDPOINT.",
+                    object.id
+                ),
+            )
+            .with_related_nodes([object.id.clone()]),
+        );
+    }
+
+    if kind == "repositoryImplementation"
+        && attr_str(object, "implements").is_none_or(str::is_empty)
+    {
+        findings.push(
+            finding(
+                "code_object.repository_interface_required",
+                format!(
+                    "Repository implementation declaration `{}` must name the repository interface it implements.",
+                    object.id
+                ),
+            )
+            .with_related_nodes([object.id.clone()]),
+        );
+    }
+
+    if matches!(kind, "dto" | "requestType" | "responseType")
+        && !has_outgoing(graph, object, "CODE_OBJECT_FOR_ENDPOINT")
+        && !has_outgoing(graph, object, "CODE_OBJECT_FOR_USE_CASE")
+    {
+        findings.push(
+            finding(
+                "code_object.dto_use_case_or_endpoint_required",
+                format!(
+                    "DTO/request/response declaration `{}` must link to an Endpoint or UseCase.",
+                    object.id
+                ),
+            )
+            .with_related_nodes([object.id.clone()]),
+        );
+    }
 }
 
 fn code_file_node(file: &CodeFileFact) -> Node {
@@ -271,6 +579,48 @@ fn code_file_node(file: &CodeFileFact) -> Node {
             ("language".to_string(), json!(file.language)),
             ("generated".to_string(), json!(file.generated)),
         ]),
+    }
+}
+
+fn code_object_declaration_node(object: &CodeObjectDeclaration) -> Node {
+    let mut attributes = BTreeMap::from([
+        ("spec".to_string(), json!(object.spec)),
+        ("module".to_string(), json!(object.module)),
+        ("kind".to_string(), json!(object.kind)),
+        ("name".to_string(), json!(object.name)),
+        ("layer".to_string(), json!(object.layer)),
+        ("visibility".to_string(), json!(object.visibility)),
+        ("status".to_string(), json!(object.status)),
+    ]);
+    insert_optional(
+        &mut attributes,
+        "expectedFile",
+        object.expected_file.as_deref(),
+    );
+    insert_optional(
+        &mut attributes,
+        "parentSymbol",
+        object.parent_symbol.as_deref(),
+    );
+    insert_optional(&mut attributes, "endpoint", object.endpoint.as_deref());
+    insert_optional(&mut attributes, "useCase", object.use_case.as_deref());
+    insert_optional(&mut attributes, "implements", object.implements.as_deref());
+    insert_optional(&mut attributes, "rationale", object.rationale.as_deref());
+    Node {
+        id: code_object_declaration_node_id(
+            &object.spec,
+            &object.module,
+            &object.kind,
+            &object.name,
+        ),
+        stable_key: code_object_declaration_stable_key(
+            &object.spec,
+            &object.module,
+            &object.kind,
+            &object.name,
+        ),
+        node_type: "CodeObjectDeclaration".to_string(),
+        attributes,
     }
 }
 
@@ -347,6 +697,27 @@ fn insert_location(
     }
 }
 
+fn insert_optional(
+    attributes: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value {
+        attributes.insert(key.to_string(), json!(value));
+    }
+}
+
+fn attr_str<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
+    node.attributes.get(key).and_then(|value| value.as_str())
+}
+
+fn has_outgoing(graph: &Graph, node: &Node, edge_type: &str) -> bool {
+    graph
+        .edges
+        .values()
+        .any(|edge| edge.from == node.id && edge.edge_type == edge_type)
+}
+
 fn graph_edge(from: &str, edge_type: &str, to: &str) -> Edge {
     Edge {
         id: edge_id(from, edge_type, to),
@@ -360,6 +731,25 @@ fn graph_edge(from: &str, edge_type: &str, to: &str) -> Edge {
 
 pub fn code_file_node_id(path: &str) -> String {
     node_id("code_file", path)
+}
+
+pub fn code_object_declaration_node_id(spec: &str, module: &str, kind: &str, name: &str) -> String {
+    node_id("code_object", &format!("{spec}/{module}/{kind}/{name}"))
+}
+
+pub fn code_object_declaration_stable_key(
+    spec: &str,
+    module: &str,
+    kind: &str,
+    name: &str,
+) -> String {
+    format!(
+        "code-object:{}/{}/{}/{}",
+        spec,
+        stable_key_fragment(module),
+        kind,
+        stable_key_fragment(name)
+    )
 }
 
 pub fn code_symbol_node_id(file: &str, kind: &str, name: &str) -> String {
@@ -393,8 +783,20 @@ fn code_node_id_from_ref(value: &str) -> String {
     }
 }
 
+fn spec_node_id(spec: &str) -> String {
+    node_id("spec", spec)
+}
+
 fn module_node_id(name: &str) -> String {
     node_id("module", name)
+}
+
+fn endpoint_node_id(endpoint: &str) -> String {
+    node_id("endpoint", endpoint)
+}
+
+fn use_case_node_id(use_case: &str) -> String {
+    node_id("use_case", use_case)
 }
 
 fn behavior_node_id(key: &str) -> String {
@@ -428,6 +830,98 @@ fn stable_fragment(value: &str) -> String {
     out.trim_matches('_').to_string()
 }
 
+pub const CODE_OBJECT_KINDS: &[&str] = &[
+    "domainEntity",
+    "valueObject",
+    "dto",
+    "requestType",
+    "responseType",
+    "interface",
+    "typeAlias",
+    "enum",
+    "class",
+    "function",
+    "method",
+    "routeHandler",
+    "repositoryInterface",
+    "repositoryImplementation",
+    "service",
+    "migration",
+    "testCase",
+];
+
+pub fn known_code_object_kind(kind: &str) -> bool {
+    CODE_OBJECT_KINDS.contains(&kind)
+}
+
+pub fn code_object_default_layer(kind: &str) -> &'static str {
+    match kind {
+        "domainEntity" | "valueObject" => "domain",
+        "dto" | "requestType" | "responseType" | "routeHandler" => "interface",
+        "repositoryImplementation" => "infrastructure",
+        "migration" => "data",
+        "testCase" => "test",
+        _ => "application",
+    }
+}
+
+pub fn allowed_layers_for_kind(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "domainEntity" | "valueObject" => &["domain"],
+        "dto" | "requestType" | "responseType" | "routeHandler" => &["interface"],
+        "repositoryInterface" => &["domain", "application"],
+        "repositoryImplementation" => &["adapter", "infrastructure"],
+        "service" | "function" => &["application"],
+        "migration" => &["data"],
+        "testCase" => &["test"],
+        "interface" | "typeAlias" | "enum" | "class" | "method" => &[
+            "domain",
+            "application",
+            "interface",
+            "adapter",
+            "infrastructure",
+            "data",
+            "test",
+            "shared",
+        ],
+        _ => &[],
+    }
+}
+
+fn stable_key_fragment(value: &str) -> String {
+    let mut output = String::new();
+    let mut previous_was_separator = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+            previous_was_separator = false;
+        } else if !previous_was_separator {
+            output.push('-');
+            previous_was_separator = true;
+        }
+    }
+    let trimmed = output.trim_matches('-');
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn language_for_path(path: &str) -> &'static str {
+    match path.rsplit('.').next().unwrap_or_default() {
+        "rs" => "rust",
+        "ts" | "tsx" => "typescript",
+        "js" | "jsx" => "javascript",
+        "py" => "python",
+        "go" => "go",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "swift" => "swift",
+        _ => "unknown",
+    }
+}
+
 fn insert_node(nodes: &mut BTreeMap<String, Node>, node: Node) {
     nodes.entry(node.id.clone()).or_insert(node);
 }
@@ -454,6 +948,7 @@ mod tests {
                 language: "javascript".to_string(),
                 generated: false,
             }],
+            code_objects: vec![],
             symbols: vec![CodeSymbolFact {
                 file: "src/identity/password-reset.js".to_string(),
                 name: "resetPassword".to_string(),
@@ -528,5 +1023,87 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "code_graph.symbol_file_required"));
+    }
+
+    #[test]
+    fn projects_code_object_declaration_with_owner_and_expected_file() {
+        let projection = CodeGraphProjection {
+            files: vec![],
+            code_objects: vec![CodeObjectDeclaration {
+                spec: "AUTH-001".to_string(),
+                module: "Identity".to_string(),
+                kind: "function".to_string(),
+                name: "requestPasswordReset".to_string(),
+                layer: "application".to_string(),
+                visibility: "private".to_string(),
+                status: "Declared".to_string(),
+                expected_file: Some("src/identity/password-reset.rs".to_string()),
+                parent_symbol: None,
+                endpoint: None,
+                use_case: None,
+                implements: None,
+                rationale: Some("Password reset use case".to_string()),
+            }],
+            symbols: vec![],
+            imports: vec![],
+            routes: vec![],
+            ownership: vec![],
+            behavior_links: vec![],
+            risk_links: vec![],
+        };
+
+        let delta = projection.to_delta();
+
+        assert!(delta
+            .create_nodes
+            .iter()
+            .any(|node| node.node_type == "CodeObjectDeclaration"
+                && node.stable_key
+                    == "code-object:AUTH-001/identity/function/requestpasswordreset"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "DECLARES_CODE_OBJECT"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "OWNED_BY_MODULE"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "CODE_OBJECT_EXPECTS_FILE"));
+    }
+
+    #[test]
+    fn validates_code_object_layer_and_parent_rules() {
+        let mut graph = Graph::default();
+        let object = code_object_declaration_node(&CodeObjectDeclaration {
+            spec: "AUTH-001".to_string(),
+            module: "Identity".to_string(),
+            kind: "method".to_string(),
+            name: "reset".to_string(),
+            layer: "application".to_string(),
+            visibility: "private".to_string(),
+            status: "Declared".to_string(),
+            expected_file: Some("src/identity/password-reset.rs".to_string()),
+            parent_symbol: None,
+            endpoint: None,
+            use_case: None,
+            implements: None,
+            rationale: None,
+        });
+        graph.nodes.insert(object.id.clone(), object);
+
+        let findings = validate_code_graph(&graph);
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "code_object.spec_owner_required"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "code_object.module_owner_required"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "code_object.missing_parent_type"));
     }
 }

@@ -100,6 +100,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "code-import:src/app.ts->src/router.ts",
     },
     StableKeyFamily {
+        prefix: "code-object",
+        description: "Declared implementation object owned by a spec and module",
+        example: "code-object:AUTH-001/identity/function/request-password-reset",
+    },
+    StableKeyFamily {
         prefix: "code-route",
         description: "Code route handler observation or accepted fact",
         example: "code-route:POST-/password-reset",
@@ -697,6 +702,7 @@ mod tests {
             "waiver",
             "policy-decision",
             "code-file",
+            "code-object",
             "code-symbol",
             "test-case",
             "validation-run",

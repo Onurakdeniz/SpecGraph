@@ -79,6 +79,20 @@ Index changed files as observed code facts:
 sg code index --changed-file src/identity/password-reset.ts
 ```
 
+Declare intended implementation objects before editing governed code:
+
+```bash
+sg code declare-object \
+  --spec AUTH-001 \
+  --module Identity \
+  --kind function \
+  --name requestPasswordReset \
+  --file src/identity/password-reset.ts \
+  --dry-run
+```
+
+`CodeObject.Declare` creates a `CodeObjectDeclaration` owned by exactly one Spec and Module, with placement defaults and parent/link validation. Source indexing remains observational; declared objects are reconciled to observed symbols in later production phases.
+
 The built-in lightweight indexer recognizes common source declarations in Rust, TypeScript/JavaScript, Python, Go, Java/Kotlin, and Swift. It emits trusted graph deltas with `CodeFile` and observed `CodeSymbol` nodes; semantic ownership remains policy/validator-controlled instead of being accepted blindly from the parser.
 
 ## Impact Analysis

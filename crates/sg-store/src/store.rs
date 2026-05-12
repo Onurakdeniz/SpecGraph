@@ -3488,6 +3488,7 @@ fn validate_operation_semantic_preconditions(
         "ActionGraph.Generate" => {
             validate_action_graph_semantic_preconditions(graph, request, delta)
         }
+        "CodeObject.Declare" => validate_code_object_declare_semantic_preconditions(graph, delta),
         "GitCommit.Record" => validate_git_commit_semantic_preconditions(graph, request, delta),
         "Validation.Record" => {
             validate_validation_record_semantic_preconditions(graph, request, delta)
@@ -3665,6 +3666,188 @@ fn validate_action_graph_semantic_preconditions(
     }
 
     findings
+}
+
+fn validate_code_object_declare_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    let declarations = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "CodeObjectDeclaration")
+        .collect::<Vec<_>>();
+
+    if declarations.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.code_object.declaration_required",
+            "CodeObject.Declare must create or update at least one CodeObjectDeclaration.",
+        ));
+        return findings;
+    }
+
+    for declaration in declarations {
+        validate_code_object_declaration_semantics(graph, delta, declaration, &mut findings);
+    }
+
+    findings
+}
+
+fn validate_code_object_declaration_semantics(
+    graph: &Graph,
+    delta: &GraphDelta,
+    declaration: &Node,
+    findings: &mut Vec<Finding>,
+) {
+    let spec = node_attr_required(declaration, "spec", findings);
+    let module = node_attr_required(declaration, "module", findings);
+    let kind = node_attr_required(declaration, "kind", findings);
+    let name = node_attr_required(declaration, "name", findings);
+    let layer = node_attr_required(declaration, "layer", findings);
+
+    if let Some(kind) = kind {
+        if !code_object_kind_known(kind) {
+            findings.push(semantic_finding(
+                "semantic.code_object.unknown_kind",
+                format!("CodeObject.Declare kind `{kind}` is unsupported."),
+            ));
+        }
+        if let Some(layer) = layer {
+            let allowed = code_object_allowed_layers(kind);
+            if !allowed.contains(&layer) {
+                findings.push(semantic_finding(
+                    "semantic.code_object.layer_not_allowed",
+                    format!(
+                        "CodeObject.Declare kind `{kind}` cannot be placed in layer `{layer}`. Remediation: use one of {}.",
+                        allowed.join(", ")
+                    ),
+                ));
+            }
+        }
+    }
+
+    if let Some(spec) = spec {
+        let Some(spec_node) = find_spec_node(graph, spec) else {
+            findings.push(semantic_finding(
+                "semantic.code_object.unknown_spec",
+                format!("CodeObject.Declare references unknown Spec `{spec}`."),
+            ));
+            return;
+        };
+        if !delta
+            .create_edges
+            .iter()
+            .chain(delta.update_edges.iter())
+            .any(|edge| {
+                edge.from == spec_node.id
+                    && edge.to == declaration.id
+                    && edge.edge_type == "DECLARES_CODE_OBJECT"
+            })
+        {
+            findings.push(semantic_finding(
+                "semantic.code_object.spec_edge_required",
+                format!(
+                    "CodeObject.Declare must link Spec `{spec}` to `{}` with DECLARES_CODE_OBJECT.",
+                    declaration.id
+                ),
+            ));
+        }
+    }
+
+    let module_node = module.and_then(|module| find_module_node(graph, module));
+    if let Some(module) = module {
+        if module_node.is_none() {
+            findings.push(semantic_finding(
+                "semantic.code_object.unknown_module",
+                format!("CodeObject.Declare references unknown Module `{module}`."),
+            ));
+        } else if !delta
+            .create_edges
+            .iter()
+            .chain(delta.update_edges.iter())
+            .any(|edge| {
+                edge.from == declaration.id
+                    && edge.edge_type == "OWNED_BY_MODULE"
+                    && module_node.is_some_and(|module_node| edge.to == module_node.id)
+            })
+        {
+            findings.push(semantic_finding(
+                "semantic.code_object.owner_edge_required",
+                format!(
+                    "CodeObject.Declare must link `{}` to Module `{module}` with OWNED_BY_MODULE.",
+                    declaration.id
+                ),
+            ));
+        }
+    }
+
+    if let (Some(expected_file), Some(module_node)) =
+        (node_attr(declaration, "expectedFile"), module_node)
+    {
+        if let Some(package) = module_package_path(module_node) {
+            if !path_is_inside_package(expected_file, package) {
+                findings.push(semantic_finding(
+                    "semantic.code_object.wrong_module_path",
+                    format!(
+                        "CodeObject.Declare expected file `{expected_file}` is outside owning module package `{package}`. Remediation: move the file under the module package or update ModuleGraph package ownership."
+                    ),
+                ));
+            }
+        }
+    }
+
+    if kind == Some("method") {
+        let parent = node_attr(declaration, "parentSymbol");
+        if parent.is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.code_object.missing_parent_type",
+                format!(
+                    "Method `{}` cannot be declared without parentSymbol. Remediation: declare or link the parent class/interface first.",
+                    name.unwrap_or("<unknown>")
+                ),
+            ));
+        } else if let Some(parent) = parent {
+            let parent_exists = code_parent_exists(graph, delta, parent);
+            if !parent_exists {
+                findings.push(semantic_finding(
+                    "semantic.code_object.parent_type_not_found",
+                    format!(
+                        "Method `{}` references parent `{parent}`, but no matching CodeSymbol or parent CodeObjectDeclaration exists.",
+                        name.unwrap_or("<unknown>")
+                    ),
+                ));
+            }
+        }
+    }
+
+    if kind == Some("routeHandler") && node_attr(declaration, "endpoint").is_none_or(str::is_empty)
+    {
+        findings.push(semantic_finding(
+            "semantic.code_object.endpoint_required",
+            "routeHandler declarations must include endpoint and CODE_OBJECT_FOR_ENDPOINT.",
+        ));
+    }
+
+    if kind == Some("repositoryImplementation")
+        && node_attr(declaration, "implements").is_none_or(str::is_empty)
+    {
+        findings.push(semantic_finding(
+            "semantic.code_object.repository_interface_required",
+            "repositoryImplementation declarations must include implements.",
+        ));
+    }
+
+    if matches!(kind, Some("dto" | "requestType" | "responseType"))
+        && node_attr(declaration, "endpoint").is_none_or(str::is_empty)
+        && node_attr(declaration, "useCase").is_none_or(str::is_empty)
+    {
+        findings.push(semantic_finding(
+            "semantic.code_object.endpoint_or_use_case_required",
+            "DTO/request/response declarations must link to an endpoint or use case.",
+        ));
+    }
 }
 
 fn validate_git_commit_semantic_preconditions(
@@ -4062,6 +4245,117 @@ fn node_attr_eq(node: &Node, key: &str, expected: &str) -> bool {
         .get(key)
         .and_then(Value::as_str)
         .is_some_and(|value| value == expected)
+}
+
+fn node_attr<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
+    node.attributes.get(key).and_then(Value::as_str)
+}
+
+fn node_attr_required<'a>(
+    node: &'a Node,
+    key: &str,
+    findings: &mut Vec<Finding>,
+) -> Option<&'a str> {
+    let value = node_attr(node, key).map(str::trim).unwrap_or_default();
+    if value.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.code_object.field_required",
+            format!(
+                "CodeObjectDeclaration `{}` requires non-empty `{key}`.",
+                node.id
+            ),
+        ));
+        None
+    } else {
+        node_attr(node, key)
+    }
+}
+
+fn find_module_node<'a>(graph: &'a Graph, module: &str) -> Option<&'a Node> {
+    let module_stable = format!("module:{}", stable_fragment(module));
+    graph.nodes.values().find(|node| {
+        node.node_type == "Module"
+            && (node.stable_key == module_stable
+                || node.stable_key == format!("module:{module}")
+                || node_attr_eq(node, "name", module))
+    })
+}
+
+fn module_package_path(module_node: &Node) -> Option<&str> {
+    node_attr(module_node, "package").filter(|value| !value.trim().is_empty())
+}
+
+fn path_is_inside_package(path: &str, package: &str) -> bool {
+    let package = package.trim().trim_end_matches('/');
+    package.is_empty()
+        || package == "."
+        || path == package
+        || path
+            .trim_start_matches("./")
+            .starts_with(&format!("{}/", package.trim_start_matches("./")))
+}
+
+fn code_parent_exists(graph: &Graph, delta: &GraphDelta, parent: &str) -> bool {
+    graph
+        .nodes
+        .values()
+        .chain(delta.create_nodes.iter())
+        .chain(delta.update_nodes.iter())
+        .any(|node| match node.node_type.as_str() {
+            "CodeSymbol" => node_attr_eq(node, "name", parent),
+            "CodeObjectDeclaration" => {
+                node_attr_eq(node, "name", parent)
+                    && node_attr(node, "kind")
+                        .is_some_and(|kind| matches!(kind, "class" | "interface"))
+            }
+            _ => false,
+        })
+}
+
+fn code_object_kind_known(kind: &str) -> bool {
+    matches!(
+        kind,
+        "domainEntity"
+            | "valueObject"
+            | "dto"
+            | "requestType"
+            | "responseType"
+            | "interface"
+            | "typeAlias"
+            | "enum"
+            | "class"
+            | "function"
+            | "method"
+            | "routeHandler"
+            | "repositoryInterface"
+            | "repositoryImplementation"
+            | "service"
+            | "migration"
+            | "testCase"
+    )
+}
+
+fn code_object_allowed_layers(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "domainEntity" | "valueObject" => &["domain"],
+        "dto" | "requestType" | "responseType" | "routeHandler" => &["interface"],
+        "repositoryInterface" => &["domain", "application"],
+        "repositoryImplementation" => &["adapter", "infrastructure"],
+        "service" | "function" => &["application"],
+        "migration" => &["data"],
+        "testCase" => &["test"],
+        "interface" | "typeAlias" | "enum" | "class" | "method" => &[
+            "domain",
+            "application",
+            "interface",
+            "adapter",
+            "infrastructure",
+            "data",
+            "test",
+            "shared",
+        ],
+        _ => &[],
+    }
 }
 
 fn semantic_finding(code: impl Into<String>, message: impl Into<String>) -> Finding {
@@ -7680,6 +7974,102 @@ acceptanceCriteria:
         assert!(matches!(error, StoreError::SpecNotFound(_)));
     }
 
+    #[test]
+    fn code_object_declare_dry_run_validates_without_mutating_store() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let delta = code_object_declaration_delta(
+            "AUTH-001",
+            "Identity",
+            "function",
+            "requestPasswordReset",
+            "application",
+            Some("src/identity/password-reset.rs"),
+            None,
+        );
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {
+                    "spec": "AUTH-001",
+                    "module": "Identity",
+                    "kind": "function",
+                    "name": "requestPasswordReset"
+                }}),
+                dry_run: true,
+                delta,
+            },
+        )
+        .unwrap();
+
+        assert!(receipt.dry_run);
+        assert!(receipt
+            .created_nodes
+            .iter()
+            .any(|node| node.starts_with("node_code_object_")));
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert!(!replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "CodeObjectDeclaration"));
+    }
+
+    #[test]
+    fn code_object_declare_blocks_wrong_module_path_and_missing_parent() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let wrong_path = code_object_declaration_delta(
+            "AUTH-001",
+            "Identity",
+            "function",
+            "requestPasswordReset",
+            "application",
+            Some("src/billing/password-reset.rs"),
+            None,
+        );
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: true,
+                delta: wrong_path,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, StoreError::SemanticValidationFailed { .. }));
+
+        let missing_parent = code_object_declaration_delta(
+            "AUTH-001",
+            "Identity",
+            "method",
+            "reset",
+            "application",
+            Some("src/identity/password-reset.rs"),
+            None,
+        );
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: true,
+                delta: missing_parent,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, StoreError::SemanticValidationFailed { .. }));
+    }
+
     fn only_snapshot_path(root: &Path) -> PathBuf {
         let snapshots = root.join(".specgraph/snapshots");
         fs::read_dir(snapshots)
@@ -7766,5 +8156,62 @@ acceptanceCriteria:
             },
         )
         .unwrap();
+    }
+
+    fn code_object_declaration_delta(
+        spec: &str,
+        module: &str,
+        kind: &str,
+        name: &str,
+        layer: &str,
+        expected_file: Option<&str>,
+        parent_symbol: Option<&str>,
+    ) -> GraphDelta {
+        let object_id = node_id("code_object", &format!("{spec}/{module}/{kind}/{name}"));
+        let mut attributes = BTreeMap::from([
+            ("spec".to_string(), json!(spec)),
+            ("module".to_string(), json!(module)),
+            ("kind".to_string(), json!(kind)),
+            ("name".to_string(), json!(name)),
+            ("layer".to_string(), json!(layer)),
+            ("visibility".to_string(), json!("private")),
+            ("status".to_string(), json!("Declared")),
+        ]);
+        if let Some(expected_file) = expected_file {
+            attributes.insert("expectedFile".to_string(), json!(expected_file));
+        }
+        if let Some(parent_symbol) = parent_symbol {
+            attributes.insert("parentSymbol".to_string(), json!(parent_symbol));
+        }
+
+        let mut create_nodes = vec![Node {
+            id: object_id.clone(),
+            stable_key: format!("code-object:{spec}/identity/{kind}/{name}"),
+            node_type: "CodeObjectDeclaration".to_string(),
+            attributes,
+        }];
+        let mut create_edges = vec![
+            edge(&node_id("spec", spec), "DECLARES_CODE_OBJECT", &object_id),
+            edge(&object_id, "OWNED_BY_MODULE", &node_id("module", module)),
+        ];
+        if let Some(expected_file) = expected_file {
+            let file_id = node_id("code_file", expected_file);
+            create_nodes.push(Node {
+                id: file_id.clone(),
+                stable_key: format!("code-file:{expected_file}"),
+                node_type: "CodeFile".to_string(),
+                attributes: BTreeMap::from([
+                    ("path".to_string(), json!(expected_file)),
+                    ("language".to_string(), json!("rust")),
+                    ("generated".to_string(), json!(false)),
+                ]),
+            });
+            create_edges.push(edge(&object_id, "CODE_OBJECT_EXPECTS_FILE", &file_id));
+        }
+        GraphDelta {
+            create_nodes,
+            create_edges,
+            ..GraphDelta::default()
+        }
     }
 }

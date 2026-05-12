@@ -94,6 +94,7 @@ As of commit `10ed53f` on `development`, the repository already contains several
 - Project profile and module baseline enforcement before spec authoring.
 - Spec intent validation, ActionGraph/CommitPlan foundations, action lifecycle commands, commit trailer enforcement, and validation recording.
 - CodeGraph, lightweight framework-aware indexing, link manifests, trace validation, and annotation link parsing.
+- CodeObjectDeclaration and `CodeObject.Declare` foundations for spec/module-owned implementation objects.
 - DataGraph and migration runtime foundations.
 - GitGraph facts for branches, commits, tags, merges, PR placeholders, and basic release records.
 - Graph diff/conflict reports, graph merge/rebase dry-run, and `sg graph integrate` acceptance path.
@@ -105,12 +106,14 @@ The unchecked checklist below is therefore a **production hardening and closure 
 
 ## Recommended Immediate Focus
 
-Start with **Phase 0A — Code object model and operation ABI**. This gives coding agents the missing work-permit vocabulary before they make further code changes:
+Current completed slice: **Phase 0A — Code object model and operation ABI** introduced `CodeObjectDeclaration`, `CodeObject.Declare`, placement defaults, parent/link validation, dry-run support, CLI declaration, and tests.
 
-1. Add `CodeObjectDeclaration` graph facts, stable keys, object kinds, ownership fields, and placement defaults.
-2. Add `CodeObject.Declare` ABI validation and dry-run behavior.
-3. Add parent-child/type-placement blockers with remediation commands.
-4. Add unit tests and one CLI/example path before moving to Phase 0B discovery.
+Next focus: **Phase 0B — Discovery-before-create resolver**. This should teach the workflow to search accepted graph facts, observed CodeGraph facts, annotations, manifests, and source/index fallback before allowing new declarations:
+
+1. Extract candidate objects from spec/user text and existing planned objects.
+2. Resolve matching accepted/observed/source candidates with confidence and reasons.
+3. Return duplicate/ambiguous findings and safe link/reuse/extend guidance.
+4. Add `CodeObject.LinkExisting` only after discovery can identify a concrete target.
 
 ---
 
@@ -254,7 +257,7 @@ Next operation: CodeObject.LinkExisting or CodeGraph.Upsert to accept/link the e
 
 Phase 0 is too large to implement safely as one unreviewable change. Keep the phase scope unchanged, but deliver it through these internal slices:
 
-- [ ] **Phase 0A — Code object model and operation ABI.** Add `CodeObjectDeclaration`, ownership fields, object kinds, parent-child rules, placement defaults, and dry-run validation shape. This slice should not yet require full source-code discovery.
+- [x] **Phase 0A — Code object model and operation ABI.** Add `CodeObjectDeclaration`, ownership fields, object kinds, parent-child rules, placement defaults, and dry-run validation shape. This slice should not yet require full source-code discovery.
 - [ ] **Phase 0B — Discovery-before-create resolver.** Add text/spec candidate extraction, trusted graph search, observed CodeGraph search, source/index fallback, duplicate findings, ambiguity findings, and `CodeObject.LinkExisting`.
 - [ ] **Phase 0C — Work permit command.** Implement `Implementation.Authorize` and `sg workflow code-plan` with `existingCandidates`, `requiredOperations`, `allowedFiles`, `allowedSymbols`, and human-readable remediation output.
 - [ ] **Phase 0D — ActionGraph and CommitPlan integration.** Make generated action groups and commit validation consume code object declarations, discovered existing objects, allowed files, allowed symbols, and scope-expansion/replan decisions.
