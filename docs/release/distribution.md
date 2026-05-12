@@ -9,7 +9,7 @@ This document defines the Phase 7.9 release/distribution implementation for the 
 - `scripts/prepare_release_evidence.py` emits deterministic release evidence JSON.
 - `sg release check` validates release prerequisites without publishing.
 - `sg release evidence --version <VERSION>` emits release evidence from the CLI.
-- `sg release record --version <VERSION> --tag <TAG> --commit <SHA>` records the release as trusted graph facts through Operation Runtime.
+- `sg release record --version <VERSION> --tag <TAG> --commit <SHA> --validation-run-id <RUN> --graph-snapshot-id <SNAPSHOT> --evidence-path <FILE> --artifact <PATH>` records scoped release, validation, snapshot, artifact, and checksum facts through Operation Runtime. `sg release validate` checks the graph-bound release before promotion, and `sg release artifact add` can attach an additional artifact checksum to an existing release.
 - `docs/performance/budgets.md` and `tests/performance/budget-placeholders.json` provide enforced Phase 7.10 budget thresholds.
 
 ## Release Principles
@@ -66,4 +66,4 @@ A release candidate is blocked unless:
 
 ## Graph snapshot binding
 
-When a repository has `.specgraph`, `sg release evidence` includes replayed graph `stateHash`, `lastSequence`, and `lastEventId`. `sg release record` then binds the release version to its Git tag, source commit, optional validation run, and evidence path as graph facts. In clean source-only releases where `.specgraph` is absent, the evidence still records that graph snapshot binding is required by release policy and must be supplied by the release project graph.
+When a repository has `.specgraph`, `sg release evidence` includes replayed graph `stateHash`, `lastSequence`, and `lastEventId`. `sg release record` then binds the release version to its Git tag, source commit, required validation run, graph snapshot id, evidence file hash, artifact nodes, and artifact checksums as graph facts. In clean source-only releases where `.specgraph` is absent, the evidence still records that graph snapshot binding is required by release policy and must be supplied by the release project graph.

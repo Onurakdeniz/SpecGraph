@@ -144,8 +144,9 @@ Current completed slices:
 - **Phase 2 — Query permissions and authorization enforcement** added built-in graph/operation permission constants, `StoreError::PermissionDenied`, `QueryContext.require_permission` enforcement through Actor/Role/Permission facts, branch/snapshot query permission checks, deny-entire-query handling for `secret`/`production` sensitivity, CLI/API query auth flags, server/SDK propagation tests, and phase-gate CLI verification.
 - **Phase 3 — Std HTTP API server and SDK transport** added a no-extra-dependency std TCP HTTP boundary with `/health`, `/graph/status`, `/graph/query`, `/validation/findings`, and `/operations`, schema-version checks, structured API errors with optional findings, bearer-token mutation auth, `sg api serve`, Rust SDK HTTP transport, TypeScript SDK token/timeouts/typed errors, and HTTP route/SDK tests.
 - **Phase 4A — Scoped release/PR/merge evidence semantics** added spec-scoped validation/PR/release/merge ontology edges, release artifact/checksum/evidence graph facts, scoped `Released` blockers, spec-scoped PR validation/record links, GitMerge-to-GraphMerge binding requirements, and tests for unrelated evidence blockers and graph merge binding.
+- **Phase 4B — Release CLI hardening and Phase 4 gate** added `sg release validate`, `sg release artifact add`, hardened `sg release record` to require validation run, graph snapshot, evidence path, and artifact checksums, updated release docs, and extended tests for unrelated evidence, missing snapshot, missing checksum, scoped release success, and GraphMerge/GitMerge binding.
 
-Next focus: **Phase 4B — Release CLI hardening, remaining tests, and Phase 4 gate**. Start from the latest `development`, finish `sg release validate` / `sg release artifact add` / hardened `sg release record`, then cover the full unrelated-PR/release/snapshot/artifact/merge test matrix before checking the Phase 4 gate.
+Next focus: **Phase 5 — Live Hosting Provider Integration**. Start from the latest `development` and continue the five-checklist-item branch policy with provider trait, GitHub adapter, optional GitLab adapter/config boundary, provider CLI, and webhook endpoint foundations.
 
 ---
 
@@ -657,15 +658,15 @@ Phase ownership note: Phase 4 owns **graph semantics and spec scoping** for Git/
 
 - [x] **Bind GraphMerge to GitMerge.** When `sg graph integrate` accepts a merge/rebase, it requires Git merge evidence and links accepted `GraphMerge` facts to `GitMerge` via `MERGE_ACCEPTS_GRAPH_MERGE`.
 
-- [ ] **Extend release CLI.** Add `sg release validate`, `sg release artifact add`, and harden `sg release record` to require version, tag, commit, snapshot, validation run, artifact checksums, and optional spec id.
+- [x] **Extend release CLI.** Added `sg release validate`, `sg release artifact add`, and hardened `sg release record` to require version, tag, commit, snapshot, validation run, artifact checksums, evidence path/hash, and optional spec id.
 
-- [ ] **Add tests.** Cover unrelated validation not satisfying release, unrelated merged PR not satisfying release, correct scoped release success, missing artifact checksum failure, missing snapshot failure, and GraphMerge/GitMerge binding.
+- [x] **Add tests.** Covered unrelated validation/PR/release evidence not satisfying release, correct scoped release success, missing artifact checksum failure, missing snapshot failure, and GraphMerge/GitMerge binding.
 
 ## Phase Gate
 
-- [ ] A spec cannot transition to `Released` using unrelated PR/validation/release facts.
-- [ ] A release cannot validate without artifact checksums and graph snapshot.
-- [ ] Accepted graph merge can be traced to Git merge evidence.
+- [x] A spec cannot transition to `Released` using unrelated PR/validation/release facts.
+- [x] A release cannot validate without artifact checksums and graph snapshot.
+- [x] Accepted graph merge can be traced to Git merge evidence.
 
 ---
 

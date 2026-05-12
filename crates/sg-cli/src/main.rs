@@ -13,9 +13,10 @@ use sg_codegraph::{
     CodeObjectDeclaration, CodeObjectQuery, SourceFallback,
 };
 use sg_gitgraph::{
-    git_graph_stable, merge_node_id, pull_request_node_id, release_node_id,
-    validate_commit_binding, validate_pr_hosting_graph, validation_run_node_id,
-    CommitValidationInput, GitGraphProjection, GitMergeFact, GitReleaseFact, PullRequestFact,
+    artifact_checksum_node_id, git_graph_stable, merge_node_id, pull_request_node_id,
+    release_artifact_node_id, release_node_id, validate_commit_binding, validate_pr_hosting_graph,
+    validation_run_node_id, CommitValidationInput, GitGraphProjection, GitMergeFact,
+    GitReleaseFact, PullRequestFact, ReleaseArtifactFact,
 };
 use sg_impact::analyze_impact;
 use sg_merge::{
@@ -1375,8 +1376,46 @@ enum ReleaseCommand {
         #[arg(long)]
         allow_dirty: bool,
     },
+    /// Validate graph-bound release evidence for a recorded release.
+    Validate(ReleaseValidateArgs),
+    /// Add one release artifact and checksum to an existing graph release.
+    Artifact {
+        #[command(subcommand)]
+        command: ReleaseArtifactCommand,
+    },
     /// Record release evidence as graph facts through Operation Runtime.
     Record(ReleaseRecordArgs),
+}
+
+#[derive(Debug, Args)]
+struct ReleaseValidateArgs {
+    #[arg(long)]
+    version: String,
+    #[arg(long)]
+    spec: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+enum ReleaseArtifactCommand {
+    Add(ReleaseArtifactAddArgs),
+}
+
+#[derive(Debug, Args)]
+struct ReleaseArtifactAddArgs {
+    #[arg(long)]
+    version: String,
+    #[arg(long)]
+    path: PathBuf,
+    #[arg(long, default_value = "source")]
+    platform: String,
+    #[arg(long = "evidence-file-hash")]
+    evidence_file_hash: Option<String>,
+    #[arg(long = "evidence-path")]
+    evidence_path: Option<PathBuf>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
 }
 
 #[derive(Debug, Args)]
@@ -1389,12 +1428,18 @@ struct ReleaseRecordArgs {
     commit: String,
     #[arg(long)]
     spec: Option<String>,
-    #[arg(long)]
-    validation_run_id: Option<String>,
+    #[arg(long = "validation-run-id")]
+    validation_run_id: String,
+    #[arg(long = "graph-snapshot-id")]
+    graph_snapshot_id: String,
+    #[arg(long = "artifact")]
+    artifacts: Vec<PathBuf>,
     #[arg(long)]
     url: Option<String>,
-    #[arg(long)]
-    evidence_path: Option<String>,
+    #[arg(long = "evidence-path")]
+    evidence_path: PathBuf,
+    #[arg(long = "evidence-file-hash")]
+    evidence_file_hash: Option<String>,
     #[arg(long, default_value = "local:user")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -4250,20 +4295,95 @@ fn handle_release(
                 print_json(&evidence)?;
             }
         }
+        ReleaseCommand::Validate(args) => {
+            let replay = store.replay(ReplayOptions::checking())?;
+            let findings =
+                release_validation_findings(&replay.graph, &args.version, args.spec.as_deref());
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.release-validate/v1",
+                    "version": args.version,
+                    "spec": args.spec,
+                    "status": if findings.iter().any(|finding| finding.severity == FindingSeverity::Error) { "failed" } else { "passed" },
+                    "findings": findings,
+                }))?;
+            } else {
+                print_findings(&findings);
+                if !output.quiet {
+                    println!(
+                        "releaseValidate: {}",
+                        if findings
+                            .iter()
+                            .any(|finding| finding.severity == FindingSeverity::Error)
+                        {
+                            "failed"
+                        } else {
+                            "passed"
+                        }
+                    );
+                }
+            }
+            fail_on_errors(&findings, "release validation")?;
+        }
+        ReleaseCommand::Artifact {
+            command: ReleaseArtifactCommand::Add(args),
+        } => {
+            let replay = store.replay(ReplayOptions::checking())?;
+            let delta = release_artifact_add_delta(&replay.graph, root, &args)?;
+            let release_node = replay
+                .graph
+                .nodes
+                .get(&release_node_id(&args.version))
+                .with_context(|| format!("Release `{}` is not recorded", args.version))?;
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "Release.Record".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({
+                    "version": args.version,
+                    "tag": graph_node_attr(release_node, "tag"),
+                    "commit": graph_node_attr(release_node, "commit"),
+                    "artifact": args.path,
+                    "platform": args.platform,
+                }),
+                delta,
+                dry_run: false,
+            })?;
+            if output.json() {
+                print_json(&serde_json::to_value(&receipt)?)?;
+            } else if !output.quiet {
+                println!("releaseArtifactAdded: {}", args.path.display());
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+        }
         ReleaseCommand::Record(args) => {
+            if args.artifacts.is_empty() {
+                bail!("release record requires at least one --artifact path");
+            }
             let replay = store.replay(ReplayOptions::checking())?;
             let project_node_id = find_project_node_id(&replay.graph)?;
+            let evidence_file_hash = args
+                .evidence_file_hash
+                .clone()
+                .map(Ok)
+                .unwrap_or_else(|| checksum_file(root, path_to_str(&args.evidence_path)?))?;
+            let artifacts = args
+                .artifacts
+                .iter()
+                .map(|path| release_artifact_fact(root, path, "source", &evidence_file_hash))
+                .collect::<anyhow::Result<Vec<_>>>()?;
             let release = GitReleaseFact {
                 version: args.version.clone(),
                 tag: args.tag.clone(),
                 commit: args.commit.clone(),
                 spec: args.spec.clone(),
-                validation_run_id: args.validation_run_id.clone(),
+                validation_run_id: Some(args.validation_run_id.clone()),
                 url: args.url.clone(),
-                evidence_path: args.evidence_path.clone(),
-                evidence_file_hash: None,
-                graph_snapshot_id: None,
-                artifacts: Vec::new(),
+                evidence_path: Some(path_to_str(&args.evidence_path)?.to_string()),
+                evidence_file_hash: Some(evidence_file_hash.clone()),
+                graph_snapshot_id: Some(args.graph_snapshot_id.clone()),
+                artifacts,
             };
             let projection = GitGraphProjection {
                 project_node_id,
@@ -4279,17 +4399,15 @@ fn handle_release(
                     &mut delta,
                     gitgraph_edge(&spec_id, "SPEC_HAS_RELEASE", &release_id),
                 );
-                if let Some(run_id) = args.validation_run_id.as_ref() {
-                    upsert_edge_delta(
-                        &replay.graph,
-                        &mut delta,
-                        gitgraph_edge(
-                            &spec_id,
-                            "SPEC_HAS_VALIDATION_RUN",
-                            &validation_run_node_id(run_id),
-                        ),
-                    );
-                }
+                upsert_edge_delta(
+                    &replay.graph,
+                    &mut delta,
+                    gitgraph_edge(
+                        &spec_id,
+                        "SPEC_HAS_VALIDATION_RUN",
+                        &validation_run_node_id(&args.validation_run_id),
+                    ),
+                );
             }
             let receipt = store.append_operation(AppendOperationOptions {
                 operation: "Release.Record".to_string(),
@@ -4303,6 +4421,8 @@ fn handle_release(
                     "validationRunId": args.validation_run_id,
                     "url": args.url,
                     "evidencePath": args.evidence_path,
+                    "evidenceFileHash": evidence_file_hash,
+                    "graphSnapshotId": args.graph_snapshot_id,
                 }),
                 delta,
                 dry_run: false,
@@ -4468,6 +4588,222 @@ fn release_evidence(
         "artifacts": artifacts,
         "releaseCheck": check,
     }))
+}
+
+fn release_validation_findings(graph: &Graph, version: &str, spec: Option<&str>) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let release_id = release_node_id(version);
+    let Some(release) = graph.nodes.get(&release_id).or_else(|| {
+        graph.nodes.values().find(|node| {
+            node.node_type == "Release" && graph_node_attr(node, "version") == Some(version)
+        })
+    }) else {
+        findings.push(release_finding(
+            "release.missing",
+            format!("Release `{version}` is not recorded."),
+        ));
+        return findings;
+    };
+    for (edge_type, node_type, code, message) in [
+        (
+            "RELEASES_TAG",
+            "GitTag",
+            "release.tag_missing",
+            "release tag evidence is missing",
+        ),
+        (
+            "RELEASES_COMMIT",
+            "GitCommit",
+            "release.commit_missing",
+            "release commit evidence is missing",
+        ),
+        (
+            "RELEASE_HAS_VALIDATION_RUN",
+            "ValidationRun",
+            "release.validation_missing",
+            "release validation run evidence is missing",
+        ),
+        (
+            "RELEASE_HAS_SNAPSHOT",
+            "GraphSnapshot",
+            "release.snapshot_missing",
+            "release graph snapshot evidence is missing",
+        ),
+    ] {
+        if !graph_has_edge_to_type(graph, &release.id, edge_type, node_type) {
+            findings.push(release_finding(
+                code,
+                format!("Release `{version}` {message}."),
+            ));
+        }
+    }
+    if !release_has_artifact_checksum_graph(graph, &release.id) {
+        findings.push(release_finding(
+            "release.artifact_checksum_missing",
+            format!("Release `{version}` artifact checksum evidence is missing."),
+        ));
+    }
+    if !release_validation_run_passed(graph, &release.id) {
+        findings.push(release_finding(
+            "release.validation_not_passed",
+            format!("Release `{version}` must link to a passed ValidationRun."),
+        ));
+    }
+    if let Some(spec) = spec {
+        match graph
+            .nodes
+            .values()
+            .find(|node| node.node_type == "Spec" && graph_node_attr(node, "spec") == Some(spec))
+        {
+            Some(spec_node) => {
+                if !graph.edges.values().any(|edge| {
+                    edge.from == spec_node.id
+                        && edge.edge_type == "SPEC_HAS_RELEASE"
+                        && edge.to == release.id
+                }) {
+                    findings.push(release_finding(
+                        "release.spec_scope_missing",
+                        format!("Release `{version}` is not scoped to Spec `{spec}`."),
+                    ));
+                }
+            }
+            None => findings.push(release_finding(
+                "release.spec_missing",
+                format!("Spec `{spec}` is not present in the graph."),
+            )),
+        }
+    }
+    findings
+}
+
+fn release_artifact_add_delta(
+    graph: &Graph,
+    root: &Path,
+    args: &ReleaseArtifactAddArgs,
+) -> anyhow::Result<GraphDelta> {
+    let release_id = release_node_id(&args.version);
+    if !graph.nodes.contains_key(&release_id) {
+        bail!("Release `{}` is not recorded", args.version);
+    }
+    let evidence_file_hash = if let Some(hash) = args.evidence_file_hash.clone() {
+        hash
+    } else if let Some(path) = args.evidence_path.as_ref() {
+        checksum_file(root, path_to_str(path)?)?
+    } else {
+        "sha256:manual".to_string()
+    };
+    let artifact = release_artifact_fact(root, &args.path, &args.platform, &evidence_file_hash)?;
+    let artifact_id = release_artifact_node_id(&args.version, path_to_str(&args.path)?);
+    let checksum_id = artifact_checksum_node_id(&args.version, path_to_str(&args.path)?, "sha256");
+    let artifact_node = Node {
+        id: artifact_id.clone(),
+        stable_key: format!(
+            "release-artifact:{}/{}",
+            git_graph_stable(&args.version),
+            git_graph_stable(path_to_str(&args.path)?)
+        ),
+        node_type: "ReleaseArtifact".to_string(),
+        attributes: BTreeMap::from([
+            ("version".to_string(), json!(args.version)),
+            ("path".to_string(), json!(path_to_str(&args.path)?)),
+            ("platform".to_string(), json!(args.platform)),
+            ("evidenceFileHash".to_string(), json!(evidence_file_hash)),
+        ]),
+    };
+    let checksum_node = Node {
+        id: checksum_id.clone(),
+        stable_key: format!(
+            "artifact-checksum:{}/{}/sha256",
+            git_graph_stable(&args.version),
+            git_graph_stable(path_to_str(&args.path)?)
+        ),
+        node_type: "ArtifactChecksum".to_string(),
+        attributes: BTreeMap::from([
+            ("version".to_string(), json!(args.version)),
+            ("artifactPath".to_string(), json!(path_to_str(&args.path)?)),
+            ("algorithm".to_string(), json!("sha256")),
+            ("value".to_string(), json!(artifact.checksum_value)),
+        ]),
+    };
+    let mut delta = GraphDelta {
+        create_nodes: vec![artifact_node, checksum_node],
+        create_edges: vec![
+            gitgraph_edge(&release_id, "RELEASE_HAS_ARTIFACT", &artifact_id),
+            gitgraph_edge(&release_id, "RELEASE_HAS_CHECKSUM", &checksum_id),
+            gitgraph_edge(&artifact_id, "ARTIFACT_HAS_CHECKSUM", &checksum_id),
+        ],
+        ..GraphDelta::default()
+    };
+    delta = sg_gitgraph::upsert_delta_for_graph(delta, graph);
+    Ok(delta)
+}
+
+fn release_artifact_fact(
+    root: &Path,
+    path: &Path,
+    platform: &str,
+    evidence_file_hash: &str,
+) -> anyhow::Result<ReleaseArtifactFact> {
+    let rel_path = path_to_str(path)?;
+    Ok(ReleaseArtifactFact {
+        path: rel_path.to_string(),
+        platform: platform.to_string(),
+        checksum_algorithm: "sha256".to_string(),
+        checksum_value: checksum_file(root, rel_path)?,
+        evidence_file_hash: evidence_file_hash.to_string(),
+    })
+}
+
+fn path_to_str(path: &Path) -> anyhow::Result<&str> {
+    path.to_str()
+        .with_context(|| format!("path `{}` is not valid UTF-8", path.display()))
+}
+
+fn release_finding(code: &str, message: String) -> Finding {
+    Finding::new(code, FindingSeverity::Error, message)
+        .with_validator(VALIDATOR_GIT_BINDING, CORE_VALIDATOR_VERSION)
+        .with_location(sg_model::FindingLocation::command("sg release validate"))
+}
+
+fn graph_node_attr<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
+    node.attributes.get(key).and_then(serde_json::Value::as_str)
+}
+
+fn graph_has_edge_to_type(graph: &Graph, from: &str, edge_type: &str, node_type: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.from == from
+            && edge.edge_type == edge_type
+            && graph
+                .nodes
+                .get(&edge.to)
+                .is_some_and(|node| node.node_type == node_type)
+    })
+}
+
+fn release_validation_run_passed(graph: &Graph, release_id: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.from == release_id
+            && edge.edge_type == "RELEASE_HAS_VALIDATION_RUN"
+            && graph.nodes.get(&edge.to).is_some_and(|node| {
+                node.node_type == "ValidationRun"
+                    && graph_node_attr(node, "status") == Some("Passed")
+            })
+    })
+}
+
+fn release_has_artifact_checksum_graph(graph: &Graph, release_id: &str) -> bool {
+    graph_has_edge_to_type(
+        graph,
+        release_id,
+        "RELEASE_HAS_CHECKSUM",
+        "ArtifactChecksum",
+    ) || graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == release_id && edge.edge_type == "RELEASE_HAS_ARTIFACT")
+        .any(|edge| {
+            graph_has_edge_to_type(graph, &edge.to, "ARTIFACT_HAS_CHECKSUM", "ArtifactChecksum")
+        })
 }
 
 fn release_artifact_paths() -> Vec<&'static str> {

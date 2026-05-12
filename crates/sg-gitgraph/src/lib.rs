@@ -8,9 +8,10 @@ pub use git::{
     validate_commit_plan_requirements, CommitTrailers, CommitValidationInput,
 };
 pub use git_graph::{
-    branch_node_id, commit_node_id, merge_node_id, pull_request_node_id, release_node_id,
-    remote_node_id, stable as git_graph_stable, tag_node_id, upsert_delta_for_graph,
-    validate_pr_hosting_graph, validation_run_node_id, GitBranchFact, GitCommitFact,
-    GitGraphProjection, GitMergeFact, GitReleaseFact, GitRemoteFact, GitTagFact, PullRequestFact,
+    artifact_checksum_node_id, branch_node_id, commit_node_id, graph_snapshot_node_id,
+    merge_node_id, pull_request_node_id, release_artifact_node_id, release_node_id, remote_node_id,
+    stable as git_graph_stable, tag_node_id, upsert_delta_for_graph, validate_pr_hosting_graph,
+    validation_run_node_id, GitBranchFact, GitCommitFact, GitGraphProjection, GitMergeFact,
+    GitReleaseFact, GitRemoteFact, GitTagFact, PullRequestFact, ReleaseArtifactFact,
     SOURCE_TRUST_OBSERVATION, TRUST_STATE_OBSERVED,
 };

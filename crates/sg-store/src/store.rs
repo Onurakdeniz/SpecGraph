@@ -14419,6 +14419,7 @@ acceptanceCriteria:
     #[test]
     fn released_spec_requires_scoped_release_pr_validation_snapshot_and_checksum() {
         let mut graph = release_scope_base_graph();
+        add_unscoped_release_evidence(&mut graph);
         let blockers = spec_state_blockers(&graph, &node_id("spec", "AUTH-001"), "Released");
         assert!(blockers
             .iter()
@@ -14431,6 +14432,18 @@ acceptanceCriteria:
             .any(|blocker| blocker.contains("scoped merged PullRequest")));
 
         add_scoped_release_evidence(&mut graph, false);
+        graph
+            .edges
+            .retain(|_, edge| edge.edge_type != "RELEASE_HAS_SNAPSHOT");
+        let blockers = spec_state_blockers(&graph, &node_id("spec", "AUTH-001"), "Released");
+        assert!(blockers
+            .iter()
+            .any(|blocker| blocker.contains("graph snapshot")));
+
+        let release_id = node_id("release", "AUTH-001/1.0.0");
+        let snapshot_id = node_id("graph_snapshot", "AUTH-001/release");
+        let snapshot_edge = edge(&release_id, "RELEASE_HAS_SNAPSHOT", &snapshot_id);
+        graph.edges.insert(snapshot_edge.id.clone(), snapshot_edge);
         let blockers = spec_state_blockers(&graph, &node_id("spec", "AUTH-001"), "Released");
         assert!(blockers
             .iter()
@@ -19480,6 +19493,34 @@ acceptanceCriteria:
         }
         if include_checksum {
             add_artifact_checksum_evidence(graph);
+        }
+    }
+
+    fn add_unscoped_release_evidence(graph: &mut Graph) {
+        let validation_id = node_id("validation_run", "UNRELATED/release");
+        let pr_id = node_id("pull_request", "UNRELATED/42");
+        let release_id = node_id("release", "UNRELATED/1.0.0");
+        for node in [
+            Node {
+                id: validation_id,
+                stable_key: "validation-run:UNRELATED/release".to_string(),
+                node_type: "ValidationRun".to_string(),
+                attributes: BTreeMap::from([("status".to_string(), json!("Passed"))]),
+            },
+            Node {
+                id: pr_id,
+                stable_key: "pull-request:UNRELATED/42".to_string(),
+                node_type: "PullRequest".to_string(),
+                attributes: BTreeMap::from([("state".to_string(), json!("merged"))]),
+            },
+            Node {
+                id: release_id,
+                stable_key: "release:UNRELATED/1.0.0".to_string(),
+                node_type: "Release".to_string(),
+                attributes: BTreeMap::from([("version".to_string(), json!("1.0.0"))]),
+            },
+        ] {
+            graph.nodes.insert(node.id.clone(), node);
         }
     }
 

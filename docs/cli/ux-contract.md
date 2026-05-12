@@ -123,7 +123,7 @@ Status values:
 | `sg adapter` | `list`, `capabilities`, `test`, `sync` | Planned | Adapter capability/provenance report; observations remain untrusted. |
 | `sg proof` | `run`, future named proof scenarios | Partial | Human progress lines; JSON proof report with passed/failed scenario steps. |
 | `sg docs` | `check`, `cli-reference` | Current | Documentation validation/generation report. |
-| `sg release` | `check`, `evidence`, `record` | Current | Release evidence/checksum/signature report; `record` binds release version/tag/commit/validation facts through Operation Runtime. |
+| `sg release` | `check`, `evidence`, `validate`, `artifact add`, `record` | Current | Release evidence/checksum/signature report; `validate` checks graph-bound release evidence; `record` binds release version/tag/commit/validation/snapshot/artifact facts through Operation Runtime. |
 | `sg perf` | `budgets` | Current | Performance budget inventory and threshold validation report. |
 
 ## Command-Specific Output Families
@@ -197,7 +197,9 @@ Phase 7 adds the final product-surface command groups needed by release/docs/per
 - `sg docs cli-reference` emits a clap-generated CLI reference.
 - `sg release check` validates local release prerequisites without publishing.
 - `sg release evidence` emits release evidence JSON with source commit, graph state when present, artifact checksums, and validation commands.
-- `sg release record` persists a Release graph fact linked to tag, commit, and optional validation evidence before a spec can move to `Released`.
+- `sg release validate` blocks missing graph-bound release evidence, including validation run, graph snapshot, artifact, and checksum facts.
+- `sg release artifact add` attaches additional artifact/checksum evidence to an existing Release through Operation Runtime.
+- `sg release record` persists a Release graph fact linked to tag, commit, required validation, graph snapshot, artifact, checksum, and optional spec evidence before a spec can move to `Released`.
 - `sg perf budgets --check` enforces that every performance budget has a positive threshold.
 
 These commands support the global `--format json` / `--json` envelope convention.
