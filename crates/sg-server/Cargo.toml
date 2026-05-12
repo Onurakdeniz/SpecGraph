@@ -11,6 +11,7 @@ serde_json.workspace = true
 sg-model.workspace = true
 sg-query.workspace = true
 sg-store.workspace = true
+sg-adapter-hosting.workspace = true
 
 [dev-dependencies]
 sg-spec.workspace = true

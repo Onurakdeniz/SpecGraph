@@ -9,11 +9,312 @@ use sg_gitgraph::{git_graph_stable as stable_part, validation_run_node_id};
 pub use sg_gitgraph::{pull_request_node_id, PullRequestFact};
 use sg_model::{Edge, Finding, FindingLocation, FindingSeverity, Graph, GraphDelta, Node};
 use std::collections::BTreeMap;
+use std::process::Command;
 
 pub const HOSTING_CHECK_REPORT_SCHEMA_VERSION: &str = "specgraph.hosting-check-report/v1";
 pub const HOSTING_ADAPTER_ID: &str = "adapter:hosting-provider";
 pub const SOURCE_TRUST_OBSERVATION: &str = "Observation";
 pub const TRUST_STATE_OBSERVED: &str = "Observed";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostingProviderError {
+    AuthFailure(String),
+    NotFound(String),
+    RateLimited(String),
+    ValidationFailed(String),
+    ProviderUnavailable(String),
+}
+
+impl std::fmt::Display for HostingProviderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AuthFailure(message) => write!(formatter, "auth failure: {message}"),
+            Self::NotFound(message) => write!(formatter, "not found: {message}"),
+            Self::RateLimited(message) => write!(formatter, "rate limited: {message}"),
+            Self::ValidationFailed(message) => write!(formatter, "validation failed: {message}"),
+            Self::ProviderUnavailable(message) => {
+                write!(formatter, "provider unavailable: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HostingProviderError {}
+
+pub trait HostingProvider {
+    fn fetch_pull_request(
+        &self,
+        repository: &str,
+        number: &str,
+    ) -> Result<PullRequestFact, HostingProviderError>;
+
+    fn publish_check(
+        &self,
+        report: &ProviderCheckReport,
+    ) -> Result<ProviderPublishReceipt, HostingProviderError>;
+
+    fn publish_comment(
+        &self,
+        repository: &str,
+        number: &str,
+        body: &str,
+    ) -> Result<ProviderPublishReceipt, HostingProviderError>;
+
+    fn receive_webhook(
+        &self,
+        payload: &[u8],
+    ) -> Result<HostingWebhookObservation, HostingProviderError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderPublishReceipt {
+    pub provider: String,
+    pub repository: String,
+    pub target: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostingWebhookObservation {
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<PullRequestFact>,
+    pub source_trust: String,
+    pub trust_state: String,
+}
+
+pub trait ProviderHttpTransport {
+    fn request(
+        &self,
+        method: &str,
+        url: &str,
+        token: Option<&str>,
+        body: Option<&serde_json::Value>,
+    ) -> Result<(u16, String), HostingProviderError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct CurlProviderTransport;
+
+impl ProviderHttpTransport for CurlProviderTransport {
+    fn request(
+        &self,
+        method: &str,
+        url: &str,
+        token: Option<&str>,
+        body: Option<&serde_json::Value>,
+    ) -> Result<(u16, String), HostingProviderError> {
+        let mut command = Command::new("curl");
+        command.args([
+            "-sS",
+            "-w",
+            "\n%{http_code}",
+            "-X",
+            method,
+            "-H",
+            "Accept: application/vnd.github+json",
+        ]);
+        if let Some(token) = token {
+            command
+                .arg("-H")
+                .arg(format!("Authorization: Bearer {token}"));
+        }
+        if let Some(body) = body {
+            command.arg("-H").arg("Content-Type: application/json");
+            command.arg("-d").arg(body.to_string());
+        }
+        command.arg(url);
+        let output = command
+            .output()
+            .map_err(|error| HostingProviderError::ProviderUnavailable(error.to_string()))?;
+        let output_body = String::from_utf8_lossy(&output.stdout).to_string();
+        if !output.status.success() {
+            return Err(HostingProviderError::ProviderUnavailable(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+        let (body, status) = output_body
+            .rsplit_once('\n')
+            .and_then(|(body, status)| status.parse::<u16>().ok().map(|status| (body, status)))
+            .unwrap_or((output_body.as_str(), 200));
+        Ok((status, body.to_string()))
+    }
+}
+
+pub struct GitHubProvider<T = CurlProviderTransport> {
+    token: Option<String>,
+    api_base: String,
+    transport: T,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitLabProvider;
+
+impl HostingProvider for GitLabProvider {
+    fn fetch_pull_request(
+        &self,
+        _repository: &str,
+        _number: &str,
+    ) -> Result<PullRequestFact, HostingProviderError> {
+        Err(HostingProviderError::ProviderUnavailable(
+            "GitLab live fetch is config-gated and not enabled in this build".to_string(),
+        ))
+    }
+
+    fn publish_check(
+        &self,
+        _report: &ProviderCheckReport,
+    ) -> Result<ProviderPublishReceipt, HostingProviderError> {
+        Err(HostingProviderError::ProviderUnavailable(
+            "GitLab check publishing is config-gated and not enabled in this build".to_string(),
+        ))
+    }
+
+    fn publish_comment(
+        &self,
+        _repository: &str,
+        _number: &str,
+        _body: &str,
+    ) -> Result<ProviderPublishReceipt, HostingProviderError> {
+        Err(HostingProviderError::ProviderUnavailable(
+            "GitLab comment publishing is config-gated and not enabled in this build".to_string(),
+        ))
+    }
+
+    fn receive_webhook(
+        &self,
+        payload: &[u8],
+    ) -> Result<HostingWebhookObservation, HostingProviderError> {
+        let value: serde_json::Value = serde_json::from_slice(payload)
+            .map_err(|error| HostingProviderError::ValidationFailed(error.to_string()))?;
+        Ok(HostingWebhookObservation {
+            provider: "gitlab".to_string(),
+            pull_request: gitlab_merge_request_from_value(&value).ok(),
+            source_trust: SOURCE_TRUST_OBSERVATION.to_string(),
+            trust_state: TRUST_STATE_OBSERVED.to_string(),
+        })
+    }
+}
+
+impl GitHubProvider<CurlProviderTransport> {
+    pub fn from_env() -> Self {
+        Self {
+            token: std::env::var("GITHUB_TOKEN").ok(),
+            api_base: "https://api.github.com".to_string(),
+            transport: CurlProviderTransport,
+        }
+    }
+}
+
+impl<T> GitHubProvider<T> {
+    pub fn new(token: Option<String>, api_base: impl Into<String>, transport: T) -> Self {
+        Self {
+            token,
+            api_base: api_base.into(),
+            transport,
+        }
+    }
+}
+
+impl<T: ProviderHttpTransport> HostingProvider for GitHubProvider<T> {
+    fn fetch_pull_request(
+        &self,
+        repository: &str,
+        number: &str,
+    ) -> Result<PullRequestFact, HostingProviderError> {
+        let url = format!("{}/repos/{repository}/pulls/{number}", self.api_base);
+        let (status, body) = self
+            .transport
+            .request("GET", &url, self.token.as_deref(), None)?;
+        ensure_provider_status(status, &body)?;
+        github_pr_from_json(repository, &body)
+    }
+
+    fn publish_check(
+        &self,
+        report: &ProviderCheckReport,
+    ) -> Result<ProviderPublishReceipt, HostingProviderError> {
+        if report.provider != "github" {
+            return Err(HostingProviderError::ValidationFailed(
+                "GitHub provider can only publish github reports".to_string(),
+            ));
+        }
+        let run = report.check_runs.first().ok_or_else(|| {
+            HostingProviderError::ValidationFailed(
+                "provider check report has no check runs".to_string(),
+            )
+        })?;
+        let url = format!("{}/repos/{}/check-runs", self.api_base, report.repository);
+        let payload = json!({
+            "name": run.name,
+            "head_sha": "unknown",
+            "status": "completed",
+            "conclusion": format!("{:?}", run.conclusion).to_ascii_lowercase(),
+            "output": {
+                "title": run.name,
+                "summary": run.summary,
+                "annotations": run.annotations.iter().map(|annotation| json!({
+                    "path": annotation.path,
+                    "start_line": annotation.start_line,
+                    "end_line": annotation.end_line.unwrap_or(annotation.start_line),
+                    "annotation_level": format!("{:?}", annotation.annotation_level).to_ascii_lowercase(),
+                    "message": annotation.message,
+                    "title": annotation.title,
+                    "raw_details": annotation.raw_details,
+                })).collect::<Vec<_>>()
+            }
+        });
+        let (status, body) =
+            self.transport
+                .request("POST", &url, self.token.as_deref(), Some(&payload))?;
+        ensure_provider_status(status, &body)?;
+        Ok(ProviderPublishReceipt {
+            provider: "github".to_string(),
+            repository: report.repository.clone(),
+            target: format!("check-run:{}", report.pr_number),
+            status: "published".to_string(),
+        })
+    }
+
+    fn publish_comment(
+        &self,
+        repository: &str,
+        number: &str,
+        body: &str,
+    ) -> Result<ProviderPublishReceipt, HostingProviderError> {
+        let url = format!(
+            "{}/repos/{repository}/issues/{number}/comments",
+            self.api_base
+        );
+        let payload = json!({ "body": body });
+        let (status, response) =
+            self.transport
+                .request("POST", &url, self.token.as_deref(), Some(&payload))?;
+        ensure_provider_status(status, &response)?;
+        Ok(ProviderPublishReceipt {
+            provider: "github".to_string(),
+            repository: repository.to_string(),
+            target: format!("comment:{number}"),
+            status: "published".to_string(),
+        })
+    }
+
+    fn receive_webhook(
+        &self,
+        payload: &[u8],
+    ) -> Result<HostingWebhookObservation, HostingProviderError> {
+        let value: serde_json::Value = serde_json::from_slice(payload)
+            .map_err(|error| HostingProviderError::ValidationFailed(error.to_string()))?;
+        Ok(HostingWebhookObservation {
+            provider: "github".to_string(),
+            pull_request: github_pr_from_value(&value).ok(),
+            source_trust: SOURCE_TRUST_OBSERVATION.to_string(),
+            trust_state: TRUST_STATE_OBSERVED.to_string(),
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -193,6 +494,186 @@ pub fn validate_provider_check_report(report: &ProviderCheckReport) -> Vec<Findi
     findings
 }
 
+fn ensure_provider_status(status: u16, body: &str) -> Result<(), HostingProviderError> {
+    match status {
+        200..=299 => Ok(()),
+        401 | 403 => Err(HostingProviderError::AuthFailure(body.to_string())),
+        404 => Err(HostingProviderError::NotFound(body.to_string())),
+        429 => Err(HostingProviderError::RateLimited(body.to_string())),
+        400..=499 => Err(HostingProviderError::ValidationFailed(body.to_string())),
+        _ => Err(HostingProviderError::ProviderUnavailable(body.to_string())),
+    }
+}
+
+pub fn github_pr_from_json(
+    repository: &str,
+    body: &str,
+) -> Result<PullRequestFact, HostingProviderError> {
+    let value: serde_json::Value = serde_json::from_str(body)
+        .map_err(|error| HostingProviderError::ValidationFailed(error.to_string()))?;
+    github_pr_from_value_with_repository(repository, &value)
+}
+
+fn github_pr_from_value(
+    value: &serde_json::Value,
+) -> Result<PullRequestFact, HostingProviderError> {
+    let repository = value
+        .get("repository")
+        .and_then(|repository| repository.get("full_name"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown/unknown");
+    let pr = value.get("pull_request").unwrap_or(value);
+    github_pr_from_value_with_repository(repository, pr)
+}
+
+fn github_pr_from_value_with_repository(
+    repository: &str,
+    value: &serde_json::Value,
+) -> Result<PullRequestFact, HostingProviderError> {
+    let number = value
+        .get("number")
+        .and_then(serde_json::Value::as_i64)
+        .map(|value| value.to_string())
+        .or_else(|| {
+            value
+                .get("iid")
+                .and_then(serde_json::Value::as_i64)
+                .map(|value| value.to_string())
+        })
+        .ok_or_else(|| {
+            HostingProviderError::ValidationFailed("GitHub PR payload missing number".to_string())
+        })?;
+    let head = value.get("head").ok_or_else(|| {
+        HostingProviderError::ValidationFailed("GitHub PR payload missing head".to_string())
+    })?;
+    let base = value.get("base").ok_or_else(|| {
+        HostingProviderError::ValidationFailed("GitHub PR payload missing base".to_string())
+    })?;
+    let branch = head
+        .get("ref")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let target_branch = base
+        .get("ref")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if branch.is_empty() || target_branch.is_empty() {
+        return Err(HostingProviderError::ValidationFailed(
+            "GitHub PR payload missing branch refs".to_string(),
+        ));
+    }
+    Ok(PullRequestFact {
+        provider: "github".to_string(),
+        number,
+        branch,
+        target_branch,
+        state: if value
+            .get("merged")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            "merged".to_string()
+        } else {
+            value
+                .get("state")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("open")
+                .to_string()
+        },
+        title: value
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        url: value
+            .get("html_url")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        author: value
+            .get("user")
+            .and_then(|user| user.get("login"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        head_sha: head
+            .get("sha")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        base_sha: base
+            .get("sha")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        validation_run_id: None,
+        observed_by: Some(format!("adapter:github:{repository}")),
+        observed_at: None,
+    })
+}
+
+fn gitlab_merge_request_from_value(
+    value: &serde_json::Value,
+) -> Result<PullRequestFact, HostingProviderError> {
+    let attrs = value.get("object_attributes").unwrap_or(value);
+    let number = attrs
+        .get("iid")
+        .and_then(serde_json::Value::as_i64)
+        .map(|value| value.to_string())
+        .or_else(|| {
+            attrs
+                .get("number")
+                .and_then(serde_json::Value::as_i64)
+                .map(|value| value.to_string())
+        })
+        .ok_or_else(|| {
+            HostingProviderError::ValidationFailed("GitLab MR payload missing iid".to_string())
+        })?;
+    let repository = value
+        .get("project")
+        .and_then(|project| project.get("path_with_namespace"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown/unknown");
+    Ok(PullRequestFact {
+        provider: "gitlab".to_string(),
+        number,
+        branch: attrs
+            .get("source_branch")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        target_branch: attrs
+            .get("target_branch")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        state: attrs
+            .get("state")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("open")
+            .to_string(),
+        title: attrs
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        url: attrs
+            .get("url")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        author: value
+            .get("user")
+            .and_then(|user| user.get("username"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        head_sha: attrs
+            .get("last_commit")
+            .and_then(|commit| commit.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        base_sha: None,
+        validation_run_id: None,
+        observed_by: Some(format!("adapter:gitlab:{repository}")),
+        observed_at: None,
+    })
+}
+
 fn annotation_from_finding(finding: &Finding) -> Vec<ProviderCheckAnnotation> {
     let level = match finding.severity {
         FindingSeverity::Info => ProviderCheckAnnotationLevel::Notice,
@@ -314,6 +795,27 @@ fn edge(from: &str, edge_type: &str, to: &str) -> Edge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+
+    struct MockTransport {
+        responses: RefCell<Vec<(u16, String)>>,
+        requests: RefCell<Vec<(String, String, Option<serde_json::Value>)>>,
+    }
+
+    impl ProviderHttpTransport for MockTransport {
+        fn request(
+            &self,
+            method: &str,
+            url: &str,
+            _token: Option<&str>,
+            body: Option<&serde_json::Value>,
+        ) -> Result<(u16, String), HostingProviderError> {
+            self.requests
+                .borrow_mut()
+                .push((method.to_string(), url.to_string(), body.cloned()));
+            Ok(self.responses.borrow_mut().remove(0))
+        }
+    }
 
     #[test]
     fn provider_check_report_maps_findings_to_annotations() {
@@ -327,5 +829,126 @@ mod tests {
         );
         assert_eq!(report.check_runs[0].annotations[0].path, "src/lib.rs");
         assert!(validate_provider_check_report(&report).is_empty());
+    }
+
+    #[test]
+    fn github_provider_maps_pr_fetch_to_observed_pull_request() {
+        let provider = GitHubProvider::new(
+            Some("token".to_string()),
+            "https://api.github.test",
+            MockTransport {
+                responses: RefCell::new(vec![(
+                    200,
+                    json!({
+                        "number": 123,
+                        "state": "open",
+                        "title": "Add feature",
+                        "html_url": "https://github.test/org/repo/pull/123",
+                        "user": {"login": "octo"},
+                        "head": {"ref": "feature", "sha": "headsha"},
+                        "base": {"ref": "main", "sha": "basesha"}
+                    })
+                    .to_string(),
+                )]),
+                requests: RefCell::new(Vec::new()),
+            },
+        );
+        let pr = provider.fetch_pull_request("org/repo", "123").unwrap();
+        assert_eq!(pr.provider, "github");
+        assert_eq!(pr.number, "123");
+        assert_eq!(pr.branch, "feature");
+        assert_eq!(pr.target_branch, "main");
+        assert_eq!(pr.observed_by.as_deref(), Some("adapter:github:org/repo"));
+        let delta = sg_gitgraph::GitGraphProjection {
+            project_node_id: "node_project".to_string(),
+            pull_requests: vec![pr],
+            ..sg_gitgraph::GitGraphProjection::default()
+        }
+        .to_delta();
+        let pr_node = delta
+            .create_nodes
+            .iter()
+            .find(|node| node.node_type == "PullRequest")
+            .unwrap();
+        assert_eq!(
+            pr_node
+                .attributes
+                .get("sourceTrust")
+                .and_then(serde_json::Value::as_str),
+            Some(SOURCE_TRUST_OBSERVATION)
+        );
+        assert_eq!(
+            pr_node
+                .attributes
+                .get("trustState")
+                .and_then(serde_json::Value::as_str),
+            Some(TRUST_STATE_OBSERVED)
+        );
+    }
+
+    #[test]
+    fn github_provider_publish_check_sends_annotations() {
+        let transport = MockTransport {
+            responses: RefCell::new(vec![(201, "{}".to_string())]),
+            requests: RefCell::new(Vec::new()),
+        };
+        let provider = GitHubProvider::new(
+            Some("token".to_string()),
+            "https://api.github.test",
+            transport,
+        );
+        let finding = Finding::new("demo.error", FindingSeverity::Error, "broken")
+            .with_location(FindingLocation::file("src/lib.rs"));
+        let report =
+            ProviderCheckReport::from_findings("github", "org/repo", "123", "ci-1", &[finding]);
+        let receipt = provider.publish_check(&report).unwrap();
+        assert_eq!(receipt.status, "published");
+        let request = provider.transport.requests.borrow();
+        assert_eq!(request[0].0, "POST");
+        assert!(request[0].1.ends_with("/repos/org/repo/check-runs"));
+        assert!(request[0].2.as_ref().unwrap()["output"]["annotations"].is_array());
+    }
+
+    #[test]
+    fn provider_errors_classify_auth_rate_limit_and_bad_payload() {
+        assert!(matches!(
+            ensure_provider_status(401, "bad token"),
+            Err(HostingProviderError::AuthFailure(_))
+        ));
+        assert!(matches!(
+            ensure_provider_status(429, "slow down"),
+            Err(HostingProviderError::RateLimited(_))
+        ));
+        assert!(github_pr_from_json("org/repo", "{}").is_err());
+    }
+
+    #[test]
+    fn github_webhook_observation_keeps_pr_untrusted() {
+        let provider = GitHubProvider::new(
+            None,
+            "https://api.github.test",
+            MockTransport {
+                responses: RefCell::new(Vec::new()),
+                requests: RefCell::new(Vec::new()),
+            },
+        );
+        let observation = provider
+            .receive_webhook(
+                json!({
+                    "repository": {"full_name": "org/repo"},
+                    "pull_request": {
+                        "number": 9,
+                        "state": "open",
+                        "head": {"ref": "feature", "sha": "head"},
+                        "base": {"ref": "main", "sha": "base"}
+                    }
+                })
+                .to_string()
+                .as_bytes(),
+            )
+            .unwrap();
+        assert_eq!(observation.source_trust, SOURCE_TRUST_OBSERVATION);
+        assert_eq!(observation.trust_state, TRUST_STATE_OBSERVED);
+        assert_eq!(observation.pull_request.unwrap().provider, "github");
     }
 }

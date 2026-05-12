@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sg_adapter_hosting::{GitHubProvider, HostingProvider};
 use sg_model::{Edge, Finding, FindingSeverity, GraphDelta, Node, OperationReceipt};
 use sg_query::{GraphQuery, QueryContext, QueryLimits, QueryTarget};
 use sg_store::{AppendOperationOptions, ReplayOptions, SpecGraphStore};
@@ -75,6 +76,11 @@ impl SpecGraphApi {
                 "POST",
                 "/operations",
                 "Append or dry-run a graph operation through the Operation Runtime.",
+            ),
+            ApiRoute::read(
+                "POST",
+                "/webhooks/github",
+                "Receive GitHub webhook payloads as untrusted hosting observations.",
             ),
         ]
     }
@@ -422,6 +428,21 @@ fn route_http_request(
             },
             Err(error) => api_error_response(401, error),
         },
+        ("POST", "/webhooks/github") => {
+            match authorize_webhook(&request, "SPECGRAPH_GITHUB_WEBHOOK_SECRET") {
+                Ok(()) => {
+                    let provider = GitHubProvider::from_env();
+                    match provider.receive_webhook(&request.body) {
+                        Ok(observation) => json_response(200, &observation),
+                        Err(error) => api_error_response(
+                            400,
+                            ApiError::new("webhook.invalid_payload", error.to_string()),
+                        ),
+                    }
+                }
+                Err(error) => api_error_response(401, error),
+            }
+        }
         _ => api_error_response(
             404,
             ApiError::new(
@@ -457,6 +478,27 @@ fn authorize_http(
         Err(ApiError::new(
             "api.unauthorized",
             "missing or invalid bearer token",
+        ))
+    }
+}
+
+fn authorize_webhook(request: &HttpRequest, secret_env: &str) -> ApiResult<()> {
+    let Some(expected) = std::env::var(secret_env)
+        .ok()
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(());
+    };
+    let provided = request
+        .headers
+        .get("x-specgraph-webhook-secret")
+        .map(String::as_str);
+    if provided == Some(expected.as_str()) {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            "webhook.unauthorized",
+            format!("missing or invalid {secret_env} webhook secret header"),
         ))
     }
 }
@@ -1208,6 +1250,37 @@ mod tests {
         })
         .unwrap()
         .receipt
+    }
+
+    #[test]
+    fn github_webhook_endpoint_returns_observed_pr_without_mutation() {
+        let root = initialized_root("github-webhook");
+        let api = SpecGraphApi::new(root);
+        let before = api.status().unwrap().events_replayed;
+        let payload = json!({
+            "repository": {"full_name": "org/repo"},
+            "pull_request": {
+                "number": 7,
+                "state": "open",
+                "title": "Webhook PR",
+                "head": {"ref": "feature", "sha": "head"},
+                "base": {"ref": "main", "sha": "base"}
+            }
+        })
+        .to_string();
+        let (status, body) = route_http_request(
+            &api,
+            &HttpServerConfig::new(PathBuf::from("."), "127.0.0.1:0".parse().unwrap()),
+            HttpRequest {
+                method: "POST".to_string(),
+                path: "/webhooks/github".to_string(),
+                headers: BTreeMap::new(),
+                body: payload.into_bytes(),
+            },
+        );
+        assert_eq!(status, 200);
+        assert!(body.contains("\"sourceTrust\":\"Observation\""));
+        assert_eq!(api.status().unwrap().events_replayed, before);
     }
 
     fn initialized_root(prefix: &str) -> PathBuf {

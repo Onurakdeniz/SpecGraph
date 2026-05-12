@@ -145,8 +145,9 @@ Current completed slices:
 - **Phase 3 — Std HTTP API server and SDK transport** added a no-extra-dependency std TCP HTTP boundary with `/health`, `/graph/status`, `/graph/query`, `/validation/findings`, and `/operations`, schema-version checks, structured API errors with optional findings, bearer-token mutation auth, `sg api serve`, Rust SDK HTTP transport, TypeScript SDK token/timeouts/typed errors, and HTTP route/SDK tests.
 - **Phase 4A — Scoped release/PR/merge evidence semantics** added spec-scoped validation/PR/release/merge ontology edges, release artifact/checksum/evidence graph facts, scoped `Released` blockers, spec-scoped PR validation/record links, GitMerge-to-GraphMerge binding requirements, and tests for unrelated evidence blockers and graph merge binding.
 - **Phase 4B — Release CLI hardening and Phase 4 gate** added `sg release validate`, `sg release artifact add`, hardened `sg release record` to require validation run, graph snapshot, evidence path, and artifact checksums, updated release docs, and extended tests for unrelated evidence, missing snapshot, missing checksum, scoped release success, and GraphMerge/GitMerge binding.
+- **Phase 5 — Hosting provider integration foundations** added a hosting provider trait, GitHub provider fetch/check/comment/webhook support, config-gated GitLab webhook mapping, `sg pr sync --from-provider`, `sg pr publish-check`, GitHub webhook HTTP endpoint, structured provider error mapping, and mock-provider tests that keep provider facts observed/untrusted.
 
-Next focus: **Phase 5 — Live Hosting Provider Integration**. Start from the latest `development` and continue the five-checklist-item branch policy with provider trait, GitHub adapter, optional GitLab adapter/config boundary, provider CLI, and webhook endpoint foundations.
+Next focus: **Phase 6 — ActionGraph and CommitPlan Productionization**. Start from the latest `development` and continue the five-checklist-item branch policy with action template schema/registry, template-based dependencies, expected-delta matching, replan lifecycle, and action status/blocker commands.
 
 ---
 
@@ -678,25 +679,25 @@ Move PR sync/check publishing from manual input to real provider APIs while keep
 
 ## Checklist
 
-- [ ] **Add hosting provider trait.** In `sg-adapter-hosting`, define a trait for fetching PR metadata, publishing check runs, publishing comments, and optionally receiving webhook payloads. All outputs must be observations.
+- [x] **Add hosting provider trait.** In `sg-adapter-hosting`, defined a trait for fetching PR metadata, publishing check runs, publishing comments, and receiving webhook payloads. All outputs remain observations.
 
-- [ ] **Implement GitHub provider adapter.** Use token from `GITHUB_TOKEN` or explicit config. Implement fetch PR, map PR JSON to `PullRequestFact`, and publish provider check runs/annotations from `ProviderCheckReport`.
+- [x] **Implement GitHub provider adapter.** Uses token from `GITHUB_TOKEN` or explicit config. Implements fetch PR, maps PR JSON to `PullRequestFact`, and publishes provider check runs/annotations from `ProviderCheckReport` through the provider transport.
 
-- [ ] **Implement GitLab provider adapter if required by config.** Keep feature-gated if needed. Map GitLab merge request metadata to the same graph observation model.
+- [x] **Implement GitLab provider adapter if required by config.** Added config-gated GitLab provider/webhook mapping that maps merge request metadata to the same graph observation model without enabling trusted live writes.
 
-- [ ] **Add provider CLI.** Add `sg pr sync --provider github --repo owner/repo --number 123 --from-provider` and `sg pr publish-check --provider github --repo owner/repo --number 123 --report-file ...`.
+- [x] **Add provider CLI.** Added `sg pr sync --provider github --repo owner/repo --number 123 --from-provider` and `sg pr publish-check --provider github --repo owner/repo --number 123 --report-file ...`.
 
-- [ ] **Add webhook endpoints.** Add `/webhooks/github` and optional `/webhooks/gitlab` to the HTTP server. Validate signatures if configured. Webhooks create observed facts only and route graph writes through Operation Runtime.
+- [x] **Add webhook endpoints.** Added `/webhooks/github` to the HTTP server with optional shared-secret validation. Webhooks return observed facts only and do not bypass Operation Runtime for graph writes.
 
-- [ ] **Add retry/rate-limit handling.** Provider calls must surface structured errors for auth failure, not found, rate-limited, validation failed, and provider unavailable.
+- [x] **Add retry/rate-limit handling.** Provider calls surface structured errors for auth failure, not found, rate-limited, validation failed, and provider unavailable.
 
-- [ ] **Add tests with mock provider.** Use mocked HTTP/provider responses for PR fetch, check publishing, auth failure, rate limit, and malformed provider payload. Do not require live network in CI.
+- [x] **Add tests with mock provider.** Added mocked provider/HTTP responses for PR fetch, check publishing, auth failure, rate limit, malformed provider payload, and webhook observations without requiring live network in CI.
 
 ## Phase Gate
 
-- [ ] Mock GitHub PR metadata sync creates observed PR facts.
-- [ ] Mock provider check publishing receives expected annotations.
-- [ ] Provider facts remain `sourceTrust=Observation` and `trustState=Observed`.
+- [x] Mock GitHub PR metadata sync creates observed PR facts.
+- [x] Mock provider check publishing receives expected annotations.
+- [x] Provider facts remain `sourceTrust=Observation` and `trustState=Observed`.
 
 ---
 

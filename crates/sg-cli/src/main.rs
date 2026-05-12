@@ -3,7 +3,9 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use serde_json::json;
 use sg_adapter_api::{built_in_adapter_catalog, validate_adapter_catalog};
 use sg_adapter_code::{index_source_file, observations_to_delta, CodeIndexObservation};
-use sg_adapter_hosting::{validate_provider_check_report, ProviderCheckReport};
+use sg_adapter_hosting::{
+    validate_provider_check_report, GitHubProvider, HostingProvider, ProviderCheckReport,
+};
 use sg_adoption::{
     adoption_report_delta, adoption_report_from_delta, scan_repository, AdoptionMode,
 };
@@ -843,6 +845,8 @@ enum PrCommand {
     Sync(PrSyncArgs),
     /// Run PR validation and emit provider-native check annotations.
     Validate(PrValidateArgs),
+    /// Publish a provider check report to a hosting provider.
+    PublishCheck(PrPublishCheckArgs),
 }
 
 #[derive(Debug, Args)]
@@ -850,11 +854,15 @@ struct PrSyncArgs {
     #[arg(long)]
     provider: String,
     #[arg(long)]
+    repo: Option<String>,
+    #[arg(long)]
     number: String,
     #[arg(long)]
-    branch: String,
+    from_provider: bool,
+    #[arg(long)]
+    branch: Option<String>,
     #[arg(long = "target-branch")]
-    target_branch: String,
+    target_branch: Option<String>,
     #[arg(long, default_value = "open")]
     state: String,
     #[arg(long)]
@@ -875,6 +883,18 @@ struct PrSyncArgs {
     actor: String,
     #[arg(long, default_value = "main")]
     graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct PrPublishCheckArgs {
+    #[arg(long)]
+    provider: String,
+    #[arg(long)]
+    repo: String,
+    #[arg(long)]
+    number: String,
+    #[arg(long = "report-file")]
+    report_file: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -2714,20 +2734,39 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
         PrCommand::Sync(args) => {
             let replay = store.replay(ReplayOptions::checking())?;
             let project_node_id = find_project_node_id(&replay.graph)?;
-            let pr = PullRequestFact {
-                provider: args.provider.clone(),
-                number: args.number.clone(),
-                branch: args.branch.clone(),
-                target_branch: args.target_branch.clone(),
-                state: args.state.clone(),
-                title: args.title,
-                url: args.url,
-                author: args.author,
-                head_sha: args.head_sha,
-                base_sha: args.base_sha,
-                validation_run_id: args.validation_run_id,
-                observed_by: Some(format!("adapter:{}", args.provider)),
-                observed_at: None,
+            let pr = if args.from_provider {
+                let repo = args
+                    .repo
+                    .as_deref()
+                    .context("`sg pr sync --from-provider` requires --repo owner/repo")?;
+                match args.provider.as_str() {
+                    "github" => GitHubProvider::from_env()
+                        .fetch_pull_request(repo, &args.number)
+                        .map_err(|error| anyhow::anyhow!(error))?,
+                    other => bail!("provider `{other}` does not support --from-provider yet"),
+                }
+            } else {
+                PullRequestFact {
+                    provider: args.provider.clone(),
+                    number: args.number.clone(),
+                    branch: args
+                        .branch
+                        .clone()
+                        .context("manual PR sync requires --branch")?,
+                    target_branch: args
+                        .target_branch
+                        .clone()
+                        .context("manual PR sync requires --target-branch")?,
+                    state: args.state.clone(),
+                    title: args.title,
+                    url: args.url,
+                    author: args.author,
+                    head_sha: args.head_sha,
+                    base_sha: args.base_sha,
+                    validation_run_id: args.validation_run_id,
+                    observed_by: Some(format!("adapter:{}", args.provider)),
+                    observed_at: None,
+                }
             };
             let projection = GitGraphProjection {
                 project_node_id,
@@ -2759,6 +2798,27 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
             println!("provider: {}", args.provider);
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
+        }
+        PrCommand::PublishCheck(args) => {
+            let report = read_provider_check_report(root, &args.report_file)?;
+            if report.provider != args.provider
+                || report.repository != args.repo
+                || report.pr_number != args.number
+            {
+                bail!("provider check report target does not match --provider/--repo/--number");
+            }
+            if let Some(finding) = validate_provider_check_report(&report).into_iter().next() {
+                bail!("invalid provider check report: {}", finding.message);
+            }
+            let receipt = match args.provider.as_str() {
+                "github" => GitHubProvider::from_env()
+                    .publish_check(&report)
+                    .map_err(|error| anyhow::anyhow!(error))?,
+                other => bail!("provider `{other}` does not support check publishing yet"),
+            };
+            println!("providerCheckPublished: {}", receipt.target);
+            println!("provider: {}", receipt.provider);
+            println!("repository: {}", receipt.repository);
         }
         PrCommand::Validate(args) => {
             let replay = store.replay(ReplayOptions::checking())?;
@@ -3633,6 +3693,16 @@ fn write_provider_check_report(
     }
     fs::write(&path, serde_json::to_vec_pretty(report)?)?;
     Ok(())
+}
+
+fn read_provider_check_report(
+    root: &Path,
+    report_file: &Path,
+) -> anyhow::Result<ProviderCheckReport> {
+    let path = resolve_path(root, report_file.to_path_buf());
+    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse provider check report {}", path.display()))
 }
 
 fn write_patch_sandbox_report(

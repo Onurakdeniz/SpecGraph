@@ -862,6 +862,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sg-adapter-hosting",
  "sg-model",
  "sg-query",
  "sg-spec",
