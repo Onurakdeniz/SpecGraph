@@ -1,5 +1,6 @@
 use anyhow::{bail, Context};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use serde::Serialize;
 use serde_json::json;
 use sg_adapter_api::{built_in_adapter_catalog, validate_adapter_catalog};
 use sg_adapter_code::{index_source_file, observations_to_delta, CodeIndexObservation};
@@ -1039,6 +1040,8 @@ struct ActionArgs {
 enum ActionCommand {
     Generate(ActionGenerateArgs),
     List(ActionListArgs),
+    Status(ActionStatusArgs),
+    Blockers(ActionStatusArgs),
     Start(ActionLifecycleArgs),
     Complete(ActionLifecycleArgs),
     Replan(ActionLifecycleArgs),
@@ -1058,6 +1061,12 @@ struct ActionGenerateArgs {
 struct ActionListArgs {
     #[arg(long)]
     spec: String,
+}
+
+#[derive(Debug, Args)]
+struct ActionStatusArgs {
+    #[arg(long)]
+    action: String,
 }
 
 #[derive(Debug, Args)]
@@ -1653,7 +1662,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Api(args) => handle_api(&store, &root, args)?,
         Commands::Pr(args) => handle_pr(&store, &root, args)?,
         Commands::Proposal(args) => handle_proposal(&store, &root, args)?,
-        Commands::Action(args) => handle_action(&store, args)?,
+        Commands::Action(args) => handle_action(&store, args, output)?,
         Commands::Git(args) => handle_git(&store, &root, args)?,
         Commands::Code(args) => handle_code(&store, &root, args)?,
         Commands::Trace(args) => handle_trace(&store, &root, args)?,
@@ -3107,7 +3116,11 @@ fn handle_proposal(store: &SpecGraphStore, root: &Path, args: ProposalArgs) -> a
     Ok(())
 }
 
-fn handle_action(store: &SpecGraphStore, args: ActionArgs) -> anyhow::Result<()> {
+fn handle_action(
+    store: &SpecGraphStore,
+    args: ActionArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
     match args.command {
         ActionCommand::Generate(args) => {
             let receipt = store.generate_action_graph(GenerateActionGraphOptions {
@@ -3128,6 +3141,46 @@ fn handle_action(store: &SpecGraphStore, args: ActionArgs) -> anyhow::Result<()>
                     "group: {} actions={} commitPlans={}",
                     group.name, group.action_count, group.commit_plan_count
                 );
+            }
+        }
+        ActionCommand::Status(args) | ActionCommand::Blockers(args) => {
+            let replay = store.replay(ReplayOptions::checking())?;
+            let action = resolve_action_node(&replay.graph, &args.action)
+                .with_context(|| format!("ActionNode `{}` not found", args.action))?;
+            let commit_plan = commit_plan_for_action(&replay.graph, &action.id);
+            let blockers = action_blocker_report(&replay.graph, action, commit_plan);
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.action-status/v1",
+                    "action": action.id,
+                    "name": action.attributes.get("name"),
+                    "state": action.attributes.get("state"),
+                    "commitPlan": commit_plan.map(|node| node.id.clone()),
+                    "blockers": blockers
+                }))?;
+            } else {
+                println!("action: {}", action.id);
+                println!(
+                    "state: {}",
+                    action
+                        .attributes
+                        .get("state")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown")
+                );
+                if let Some(commit_plan) = commit_plan {
+                    println!("commitPlan: {}", commit_plan.id);
+                }
+                for blocker in blockers
+                    .dependency
+                    .iter()
+                    .chain(blockers.validation.iter())
+                    .chain(blockers.policy.iter())
+                    .chain(blockers.impact.iter())
+                    .chain(blockers.expected_delta.iter())
+                {
+                    println!("blocker: {blocker}");
+                }
             }
         }
         ActionCommand::Start(args) => {
@@ -3156,6 +3209,199 @@ fn action_lifecycle_options(args: ActionLifecycleArgs) -> ActionLifecycleOptions
         graph_branch: args.graph_branch,
         reason: args.reason,
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActionBlockerReport {
+    dependency: Vec<String>,
+    validation: Vec<String>,
+    policy: Vec<String>,
+    impact: Vec<String>,
+    expected_delta: Vec<String>,
+}
+
+fn resolve_action_node<'a>(graph: &'a Graph, action: &str) -> Option<&'a Node> {
+    graph.nodes.get(action).or_else(|| {
+        graph.nodes.values().find(|node| {
+            node.node_type == "ActionNode"
+                && node
+                    .attributes
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| value == action)
+        })
+    })
+}
+
+fn commit_plan_for_action<'a>(graph: &'a Graph, action_id: &str) -> Option<&'a Node> {
+    let group_id = graph
+        .edges
+        .values()
+        .find(|edge| edge.edge_type == "HAS_ACTION" && edge.to == action_id)
+        .map(|edge| edge.from.as_str())?;
+    graph
+        .edges
+        .values()
+        .find(|edge| edge.from == group_id && edge.edge_type == "HAS_COMMIT_PLAN")
+        .and_then(|edge| graph.nodes.get(&edge.to))
+}
+
+fn action_blocker_report(
+    graph: &Graph,
+    action: &Node,
+    commit_plan: Option<&Node>,
+) -> ActionBlockerReport {
+    ActionBlockerReport {
+        dependency: action_dependency_blockers(graph, &action.id),
+        validation: action_validation_blockers(graph, &action.id),
+        policy: action_policy_blockers(graph, &action.id),
+        impact: action_impact_blockers(action),
+        expected_delta: action_expected_delta_blockers(commit_plan),
+    }
+}
+
+fn action_dependency_blockers(graph: &Graph, action_id: &str) -> Vec<String> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == action_id && edge.edge_type == "DEPENDS_ON")
+        .filter(|edge| {
+            !graph.nodes.get(&edge.to).is_some_and(|node| {
+                node.attributes
+                    .get("state")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("Completed")
+            })
+        })
+        .map(|edge| format!("dependency action `{}` is not Completed", edge.to))
+        .collect()
+}
+
+fn action_validation_blockers(graph: &Graph, action_id: &str) -> Vec<String> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| {
+            edge.from == action_id && edge.edge_type == "ACTION_REQUIRES_VALIDATION_RECIPE"
+        })
+        .filter(|edge| !validation_recipe_satisfied_cli(graph, &edge.to))
+        .map(|edge| format!("validation recipe `{}` is not satisfied", edge.to))
+        .collect()
+}
+
+fn validation_recipe_satisfied_cli(graph: &Graph, recipe_id: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.edge_type == "VALIDATION_RUN_SATISFIES_RECIPE"
+            && edge.to == recipe_id
+            && graph.nodes.get(&edge.from).is_some_and(|node| {
+                node.node_type == "ValidationRun"
+                    && node
+                        .attributes
+                        .get("status")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("Passed")
+            })
+    })
+}
+
+fn action_policy_blockers(graph: &Graph, action_id: &str) -> Vec<String> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == action_id && edge.edge_type == "ACTION_HAS_REVIEW")
+        .flat_map(|edge| unresolved_requested_changes_for_review_cli(graph, &edge.to))
+        .map(|change| {
+            format!(
+                "requested change `{}` is unresolved",
+                change
+                    .attributes
+                    .get("changeId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(change.id.as_str())
+            )
+        })
+        .collect()
+}
+
+fn unresolved_requested_changes_for_review_cli<'a>(
+    graph: &'a Graph,
+    review_id: &str,
+) -> Vec<&'a Node> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == review_id && edge.edge_type == "REVIEW_REQUESTS_CHANGE")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| node.node_type == "RequestedChange")
+        .filter(|change| !requested_change_is_resolved_cli(graph, &change.id))
+        .collect()
+}
+
+fn requested_change_is_resolved_cli(graph: &Graph, change_id: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.from == change_id
+            && ((edge.edge_type == "REQUESTED_CHANGE_RESOLVED_BY"
+                && graph.nodes.get(&edge.to).is_some_and(|node| {
+                    node.node_type == "ReviewResolution"
+                        && matches!(
+                            node.attributes
+                                .get("status")
+                                .and_then(serde_json::Value::as_str),
+                            Some("Resolved" | "Accepted" | "Closed")
+                        )
+                }))
+                || (edge.edge_type == "REQUESTED_CHANGE_APPROVED_BY"
+                    && graph.nodes.get(&edge.to).is_some_and(|node| {
+                        node.node_type == "ReviewApproval"
+                            && matches!(
+                                node.attributes
+                                    .get("status")
+                                    .and_then(serde_json::Value::as_str),
+                                Some("Approved" | "Accepted")
+                            )
+                    })))
+    })
+}
+
+fn action_impact_blockers(action: &Node) -> Vec<String> {
+    if action
+        .attributes
+        .get("state")
+        .and_then(serde_json::Value::as_str)
+        == Some("Replanned")
+    {
+        vec![format!(
+            "action `{}` has been replanned and cannot continue; use the replacement ActionNode",
+            action.id
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
+fn action_expected_delta_blockers(commit_plan: Option<&Node>) -> Vec<String> {
+    let Some(commit_plan) = commit_plan else {
+        return vec!["action has no linked CommitPlan".to_string()];
+    };
+    let has_expected_nodes = attr_array_non_empty(commit_plan, "expectedNodeTypes");
+    let has_expected_edges = attr_array_non_empty(commit_plan, "expectedEdgeTypes");
+    let has_forbidden_effects = attr_array_non_empty(commit_plan, "forbiddenEffects");
+    if has_expected_nodes || has_expected_edges || has_forbidden_effects {
+        Vec::new()
+    } else {
+        vec![format!(
+            "CommitPlan `{}` has no expected GraphDelta type/effect constraints",
+            commit_plan.id
+        )]
+    }
+}
+
+fn attr_array_non_empty(node: &Node, attr: &str) -> bool {
+    node.attributes
+        .get(attr)
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|values| !values.is_empty())
 }
 
 fn handle_git(store: &SpecGraphStore, root: &Path, args: GitArgs) -> anyhow::Result<()> {
@@ -6498,4 +6744,81 @@ fn stable_fragment(value: &str) -> String {
     }
 
     out.trim_matches('_').to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_blocker_report_includes_all_blocker_categories() {
+        let mut graph = Graph::default();
+        let action_id = node_id("action_node", "AUTH-001/implementation");
+        let dependency_id = node_id("action_node", "AUTH-001/graph");
+        let commit_plan_id = node_id("commit_plan", "AUTH-001/implementation");
+        let review_id = node_id("review", "AUTH-001/implementation");
+        let change_id = node_id("requested_change", "AUTH-001/implementation/fix");
+        let recipe_id = node_id("validation_recipe", "AUTH-001/implementation/build");
+
+        for node in [
+            Node {
+                id: action_id.clone(),
+                stable_key: "action-node:AUTH-001/implementation".to_string(),
+                node_type: "ActionNode".to_string(),
+                attributes: BTreeMap::from([
+                    ("name".to_string(), json!("Implement required behavior")),
+                    ("state".to_string(), json!("Replanned")),
+                ]),
+            },
+            Node {
+                id: dependency_id.clone(),
+                stable_key: "action-node:AUTH-001/graph".to_string(),
+                node_type: "ActionNode".to_string(),
+                attributes: BTreeMap::from([("state".to_string(), json!("Ready"))]),
+            },
+            Node {
+                id: commit_plan_id.clone(),
+                stable_key: "commit-plan:AUTH-001/implementation".to_string(),
+                node_type: "CommitPlan".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: review_id.clone(),
+                stable_key: "review:AUTH-001/implementation".to_string(),
+                node_type: "Review".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: change_id.clone(),
+                stable_key: "requested-change:AUTH-001/implementation/fix".to_string(),
+                node_type: "RequestedChange".to_string(),
+                attributes: BTreeMap::from([("changeId".to_string(), json!("fix"))]),
+            },
+            Node {
+                id: recipe_id.clone(),
+                stable_key: "validation-recipe:AUTH-001/implementation/build".to_string(),
+                node_type: "ValidationRecipe".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        ] {
+            graph.nodes.insert(node.id.clone(), node);
+        }
+        for edge_value in [
+            edge(&action_id, "DEPENDS_ON", &dependency_id),
+            edge(&action_id, "ACTION_REQUIRES_VALIDATION_RECIPE", &recipe_id),
+            edge(&action_id, "ACTION_HAS_REVIEW", &review_id),
+            edge(&review_id, "REVIEW_REQUESTS_CHANGE", &change_id),
+        ] {
+            graph.edges.insert(edge_value.id.clone(), edge_value);
+        }
+        let action = graph.nodes.get(&action_id).unwrap();
+        let commit_plan = graph.nodes.get(&commit_plan_id);
+        let blockers = action_blocker_report(&graph, action, commit_plan);
+
+        assert_eq!(blockers.dependency.len(), 1);
+        assert_eq!(blockers.validation.len(), 1);
+        assert_eq!(blockers.policy.len(), 1);
+        assert_eq!(blockers.impact.len(), 1);
+        assert_eq!(blockers.expected_delta.len(), 1);
+    }
 }

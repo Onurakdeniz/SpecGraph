@@ -147,8 +147,9 @@ Current completed slices:
 - **Phase 4B — Release CLI hardening and Phase 4 gate** added `sg release validate`, `sg release artifact add`, hardened `sg release record` to require validation run, graph snapshot, evidence path, and artifact checksums, updated release docs, and extended tests for unrelated evidence, missing snapshot, missing checksum, scoped release success, and GraphMerge/GitMerge binding.
 - **Phase 5 — Hosting provider integration foundations** added a hosting provider trait, GitHub provider fetch/check/comment/webhook support, config-gated GitLab webhook mapping, `sg pr sync --from-provider`, `sg pr publish-check`, GitHub webhook HTTP endpoint, structured provider error mapping, and mock-provider tests that keep provider facts observed/untrusted.
 - **Phase 6A — Action template planning foundations** added a versioned built-in action template schema/registry foundation, template-generated `DEPENDS_ON` edges with start blockers, CommitPlan expected GraphDelta type/effect matching, and replan replacement evidence that blocks stale action continuation.
+- **Phase 6B — Pack templates and action blocker CLI** added architecture-pack-provided action templates, pack selection from the project architecture profile, `sg action status`, `sg action blockers`, blocker-category JSON output, and tests proving pack-generated ActionGraphs differ from the built-in default.
 
-Next focus: **Phase 6B — Pack templates and action blocker CLI**. Keep the five-checklist-item branch policy: finish architecture-pack-provided template selection, add `sg action status`/`sg action blockers` JSON output, and close the remaining Phase 6 pack-selection gate.
+Next focus: **Phase 6C — Impact queue replan closure**. Keep the five-checklist-item branch policy: wire impact queue input into `sg action replan`, add impact-driven replan tests if needed, and then close the remaining partial Phase 6 replan/test checklist items.
 
 ---
 
@@ -712,7 +713,7 @@ Replace fixed MVP action templates with pack-aware planning, dependency ordering
 
 - [x] **Add ActionGraph template schema.** Define a versioned YAML/JSON template schema with action groups, actions, dependencies, allowed file scopes, required validations, expected node types, expected edge types, and forbidden effects.
 
-- [~] **Add template registry.** Load built-in templates and architecture-pack-provided templates. Select template by project profile, module graph, spec intent, and architecture pack.
+- [x] **Add template registry.** Load built-in templates and architecture-pack-provided templates. Select template by project profile, module graph, spec intent, and architecture pack.
 
 - [x] **Generate dependencies.** When generating ActionGraph, create `DEPENDS_ON` edges from template dependencies and validate dependency ordering before action start.
 
@@ -720,13 +721,13 @@ Replace fixed MVP action templates with pack-aware planning, dependency ordering
 
 - [~] **Add replan lifecycle.** `sg action replan` should accept impact queue input, update affected actions to `Replanned`, create `REPLANNED_BY` evidence, and block continuation until a new valid plan exists.
 
-- [ ] **Add action status/blockers commands.** Add `sg action status` and `sg action blockers` with JSON output. Include dependency blockers, validation blockers, policy blockers, impact blockers, and expected-delta blockers.
+- [x] **Add action status/blockers commands.** Add `sg action status` and `sg action blockers` with JSON output. Include dependency blockers, validation blockers, policy blockers, impact blockers, and expected-delta blockers.
 
 - [~] **Add tests.** Cover pack template selection, dependency enforcement, expected-delta success/failure, forbidden effect failure, impact-driven replan, and action continuation blocked until replan.
 
 ## Phase Gate
 
-- [ ] ActionGraph generated from a pack differs from MVP default when pack is selected.
+- [x] ActionGraph generated from a pack differs from MVP default when pack is selected.
 - [x] Commit outside expected delta fails.
 - [x] Impacted action cannot continue until replanned.
 

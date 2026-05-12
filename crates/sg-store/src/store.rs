@@ -2,6 +2,10 @@ use crate::identity::{
     actor_permissions, actor_roles, infer_actor_kind, resolve_actor_identity, ActorIdentity,
 };
 use serde_json::{json, Value};
+use sg_architecture::{
+    load_architecture_pack, validate_architecture_pack, ArchitectureActionTemplate,
+    ArchitecturePack,
+};
 use sg_canonical::state_hash;
 use sg_codegraph::{resolve_code_object, CodeObjectQuery, ExistingCodeObjectCandidate};
 use sg_gitgraph::{parse_commit_trailers, validate_commit_binding, CommitValidationInput};
@@ -119,6 +123,10 @@ pub enum StoreError {
     PolicyValidationFailed(usize),
     #[error("ontology pack validation failed with {0} error finding(s)")]
     OntologyPackValidationFailed(usize),
+    #[error("architecture pack error at {path}: {message}")]
+    ArchitecturePack { path: PathBuf, message: String },
+    #[error("architecture pack validation failed with {0} error finding(s)")]
+    ArchitecturePackValidationFailed(usize),
     #[error("actor not found in identity registry: {0}")]
     ActorNotFound(String),
     #[error("approval or waiver id cannot be empty")]
@@ -964,6 +972,10 @@ impl SpecGraphStore {
 
     pub fn list_installed_ontology_packs(&self) -> Result<Vec<OntologyPackManifest>> {
         list_installed_ontology_packs(self.root())
+    }
+
+    pub fn list_installed_architecture_packs(&self) -> Result<Vec<ArchitecturePack>> {
+        list_installed_architecture_packs(self.root())
     }
 
     pub fn validate_specs(&self) -> Result<SpecValidationReport> {
@@ -4937,6 +4949,52 @@ pub fn list_installed_ontology_packs(root: &Path) -> Result<Vec<OntologyPackMani
     Ok(packs)
 }
 
+pub fn list_installed_architecture_packs(root: &Path) -> Result<Vec<ArchitecturePack>> {
+    let pack_dir = root.join(".specgraph").join("architecture").join("packs");
+    if !pack_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut packs = Vec::new();
+    for entry in fs::read_dir(&pack_dir).map_err(|source| StoreError::Io {
+        path: pack_dir.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StoreError::Io {
+            path: pack_dir.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        if !path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
+        {
+            continue;
+        }
+        let pack =
+            load_architecture_pack(&path).map_err(|source| StoreError::ArchitecturePack {
+                path: path.clone(),
+                message: source,
+            })?;
+        let report = validate_architecture_pack(&pack);
+        let error_count = report
+            .findings
+            .iter()
+            .filter(|finding| finding.severity == FindingSeverity::Error)
+            .count();
+        if error_count > 0 {
+            return Err(StoreError::ArchitecturePackValidationFailed(error_count));
+        }
+        packs.push(pack);
+    }
+    packs.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then(left.version.cmp(&right.version))
+    });
+    Ok(packs)
+}
+
 pub fn import_spec_file(
     root: &Path,
     path: &Path,
@@ -5195,7 +5253,7 @@ pub fn generate_action_graph(
     let replay = replay_events(root, ReplayOptions::checking())?;
     let spec_node = find_spec_node(&replay.graph, &options.spec)
         .ok_or_else(|| StoreError::SpecNotFound(options.spec.clone()))?;
-    let delta = action_graph_delta(&replay.graph, &options.spec, &spec_node.id);
+    let delta = action_graph_delta(root, &replay.graph, &options.spec, &spec_node.id)?;
 
     append_operation(
         root,
@@ -11194,17 +11252,23 @@ struct ActionGraphCodeScope {
     symbols: Vec<String>,
 }
 
-fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDelta {
+fn action_graph_delta(
+    root: &Path,
+    graph: &Graph,
+    spec: &str,
+    spec_node_id: &str,
+) -> Result<GraphDelta> {
     let action_graph_id = node_id("action_graph", spec);
     let declaration_scopes = action_graph_code_scopes(graph, spec_node_id);
-    let templates = select_action_templates(graph, spec_node_id);
+    let selection = select_action_templates(root, graph, spec_node_id)?;
+    let templates = selection.templates;
     let mut create_nodes = vec![Node {
         id: action_graph_id.clone(),
         stable_key: format!("action-graph:{spec}"),
         node_type: "ActionGraph".to_string(),
         attributes: BTreeMap::from([
             ("spec".to_string(), json!(spec)),
-            ("template".to_string(), json!("built-in/code-object-aware")),
+            ("template".to_string(), json!(selection.name)),
             (
                 "codeObjectDeclarations".to_string(),
                 json!(declaration_scopes
@@ -11217,23 +11281,19 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
     let mut create_edges = vec![edge(spec_node_id, "HAS_ACTION_GRAPH", &action_graph_id)];
 
     let mut action_ids_by_group = BTreeMap::new();
-    for template in templates {
+    for template in &templates {
         let group_id = node_id("action_group", &format!("{spec}/{}", template.name));
         let action_id = node_id("action_node", &format!("{spec}/{}", template.name));
-        action_ids_by_group.insert(template.name, action_id.clone());
+        action_ids_by_group.insert(template.name.clone(), action_id.clone());
         let commit_plan_id = node_id("commit_plan", &format!("{spec}/{}", template.name));
-        let scope = declaration_scopes.get(template.name);
+        let scope = declaration_scopes.get(&template.name);
         let scoped_files = scope.map(|scope| scope.files.clone()).unwrap_or_default();
         let scoped_symbols = scope.map(|scope| scope.symbols.clone()).unwrap_or_default();
         let scoped_declarations = scope
             .map(|scope| scope.declaration_ids.clone())
             .unwrap_or_default();
         let allowed_files = if scoped_files.is_empty() {
-            template
-                .allowed_paths
-                .iter()
-                .map(|path| (*path).to_string())
-                .collect::<Vec<_>>()
+            template.allowed_paths.clone()
         } else {
             scoped_files.clone()
         };
@@ -11243,8 +11303,11 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
             stable_key: format!("action-group:{spec}/{}", template.name),
             node_type: "ActionGroup".to_string(),
             attributes: BTreeMap::from([
-                ("name".to_string(), json!(template.name)),
-                ("description".to_string(), json!(template.description)),
+                ("name".to_string(), json!(template.name.clone())),
+                (
+                    "description".to_string(),
+                    json!(template.description.clone()),
+                ),
                 (
                     "codeObjectDeclarations".to_string(),
                     json!(scoped_declarations.clone()),
@@ -11256,7 +11319,7 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
             stable_key: format!("action-node:{spec}/{}", template.name),
             node_type: "ActionNode".to_string(),
             attributes: BTreeMap::from([
-                ("name".to_string(), json!(template.action)),
+                ("name".to_string(), json!(template.action.clone())),
                 ("allowedPaths".to_string(), json!(allowed_files.clone())),
                 ("allowedSymbols".to_string(), json!(scoped_symbols.clone())),
                 (
@@ -11275,8 +11338,8 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
             stable_key: format!("commit-plan:{spec}/{}", template.name),
             node_type: "CommitPlan".to_string(),
             attributes: BTreeMap::from([
-                ("name".to_string(), json!(template.commit_plan)),
-                ("category".to_string(), json!(template.name)),
+                ("name".to_string(), json!(template.commit_plan.clone())),
+                ("category".to_string(), json!(template.name.clone())),
                 ("state".to_string(), json!("Planned")),
                 ("allowedFiles".to_string(), json!(allowed_files)),
                 ("allowedSymbols".to_string(), json!(scoped_symbols)),
@@ -11290,7 +11353,7 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
                 ),
                 (
                     "requiredValidation".to_string(),
-                    json!(template.required_validation),
+                    json!(template.required_validation.clone()),
                 ),
                 (
                     "expectedGraphDelta".to_string(),
@@ -11298,24 +11361,24 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
                 ),
                 (
                     "expectedNodeTypes".to_string(),
-                    json!(template.expected_node_types),
+                    json!(template.expected_node_types.clone()),
                 ),
                 (
                     "expectedEdgeTypes".to_string(),
-                    json!(template.expected_edge_types),
+                    json!(template.expected_edge_types.clone()),
                 ),
                 (
                     "forbiddenEffects".to_string(),
-                    json!(template.forbidden_effects),
+                    json!(template.forbidden_effects.clone()),
                 ),
             ]),
         });
         append_validation_recipe_nodes(
             spec,
-            template.name,
+            &template.name,
             &action_id,
             &commit_plan_id,
-            template.required_recipes,
+            &template.required_recipes,
             &mut create_nodes,
             &mut create_edges,
         );
@@ -11324,29 +11387,29 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
         create_edges.push(edge(&group_id, "HAS_ACTION", &action_id));
         create_edges.push(edge(&group_id, "HAS_COMMIT_PLAN", &commit_plan_id));
     }
-    for template in templates {
-        let Some(action_id) = action_ids_by_group.get(template.name) else {
+    for template in &templates {
+        let Some(action_id) = action_ids_by_group.get(&template.name) else {
             continue;
         };
-        for dependency in template.dependencies {
+        for dependency in &template.dependencies {
             if let Some(dependency_id) = action_ids_by_group.get(dependency) {
                 create_edges.push(edge(action_id, "DEPENDS_ON", dependency_id));
             }
         }
     }
 
-    GraphDelta {
+    Ok(GraphDelta {
         create_nodes,
         create_edges,
         ..GraphDelta::default()
-    }
+    })
 }
 
 pub fn built_in_action_template_schema() -> ActionGraphTemplateSchema {
     ActionGraphTemplateSchema {
         schema_version: "specgraph.action-template/v1".to_string(),
         name: "built-in/code-object-aware".to_string(),
-        action_groups: ACTION_GROUP_TEMPLATES
+        action_groups: BUILT_IN_ACTION_GROUP_TEMPLATES
             .iter()
             .map(|template| ActionGraphTemplateGroup {
                 name: template.name.to_string(),
@@ -11386,11 +11449,89 @@ pub fn built_in_action_template_schema() -> ActionGraphTemplateSchema {
     }
 }
 
-fn select_action_templates<'a>(
-    _graph: &'a Graph,
-    _spec_node_id: &str,
-) -> &'a [ActionGroupTemplate] {
-    ACTION_GROUP_TEMPLATES
+struct ActionTemplateSelection {
+    name: String,
+    templates: Vec<ActionGroupTemplate>,
+}
+
+fn select_action_templates(
+    root: &Path,
+    graph: &Graph,
+    spec_node_id: &str,
+) -> Result<ActionTemplateSelection> {
+    let selected_pack = selected_architecture_pack_name(graph, spec_node_id);
+    for pack in list_installed_architecture_packs(root)? {
+        if pack.action_templates.is_empty() {
+            continue;
+        }
+        let versioned_name = format!("{}@{}", pack.name, pack.version);
+        let selected = selected_pack
+            .as_deref()
+            .is_none_or(|name| name == pack.name.as_str() || name == versioned_name);
+        if selected {
+            return Ok(ActionTemplateSelection {
+                name: format!("architecture-pack/{}@{}", pack.name, pack.version),
+                templates: pack
+                    .action_templates
+                    .iter()
+                    .map(ActionGroupTemplate::from_architecture_pack)
+                    .collect(),
+            });
+        }
+    }
+
+    Ok(ActionTemplateSelection {
+        name: "built-in/code-object-aware".to_string(),
+        templates: built_in_action_group_templates(),
+    })
+}
+
+fn selected_architecture_pack_name(graph: &Graph, spec_node_id: &str) -> Option<String> {
+    graph
+        .nodes
+        .get(spec_node_id)
+        .and_then(|spec| {
+            node_attr(spec, "actionTemplatePack")
+                .or_else(|| node_attr(spec, "architecturePack"))
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| spec_module_architecture_pack(graph, spec_node_id).map(ToOwned::to_owned))
+        .or_else(|| project_architecture_style(graph).map(ToOwned::to_owned))
+}
+
+fn spec_module_architecture_pack<'a>(graph: &'a Graph, spec_node_id: &str) -> Option<&'a str> {
+    let module_name = graph.nodes.get(spec_node_id).and_then(|spec| {
+        node_attr(spec, "module")
+            .or_else(|| node_attr(spec, "owningModule"))
+            .or_else(|| node_attr(spec, "moduleName"))
+    })?;
+    graph
+        .nodes
+        .values()
+        .find(|node| {
+            node.node_type == "Module"
+                && node_attr(node, "name").is_some_and(|name| name == module_name)
+        })
+        .and_then(|module| {
+            node_attr(module, "actionTemplatePack")
+                .or_else(|| node_attr(module, "architecturePack"))
+                .or_else(|| node_attr(module, "architectureStyle"))
+        })
+}
+
+fn project_architecture_style(graph: &Graph) -> Option<&str> {
+    graph
+        .nodes
+        .values()
+        .find(|node| node.node_type == "Project")
+        .and_then(|project| {
+            graph
+                .edges
+                .values()
+                .find(|edge| edge.from == project.id && edge.edge_type == "HAS_ARCHITECTURE_STYLE")
+                .and_then(|edge| graph.nodes.get(&edge.to))
+        })
+        .and_then(|node| node_attr(node, "architecture"))
 }
 
 fn action_graph_code_scopes(
@@ -11440,7 +11581,7 @@ fn append_validation_recipe_nodes(
     group: &str,
     action_id: &str,
     commit_plan_id: &str,
-    recipe_names: &[&str],
+    recipe_names: &[String],
     create_nodes: &mut Vec<Node>,
     create_edges: &mut Vec<Edge>,
 ) {
@@ -11540,7 +11681,89 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     }
 }
 
+#[derive(Debug, Clone)]
 struct ActionGroupTemplate {
+    name: String,
+    description: String,
+    action: String,
+    commit_plan: String,
+    allowed_paths: Vec<String>,
+    required_validation: Vec<String>,
+    required_recipes: Vec<String>,
+    dependencies: Vec<String>,
+    expected_node_types: Vec<String>,
+    expected_edge_types: Vec<String>,
+    forbidden_effects: Vec<String>,
+}
+
+impl ActionGroupTemplate {
+    fn from_builtin(template: &BuiltinActionGroupTemplate) -> Self {
+        Self {
+            name: template.name.to_string(),
+            description: template.description.to_string(),
+            action: template.action.to_string(),
+            commit_plan: template.commit_plan.to_string(),
+            allowed_paths: template
+                .allowed_paths
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            required_validation: template
+                .required_validation
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            required_recipes: template
+                .required_recipes
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            dependencies: template
+                .dependencies
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            expected_node_types: template
+                .expected_node_types
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            expected_edge_types: template
+                .expected_edge_types
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            forbidden_effects: template
+                .forbidden_effects
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+        }
+    }
+
+    fn from_architecture_pack(template: &ArchitectureActionTemplate) -> Self {
+        Self {
+            name: template.name.clone(),
+            description: template.description.clone(),
+            action: template.action.clone(),
+            commit_plan: template.commit_plan.clone(),
+            allowed_paths: template.allowed_paths.clone(),
+            required_validation: template.required_validation.clone(),
+            required_recipes: if template.required_recipes.is_empty() {
+                template.required_validation.clone()
+            } else {
+                template.required_recipes.clone()
+            },
+            dependencies: template.dependencies.clone(),
+            expected_node_types: template.expected_node_types.clone(),
+            expected_edge_types: template.expected_edge_types.clone(),
+            forbidden_effects: template.forbidden_effects.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BuiltinActionGroupTemplate {
     name: &'static str,
     description: &'static str,
     action: &'static str,
@@ -11554,8 +11777,15 @@ struct ActionGroupTemplate {
     forbidden_effects: &'static [&'static str],
 }
 
-const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
-    ActionGroupTemplate {
+fn built_in_action_group_templates() -> Vec<ActionGroupTemplate> {
+    BUILT_IN_ACTION_GROUP_TEMPLATES
+        .iter()
+        .map(ActionGroupTemplate::from_builtin)
+        .collect()
+}
+
+const BUILT_IN_ACTION_GROUP_TEMPLATES: &[BuiltinActionGroupTemplate] = &[
+    BuiltinActionGroupTemplate {
         name: "graph",
         description: "Update SpecGraph metadata and projections.",
         action: "Update graph facts and spec projections",
@@ -11585,7 +11815,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         ],
         forbidden_effects: &["deleteNodes"],
     },
-    ActionGroupTemplate {
+    BuiltinActionGroupTemplate {
         name: "tests",
         description: "Add or update tests linked to acceptance criteria.",
         action: "Add acceptance-criterion tests",
@@ -11603,7 +11833,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         ],
         forbidden_effects: &["deleteNodes"],
     },
-    ActionGroupTemplate {
+    BuiltinActionGroupTemplate {
         name: "implementation",
         description: "Implement runtime or application code for the spec.",
         action: "Implement required behavior",
@@ -11616,7 +11846,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         expected_edge_types: &["DEFINES_SYMBOL", "DECLARES_ROUTE", "HANDLED_BY_SYMBOL"],
         forbidden_effects: &["deleteNodes"],
     },
-    ActionGroupTemplate {
+    BuiltinActionGroupTemplate {
         name: "interface",
         description: "Update public interfaces, CLI commands, or API surfaces.",
         action: "Update interfaces",
@@ -11635,7 +11865,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         expected_edge_types: &["DECLARES_ROUTE", "HANDLED_BY_SYMBOL"],
         forbidden_effects: &["deleteNodes"],
     },
-    ActionGroupTemplate {
+    BuiltinActionGroupTemplate {
         name: "validation",
         description: "Run and record validation evidence.",
         action: "Run validation commands",
@@ -13303,7 +13533,8 @@ acceptanceCriteria:
                 graph_branch: "main".to_string(),
                 input: json!({"spec": "AUTH-001"}),
                 dry_run: false,
-                delta: action_graph_delta(&replay.graph, "AUTH-001", &spec_node.id),
+                delta: action_graph_delta(tmp.path(), &replay.graph, "AUTH-001", &spec_node.id)
+                    .unwrap(),
             },
         )
         .unwrap_err();
@@ -14538,6 +14769,41 @@ acceptanceCriteria:
         )
         .unwrap_err();
         assert!(matches!(blocked, StoreError::OperationValidationFailed(_)));
+    }
+
+    #[test]
+    fn architecture_pack_action_template_selection_changes_generated_graph() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_modular_workspace_action_template_pack(tmp.path());
+        add_action_graph_for_valid_spec(tmp.path());
+
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        let action_graph = replay
+            .graph
+            .nodes
+            .get(&node_id("action_graph", "AUTH-001"))
+            .unwrap();
+        assert_eq!(
+            node_attr(action_graph, "template"),
+            Some("architecture-pack/modular-workspace@1.0.0")
+        );
+        assert!(replay
+            .graph
+            .nodes
+            .contains_key(&node_id("action_node", "AUTH-001/adapter")));
+        assert!(!replay
+            .graph
+            .nodes
+            .contains_key(&node_id("action_node", "AUTH-001/tests")));
+
+        let adapter_action_id = node_id("action_node", "AUTH-001/adapter");
+        let graph_action_id = node_id("action_node", "AUTH-001/graph");
+        assert!(replay.graph.edges.values().any(|edge| {
+            edge.from == adapter_action_id
+                && edge.to == graph_action_id
+                && edge.edge_type == "DEPENDS_ON"
+        }));
     }
 
     #[test]
@@ -20112,6 +20378,70 @@ acceptanceCriteria:
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
+        )
+        .unwrap();
+    }
+
+    fn add_modular_workspace_action_template_pack(root: &Path) {
+        let pack_dir = root.join(".specgraph/architecture/packs");
+        fs::create_dir_all(&pack_dir).unwrap();
+        fs::write(
+            pack_dir.join("modular-workspace.yaml"),
+            r#"
+name: modular-workspace
+version: 1.0.0
+actionTemplates:
+  - name: graph
+    description: Update graph facts from a modular workspace pack.
+    action: Update modular graph facts
+    commitPlan: Commit modular graph facts
+    allowedPaths:
+      - .specgraph/**
+      - specs/**
+    requiredValidation:
+      - replay
+    requiredRecipes:
+      - replay
+    expectedNodeTypes:
+      - Spec
+      - ActionGraph
+      - ActionGroup
+      - ActionNode
+      - CommitPlan
+      - ValidationRecipe
+      - ValidationCommand
+    expectedEdgeTypes:
+      - HAS_ACTION_GRAPH
+      - HAS_ACTION_GROUP
+      - HAS_ACTION
+      - HAS_COMMIT_PLAN
+      - ACTION_REQUIRES_VALIDATION_RECIPE
+      - COMMIT_PLAN_REQUIRES_VALIDATION_RECIPE
+      - VALIDATION_RECIPE_HAS_COMMAND
+      - DEPENDS_ON
+    forbiddenEffects:
+      - deleteNodes
+  - name: adapter
+    description: Implement adapter boundary code selected by the architecture pack.
+    action: Implement adapter boundary
+    commitPlan: Commit adapter boundary
+    allowedPaths:
+      - crates/sg-adapter-*/**
+    requiredValidation:
+      - trace
+    requiredRecipes:
+      - build
+      - trace
+    dependencies:
+      - graph
+    expectedNodeTypes:
+      - CodeFile
+      - CodeSymbol
+    expectedEdgeTypes:
+      - DEFINES_SYMBOL
+    forbiddenEffects:
+      - deleteNodes
+"#,
         )
         .unwrap();
     }

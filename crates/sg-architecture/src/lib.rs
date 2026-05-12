@@ -9,6 +9,7 @@ pub use architecture_graph::{
     PortDirection,
 };
 pub use architecture_pack::{
-    validate_architecture_graph_with_pack, validate_architecture_pack, ArchitecturePack,
-    ArchitecturePackValidationReport, ForbiddenDependencyRule,
+    load_architecture_pack, validate_architecture_graph_with_pack, validate_architecture_pack,
+    ArchitectureActionTemplate, ArchitecturePack, ArchitecturePackValidationReport,
+    ForbiddenDependencyRule,
 };

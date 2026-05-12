@@ -626,6 +626,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "serde_yaml",
  "sg-model",
  "sg-module-graph",
  "sg-ontology",
@@ -650,6 +651,7 @@ dependencies = [
  "anyhow",
  "clap",
  "hex",
+ "serde",
  "serde_json",
  "serde_yaml",
  "sg-adapter-api",
@@ -885,6 +887,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sg-architecture",
  "sg-canonical",
  "sg-codegraph",
  "sg-gitgraph",
