@@ -38,8 +38,8 @@ use sg_proposal::{
 };
 use sg_query::{GraphQuery, QueryContext, QueryLimits, QueryTarget};
 use sg_server::{
-    ApiGraphTarget, ApiOperationRequest, ApiQueryLimits, ApiQueryRequest, ApiQuerySelector,
-    SpecGraphApi,
+    serve_http, ApiGraphTarget, ApiOperationRequest, ApiQueryLimits, ApiQueryRequest,
+    ApiQuerySelector, HttpServerConfig, SpecGraphApi,
 };
 use sg_spec::{ModuleChange, ModuleChangeAction, PlannedObject, SpecProjection, TextItem};
 use sg_store::{
@@ -69,6 +69,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -767,6 +768,8 @@ struct ApiArgs {
 
 #[derive(Debug, Subcommand)]
 enum ApiCommand {
+    /// Start the local HTTP API server.
+    Serve(ApiServeArgs),
     /// List stable server API routes and whether they can mutate the graph.
     Routes,
     /// Check whether the local .specgraph store exists.
@@ -779,6 +782,14 @@ enum ApiCommand {
     Findings,
     /// Submit a mutating or dry-run operation through the Operation Runtime.
     Mutate(ApiMutateArgs),
+}
+
+#[derive(Debug, Args)]
+struct ApiServeArgs {
+    #[arg(long, default_value = "127.0.0.1:3737")]
+    bind: SocketAddr,
+    #[arg(long = "require-read-auth")]
+    require_read_auth: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2507,6 +2518,14 @@ fn handle_adapter(args: AdapterArgs) -> anyhow::Result<()> {
 fn handle_api(store: &SpecGraphStore, root: &Path, args: ApiArgs) -> anyhow::Result<()> {
     let api = SpecGraphApi::with_store(store.clone());
     match args.command {
+        ApiCommand::Serve(args) => {
+            println!("serving: http://{}", args.bind);
+            serve_http(
+                HttpServerConfig::new(root.to_path_buf(), args.bind)
+                    .with_require_read_auth(args.require_read_auth),
+            )
+            .context("failed to run SpecGraph HTTP API server")?;
+        }
         ApiCommand::Routes => {
             for route in SpecGraphApi::routes() {
                 println!(

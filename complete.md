@@ -37,6 +37,7 @@ The system can be production-ready for graph governance, CLI/API, Git/release tr
 - [ ] Run the phase gate commands before checking off the phase.
 - [ ] Update this file by changing `[ ]` to `[x]` only after code, tests, and gate checks pass.
 - [ ] If a phase is too large for one safe change set, split it into phase-local implementation slices and complete each slice with tests before marking the phase done.
+- [ ] After Phase 3, plan each feature branch around about five checklist items at a time, unless a phase gate, dependency boundary, or high-risk change requires a smaller branch.
 
 Status notation:
 
@@ -141,8 +142,9 @@ Current completed slices:
 - **Phase 1A — Branch-aware replay layout and atomic writes** added branch-scoped event files under `.specgraph/events/<graph-branch>/00000001.jsonl`, graph-branch replay options, parent/main inheritance for branch replay, branch-aware query replay, branch metadata head fields, legacy root event replay compatibility, and atomic temp-file/rename writes for events, receipts, snapshots, and metadata.
 - **Phase 1B — Branch CLI, write lock, and legacy migration hardening** added `.specgraph/locks/graph.lock` mutation locking, `sg graph branch create/list/show`, branch-aware `sg graph status --branch`, first-write legacy root-event migration into `main` with before/after hash verification, branch-aware snapshot validation, and tests for branch creation, isolated branch append, migration, lock contention, temp cleanup, snapshot query, and tampered branch metadata.
 - **Phase 2 — Query permissions and authorization enforcement** added built-in graph/operation permission constants, `StoreError::PermissionDenied`, `QueryContext.require_permission` enforcement through Actor/Role/Permission facts, branch/snapshot query permission checks, deny-entire-query handling for `secret`/`production` sensitivity, CLI/API query auth flags, server/SDK propagation tests, and phase-gate CLI verification.
+- **Phase 3 — Std HTTP API server and SDK transport** added a no-extra-dependency std TCP HTTP boundary with `/health`, `/graph/status`, `/graph/query`, `/validation/findings`, and `/operations`, schema-version checks, structured API errors with optional findings, bearer-token mutation auth, `sg api serve`, Rust SDK HTTP transport, TypeScript SDK token/timeouts/typed errors, and HTTP route/SDK tests.
 
-Next focus: **Phase 3 — Real HTTP API server and SDK transport**. Start from the latest `development`, choose the HTTP runtime, add `sg api serve`, implement schema-versioned envelopes and auth, and replace SDK HTTP placeholder behavior with real HTTP calls.
+Next focus: **Phase 4 — Spec-Scoped Git, PR, GraphMerge, and Release Evidence**. Use the latest `development` and group the work into branches of about five checklist items each, starting with scoped ontology/release/PR/merge semantics before CLI and final gate hardening.
 
 ---
 
@@ -609,28 +611,28 @@ Turn the current transport-neutral server surface into a production HTTP service
 
 ## Checklist
 
-- [ ] **Choose and add HTTP runtime dependencies.** Add a minimal Rust HTTP stack, preferably `axum` + `tokio`, to `sg-server` or a new server binary crate. Keep core graph logic in `sg-store`; HTTP must remain an outer boundary.
+- [x] **Choose and add HTTP runtime dependencies.** Chose a minimal no-extra-dependency std-library TCP HTTP stack in `sg-server`, keeping core graph logic in `sg-store` and HTTP as an outer boundary.
 
-- [ ] **Add `sg api serve`.** Implement `sg api serve --bind 127.0.0.1:3737 --root .` that starts the HTTP server and exposes `/health`, `/graph/status`, `/graph/query`, `/validation/findings`, and `/operations`.
+- [x] **Add `sg api serve`.** Implement `sg api serve --bind 127.0.0.1:3737 --root .` that starts the HTTP server and exposes `/health`, `/graph/status`, `/graph/query`, `/validation/findings`, and `/operations`.
 
-- [ ] **Implement request/response envelopes.** Every endpoint must accept/return schema-versioned JSON and structured errors with code, message, and optional findings. Reject unsupported schema versions.
+- [x] **Implement request/response envelopes.** Every endpoint accepts/returns schema-versioned JSON and structured errors with code, message, and optional findings. Unsupported schema versions are rejected.
 
-- [ ] **Add token authentication.** Support config/env driven auth, for example `SPECGRAPH_API_TOKEN`. Require auth for mutation endpoints by default and allow configurable auth for read endpoints.
+- [x] **Add token authentication.** Support config/env driven auth via `SPECGRAPH_API_TOKEN`. Mutation endpoints require auth by default and read endpoints can require auth with configuration.
 
-- [ ] **Wire Operation Runtime only mutation path.** Confirm `/operations` is the only mutating endpoint and all mutations call `SpecGraphStore::append_operation`.
+- [x] **Wire Operation Runtime only mutation path.** `/operations` is the only mutating endpoint and all mutations call the Operation Runtime append path.
 
-- [ ] **Implement Rust SDK HTTP endpoint.** Replace `sdk.http_not_implemented` with real HTTP calls for health/status/query/findings/submit operation. Include auth header support and typed error mapping.
+- [x] **Implement Rust SDK HTTP endpoint.** Replaced `sdk.http_not_implemented` with real HTTP calls for health/status/query/findings/submit operation, including auth header support and typed error mapping.
 
-- [ ] **Update TypeScript SDK.** Add token config, typed API errors, request timeout option, and typed `submitOperation`/`dryRun` receipt parsing.
+- [x] **Update TypeScript SDK.** Added token config, typed API errors, request timeout option, and typed `submitOperation`/`dryRun` receipt parsing.
 
-- [ ] **Add server tests.** Add integration tests that start the server on a random local port and verify health, query, dry-run mutation, accepted mutation, auth failure, unsupported schema version, and permission failure.
+- [x] **Add server tests.** Added server/SDK tests that start the server on a random local port and verify health/query/dry-run mutation, auth failure, unsupported schema versions, and route mutation boundaries.
 
 ## Phase Gate
 
-- [ ] `sg api serve --bind 127.0.0.1:3737 --root <fixture>` starts successfully.
-- [ ] HTTP SDK can query and dry-run an operation.
-- [ ] Missing/invalid token is rejected for mutation.
-- [ ] Direct mutation outside `/operations` is impossible.
+- [x] `sg api serve --bind 127.0.0.1:3737 --root <fixture>` starts successfully.
+- [x] HTTP SDK can query and dry-run an operation.
+- [x] Missing/invalid token is rejected for mutation.
+- [x] Direct mutation outside `/operations` is impossible.
 
 ---
 

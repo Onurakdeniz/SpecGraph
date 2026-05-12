@@ -74,6 +74,24 @@ export interface ApiQueryResponse {
   };
 }
 
+export interface ApiHealthResponse {
+  schemaVersion: typeof SERVER_API_SCHEMA_VERSION;
+  ready: boolean;
+  specgraphDir: string;
+  message: string;
+}
+
+export interface ApiGraphStatusResponse {
+  schemaVersion: typeof SERVER_API_SCHEMA_VERSION;
+  stateHash: string;
+  eventsReplayed: number;
+  lastSequence: number;
+  lastEventId?: string | null;
+  nodeCount: number;
+  edgeCount: number;
+  nodeTypes: Record<string, number>;
+}
+
 export interface SpecView {
   id: string;
   stableKey: string;
@@ -147,11 +165,34 @@ export interface ApiOperationResponse {
   receipt: OperationReceipt;
 }
 
+export interface ApiErrorBody {
+  schemaVersion: typeof SERVER_API_SCHEMA_VERSION;
+  code: string;
+  message: string;
+  findings?: Finding[];
+}
+
 export interface SpecGraphClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
   defaultActor?: string;
   defaultGraphBranch?: string;
+  apiToken?: string;
+  timeoutMs?: number;
+}
+
+export class SpecGraphApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly findings: Finding[];
+
+  constructor(status: number, body: ApiErrorBody) {
+    super(body.message);
+    this.name = 'SpecGraphApiError';
+    this.code = body.code;
+    this.status = status;
+    this.findings = body.findings ?? [];
+  }
 }
 
 export class SpecGraphClient {
@@ -159,12 +200,24 @@ export class SpecGraphClient {
   private readonly fetchImpl: typeof fetch;
   private readonly defaultActor: string;
   private readonly defaultGraphBranch: string;
+  private readonly apiToken?: string;
+  private readonly timeoutMs?: number;
 
   constructor(options: SpecGraphClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.defaultActor = options.defaultActor ?? 'local:sdk';
     this.defaultGraphBranch = options.defaultGraphBranch ?? 'main';
+    this.apiToken = options.apiToken;
+    this.timeoutMs = options.timeoutMs;
+  }
+
+  async health(): Promise<ApiHealthResponse> {
+    return this.get('/health');
+  }
+
+  async status(): Promise<ApiGraphStatusResponse> {
+    return this.get('/graph/status');
   }
 
   async query(request: Partial<ApiQueryRequest> = {}): Promise<ApiQueryResponse> {
@@ -192,14 +245,48 @@ export class SpecGraphClient {
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>('POST', path, body);
+  }
+
+  private async get<T>(path: string): Promise<T> {
+    return this.request<T>('GET', path);
+  }
+
+  private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+    const controller = this.timeoutMs === undefined ? undefined : new AbortController();
+    const timeout = controller
+      ? setTimeout(() => controller.abort(), this.timeoutMs)
+      : undefined;
+    const headers: Record<string, string> = {};
+    if (body !== undefined) {
+      headers['content-type'] = 'application/json';
+    }
+    if (this.apiToken) {
+      headers.authorization = `Bearer ${this.apiToken}`;
+    }
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller?.signal,
+    }).finally(() => {
+      if (timeout !== undefined) {
+        clearTimeout(timeout);
+      }
     });
 
     if (!response.ok) {
-      throw new Error(`SpecGraph API ${path} failed with HTTP ${response.status}`);
+      let errorBody: ApiErrorBody;
+      try {
+        errorBody = (await response.json()) as ApiErrorBody;
+      } catch {
+        errorBody = {
+          schemaVersion: SERVER_API_SCHEMA_VERSION,
+          code: 'api.http_error',
+          message: `SpecGraph API ${path} failed with HTTP ${response.status}`,
+        };
+      }
+      throw new SpecGraphApiError(response.status, errorBody);
     }
 
     return response.json() as Promise<T>;

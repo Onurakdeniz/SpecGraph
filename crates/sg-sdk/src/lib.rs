@@ -7,9 +7,11 @@
 use serde::{Deserialize, Serialize};
 use sg_model::{GraphDelta, OperationReceipt, OperationRequest};
 use sg_server::{
-    ApiError, ApiGraphStatusResponse, ApiOperationRequest, ApiQueryRequest, ApiQueryResponse,
-    ApiValidationFindingsResponse, SpecGraphApi, SERVER_API_SCHEMA_VERSION,
+    ApiError, ApiGraphStatusResponse, ApiOperationRequest, ApiOperationResponse, ApiQueryRequest,
+    ApiQueryResponse, ApiValidationFindingsResponse, SpecGraphApi, SERVER_API_SCHEMA_VERSION,
 };
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::PathBuf;
 
 pub use sg_model::{Finding, Node, NodeId};
@@ -34,6 +36,8 @@ pub struct ClientConfig {
     pub default_actor: Option<String>,
     #[serde(default = "default_graph_branch")]
     pub default_graph_branch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_token: Option<String>,
 }
 
 impl ClientConfig {
@@ -43,6 +47,7 @@ impl ClientConfig {
             endpoint: ClientEndpoint::Local { root: root.into() },
             default_actor: None,
             default_graph_branch: default_graph_branch(),
+            api_token: None,
         }
     }
 
@@ -53,6 +58,11 @@ impl ClientConfig {
 
     pub fn with_default_graph_branch(mut self, graph_branch: impl Into<String>) -> Self {
         self.default_graph_branch = graph_branch.into();
+        self
+    }
+
+    pub fn with_api_token(mut self, token: impl Into<String>) -> Self {
+        self.api_token = Some(token.into());
         self
     }
 }
@@ -93,19 +103,33 @@ impl SpecGraphClient {
     }
 
     pub fn health(&self) -> SdkResult<ApiHealthResponse> {
-        Ok(self.local_api()?.health())
+        match &self.config.endpoint {
+            ClientEndpoint::Local { .. } => Ok(self.local_api()?.health()),
+            ClientEndpoint::Http { .. } => self.http_get("/health"),
+        }
     }
 
     pub fn status(&self) -> SdkResult<ApiGraphStatusResponse> {
-        self.local_api()?.status().map_err(SdkError::from)
+        match &self.config.endpoint {
+            ClientEndpoint::Local { .. } => self.local_api()?.status().map_err(SdkError::from),
+            ClientEndpoint::Http { .. } => self.http_get("/graph/status"),
+        }
     }
 
     pub fn query(&self, request: ApiQueryRequest) -> SdkResult<ApiQueryResponse> {
-        self.local_api()?.query(request).map_err(SdkError::from)
+        match &self.config.endpoint {
+            ClientEndpoint::Local { .. } => {
+                self.local_api()?.query(request).map_err(SdkError::from)
+            }
+            ClientEndpoint::Http { .. } => self.http_post("/graph/query", &request),
+        }
     }
 
     pub fn findings(&self) -> SdkResult<ApiValidationFindingsResponse> {
-        self.local_api()?.findings().map_err(SdkError::from)
+        match &self.config.endpoint {
+            ClientEndpoint::Local { .. } => self.local_api()?.findings().map_err(SdkError::from),
+            ClientEndpoint::Http { .. } => self.http_get("/validation/findings"),
+        }
     }
 
     pub fn submit_operation(&self, request: SdkOperationRequest) -> SdkResult<OperationReceipt> {
@@ -116,18 +140,24 @@ impl SpecGraphClient {
         let graph_branch = request
             .graph_branch
             .unwrap_or_else(|| self.config.default_graph_branch.clone());
-        let response = self
-            .local_api()?
-            .submit_operation(ApiOperationRequest {
-                schema_version: SERVER_API_SCHEMA_VERSION.to_string(),
-                operation: request.operation,
-                actor,
-                graph_branch,
-                dry_run: request.dry_run,
-                input: request.input,
-                delta: request.delta,
-            })
-            .map_err(SdkError::from)?;
+        let api_request = ApiOperationRequest {
+            schema_version: SERVER_API_SCHEMA_VERSION.to_string(),
+            operation: request.operation,
+            actor,
+            graph_branch,
+            dry_run: request.dry_run,
+            input: request.input,
+            delta: request.delta,
+        };
+        let response = match &self.config.endpoint {
+            ClientEndpoint::Local { .. } => self
+                .local_api()?
+                .submit_operation(api_request)
+                .map_err(SdkError::from)?,
+            ClientEndpoint::Http { .. } => {
+                self.http_post::<_, ApiOperationResponse>("/operations", &api_request)?
+            }
+        };
         Ok(response.receipt)
     }
 
@@ -162,6 +192,124 @@ impl SpecGraphClient {
                 "HTTP transport is reserved for the Phase 7 server runtime; use ClientEndpoint::Local in this build.",
             )
         })
+    }
+
+    fn http_get<T: for<'de> Deserialize<'de>>(&self, path: &str) -> SdkResult<T> {
+        self.http_request("GET", path, None)
+    }
+
+    fn http_post<B: Serialize, T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> SdkResult<T> {
+        let body = serde_json::to_vec(body)
+            .map_err(|error| SdkError::new("sdk.serialize_error", error.to_string()))?;
+        self.http_request("POST", path, Some(body))
+    }
+
+    fn http_request<T: for<'de> Deserialize<'de>>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Vec<u8>>,
+    ) -> SdkResult<T> {
+        let ClientEndpoint::Http { base_url } = &self.config.endpoint else {
+            return Err(SdkError::new(
+                "sdk.invalid_endpoint",
+                "HTTP request attempted against a local endpoint",
+            ));
+        };
+        let endpoint = ParsedHttpEndpoint::parse(base_url)?;
+        let mut stream = TcpStream::connect((&*endpoint.host, endpoint.port)).map_err(|error| {
+            SdkError::new(
+                "sdk.http_connect_error",
+                format!("failed to connect to {base_url}: {error}"),
+            )
+        })?;
+        let body = body.unwrap_or_default();
+        let mut request = format!(
+            "{method} {path} HTTP/1.1\r\nhost: {}\r\naccept: application/json\r\nconnection: close\r\ncontent-length: {}\r\n",
+            endpoint.host,
+            body.len()
+        );
+        if !body.is_empty() {
+            request.push_str("content-type: application/json\r\n");
+        }
+        if let Some(token) = &self.config.api_token {
+            request.push_str(&format!("authorization: Bearer {token}\r\n"));
+        }
+        request.push_str("\r\n");
+        stream
+            .write_all(request.as_bytes())
+            .and_then(|_| stream.write_all(&body))
+            .map_err(|error| SdkError::new("sdk.http_write_error", error.to_string()))?;
+        let mut response = Vec::new();
+        stream
+            .read_to_end(&mut response)
+            .map_err(|error| SdkError::new("sdk.http_read_error", error.to_string()))?;
+        parse_http_response(&response)
+    }
+}
+
+struct ParsedHttpEndpoint {
+    host: String,
+    port: u16,
+}
+
+impl ParsedHttpEndpoint {
+    fn parse(base_url: &str) -> SdkResult<Self> {
+        let value = base_url.trim_end_matches('/');
+        let Some(authority) = value.strip_prefix("http://") else {
+            return Err(SdkError::new(
+                "sdk.unsupported_endpoint",
+                "only http:// endpoints are supported by this SDK transport",
+            ));
+        };
+        if authority.contains('/') {
+            return Err(SdkError::new(
+                "sdk.unsupported_endpoint",
+                "HTTP endpoint must be a base URL without a path",
+            ));
+        }
+        let (host, port) = authority.rsplit_once(':').ok_or_else(|| {
+            SdkError::new(
+                "sdk.unsupported_endpoint",
+                "HTTP endpoint must include an explicit port",
+            )
+        })?;
+        let port = port
+            .parse::<u16>()
+            .map_err(|error| SdkError::new("sdk.unsupported_endpoint", error.to_string()))?;
+        Ok(Self {
+            host: host.to_string(),
+            port,
+        })
+    }
+}
+
+fn parse_http_response<T: for<'de> Deserialize<'de>>(response: &[u8]) -> SdkResult<T> {
+    let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return Err(SdkError::new(
+            "sdk.invalid_http_response",
+            "missing HTTP response header terminator",
+        ));
+    };
+    let headers = String::from_utf8_lossy(&response[..header_end]);
+    let status_line = headers.lines().next().unwrap_or_default();
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| SdkError::new("sdk.invalid_http_response", "missing HTTP status code"))?;
+    let body = &response[header_end + 4..];
+    if (200..300).contains(&status) {
+        serde_json::from_slice(body)
+            .map_err(|error| SdkError::new("sdk.deserialize_error", error.to_string()))
+    } else {
+        let api_error = serde_json::from_slice::<ApiError>(body)
+            .unwrap_or_else(|_| ApiError::new("api.error", String::from_utf8_lossy(body)));
+        Err(SdkError::from(api_error))
     }
 }
 
@@ -274,13 +422,19 @@ fn operation_request_defaults() -> OperationRequest {
 mod tests {
     use super::*;
     use serde_json::json;
-    use sg_server::{ApiQueryRequest, ApiQuerySelector};
+    use sg_server::{serve_http_listener, ApiQueryRequest, ApiQuerySelector, HttpServerConfig};
     use sg_spec::SpecProjection;
     use sg_store::{
         GrantRoleOptions, InitOptions, ModuleDefinition, ProjectProfileInput, SpecGraphStore,
         UpsertActorOptions, UpsertModuleGraphOptions, UpsertProjectProfileOptions,
         PERMISSION_GRAPH_READ,
     };
+    use std::net::TcpListener;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -402,18 +556,84 @@ mod tests {
     }
 
     #[test]
-    fn sdk_http_endpoint_is_schema_only_until_server_runtime() {
+    fn sdk_http_endpoint_rejects_unsupported_urls() {
         let client = SpecGraphClient::from_config(ClientConfig {
             schema_version: SDK_SCHEMA_VERSION.to_string(),
             endpoint: ClientEndpoint::Http {
-                base_url: "http://127.0.0.1:3737".to_string(),
+                base_url: "https://127.0.0.1:3737".to_string(),
             },
             default_actor: None,
             default_graph_branch: "main".to_string(),
+            api_token: None,
         });
 
         let error = client.status().unwrap_err();
-        assert_eq!(error.code, "sdk.http_not_implemented");
+        assert_eq!(error.code, "sdk.unsupported_endpoint");
+    }
+
+    #[test]
+    fn sdk_http_endpoint_queries_and_dry_runs_with_token() {
+        let root = initialized_root("sdk-http");
+        let listener = match TcpListener::bind("127.0.0.1:0") {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("skipping SDK HTTP test because localhost bind is unavailable");
+                return;
+            }
+            Err(error) => panic!("failed to bind SDK HTTP test listener: {error}"),
+        };
+        let addr = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_shutdown = shutdown.clone();
+        let handle = thread::spawn(move || {
+            serve_http_listener(
+                listener,
+                HttpServerConfig::new(root, addr).with_api_token("secret-token"),
+                thread_shutdown,
+            )
+        });
+
+        let client = SpecGraphClient::from_config(ClientConfig {
+            schema_version: SDK_SCHEMA_VERSION.to_string(),
+            endpoint: ClientEndpoint::Http {
+                base_url: format!("http://{addr}"),
+            },
+            default_actor: Some("local:sdk-http".to_string()),
+            default_graph_branch: "main".to_string(),
+            api_token: Some("secret-token".to_string()),
+        });
+        assert!(client.health().unwrap().ready);
+        let query = client.query(ApiQueryRequest::default()).unwrap();
+        assert!(!query.nodes.is_empty());
+
+        let receipt = client
+            .submit_operation(
+                SdkOperationRequest::new(
+                    "Identity.UpsertActor",
+                    GraphDelta {
+                        create_nodes: vec![sg_model::Node {
+                            id: "node_actor_local_sdk_http".to_string(),
+                            stable_key: "actor:local:sdk-http".to_string(),
+                            node_type: "Actor".to_string(),
+                            attributes: std::collections::BTreeMap::from([
+                                ("actorId".to_string(), json!("local:sdk-http")),
+                                ("displayName".to_string(), json!("SDK HTTP")),
+                                ("provider".to_string(), json!("local")),
+                                ("subject".to_string(), json!("local:sdk-http")),
+                                ("kind".to_string(), json!("Human")),
+                            ]),
+                        }],
+                        ..GraphDelta::default()
+                    },
+                )
+                .input(json!({"actorId": "local:sdk-http"}))
+                .dry_run(),
+            )
+            .unwrap();
+        assert!(receipt.dry_run);
+
+        shutdown.store(true, Ordering::SeqCst);
+        handle.join().unwrap().unwrap();
     }
 
     fn initialized_root(prefix: &str) -> PathBuf {
