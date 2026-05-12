@@ -278,6 +278,8 @@ pub struct WorkflowCodePlanOptions {
     pub file: Option<String>,
     pub expected_state_hash: Option<String>,
     pub expected_file_hashes: Vec<WorkflowExpectedFileHash>,
+    pub require_reservation: bool,
+    pub reservation_id: Option<String>,
     pub actor: String,
     pub graph_branch: String,
 }
@@ -334,6 +336,56 @@ pub struct WorkflowFileHash {
     pub file: String,
     pub sha256: Option<String>,
     pub missing: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkReservationStatus {
+    pub reservation_id: String,
+    pub actor: String,
+    pub spec: String,
+    pub action: Option<String>,
+    pub commit_plan: Option<String>,
+    pub graph_branch: String,
+    pub files: Vec<String>,
+    pub symbols: Vec<String>,
+    pub modules: Vec<String>,
+    pub expires_at: Option<String>,
+    pub state: String,
+    pub expired: bool,
+    pub stale: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReleaseWorkReservationOptions {
+    pub reservation_id: String,
+    pub reason: String,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone)]
+struct WorkReservationRequestScope {
+    spec: String,
+    action: String,
+    graph_branch: String,
+    actor: String,
+    file: Option<String>,
+    symbol: Option<String>,
+    module: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WorkReservationPolicyOutcome {
+    Satisfied,
+    Missing {
+        stale: Vec<String>,
+    },
+    Conflict {
+        conflicts: Vec<String>,
+        stale: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -785,6 +837,27 @@ impl SpecGraphStore {
 
     pub fn plan_code_workflow(&self, options: WorkflowCodePlanOptions) -> Result<WorkflowCodePlan> {
         plan_code_workflow(self.root(), options)
+    }
+
+    pub fn list_work_reservations(
+        &self,
+        include_released: bool,
+    ) -> Result<Vec<WorkReservationStatus>> {
+        list_work_reservations(self.root(), include_released)
+    }
+
+    pub fn show_work_reservation(
+        &self,
+        reservation_id: &str,
+    ) -> Result<Option<WorkReservationStatus>> {
+        show_work_reservation(self.root(), reservation_id)
+    }
+
+    pub fn release_work_reservation(
+        &self,
+        options: ReleaseWorkReservationOptions,
+    ) -> Result<OperationReceipt> {
+        release_work_reservation(self.root(), options)
     }
 
     pub fn upsert_actor(&self, options: UpsertActorOptions) -> Result<OperationReceipt> {
@@ -1734,6 +1807,75 @@ pub fn plan_code_workflow(
         .file
         .clone()
         .or_else(|| node_attr(declaration_node, "expectedFile").map(ToString::to_string));
+    let requested_scope = WorkReservationRequestScope {
+        spec: options.spec.clone(),
+        action: options.action.clone(),
+        graph_branch: options.graph_branch.clone(),
+        actor: options.actor.clone(),
+        file: allowed_file.clone(),
+        symbol: Some(name.clone()),
+        module: node_attr(declaration_node, "module")
+            .map(ToString::to_string)
+            .or(module),
+    };
+    match evaluate_work_reservation_policy(
+        &replay.graph,
+        &requested_scope,
+        options.require_reservation,
+        options.reservation_id.as_deref(),
+    ) {
+        WorkReservationPolicyOutcome::Satisfied => {}
+        WorkReservationPolicyOutcome::Missing { stale } => {
+            let mut missing = vec![format!(
+                "work-reservation:{}:{}",
+                options.spec, options.action
+            )];
+            missing.extend(
+                stale
+                    .iter()
+                    .map(|id| format!("stale-work-reservation:{id}")),
+            );
+            return Ok(blocked_code_plan(BlockedCodePlan {
+                state_hash: replay.state_hash,
+                decision: "reservation-required".to_string(),
+                change_type,
+                graph_branch: options.graph_branch,
+                action_id: action_binding.0,
+                commit_plan_id: action_binding.1,
+                file_hashes,
+                required_operations: vec!["WorkReservation.Create".to_string()],
+                missing_graph_facts: missing,
+                human_message: "Strict/team edit permits require an active non-expired WorkReservation for the intended file, symbol, or module.".to_string(),
+            }));
+        }
+        WorkReservationPolicyOutcome::Conflict { conflicts, stale } => {
+            let mut missing = conflicts
+                .iter()
+                .map(|id| format!("conflicting-work-reservation:{id}"))
+                .collect::<Vec<_>>();
+            missing.extend(
+                stale
+                    .iter()
+                    .map(|id| format!("stale-work-reservation:{id}")),
+            );
+            return Ok(blocked_code_plan(BlockedCodePlan {
+                state_hash: replay.state_hash,
+                decision: "reservation-conflict".to_string(),
+                change_type,
+                graph_branch: options.graph_branch,
+                action_id: action_binding.0,
+                commit_plan_id: action_binding.1,
+                file_hashes,
+                required_operations: vec![
+                    "WorkReservation.Release".to_string(),
+                    "WorkReservation.ForceRelease".to_string(),
+                    "HumanDecision.Record".to_string(),
+                ],
+                missing_graph_facts: missing,
+                human_message: "Another actor has an active conflicting WorkReservation. Coordinate, release, force-release with approval, or share the same spec/action reservation before editing.".to_string(),
+            }));
+        }
+    }
 
     Ok(WorkflowCodePlan {
         schema_version: "specgraph.workflow-code-plan/v1".to_string(),
@@ -1764,6 +1906,199 @@ pub fn plan_code_workflow(
         human_message: "Code object is declared and no existing duplicate candidate was found."
             .to_string(),
     })
+}
+
+pub fn list_work_reservations(
+    root: &Path,
+    include_released: bool,
+) -> Result<Vec<WorkReservationStatus>> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let mut reservations = replay
+        .graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "WorkReservation")
+        .filter_map(work_reservation_status_from_node)
+        .filter(|status| include_released || status.state == "Active")
+        .collect::<Vec<_>>();
+    reservations.sort_by(|left, right| left.reservation_id.cmp(&right.reservation_id));
+    Ok(reservations)
+}
+
+pub fn show_work_reservation(
+    root: &Path,
+    reservation_id: &str,
+) -> Result<Option<WorkReservationStatus>> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    Ok(find_work_reservation_node(&replay.graph, reservation_id)
+        .and_then(work_reservation_status_from_node))
+}
+
+pub fn release_work_reservation(
+    root: &Path,
+    options: ReleaseWorkReservationOptions,
+) -> Result<OperationReceipt> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let Some(previous) = find_work_reservation_node(&replay.graph, &options.reservation_id) else {
+        return Err(StoreError::OperationValidationFailed(1));
+    };
+    let mut updated = previous.clone();
+    updated
+        .attributes
+        .insert("state".to_string(), json!("Released"));
+    updated
+        .attributes
+        .insert("releaseReason".to_string(), json!(options.reason.clone()));
+    let released_at = OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("RFC3339 formatting should succeed");
+    updated
+        .attributes
+        .insert("releasedAt".to_string(), json!(released_at));
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "WorkReservation.Release".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "reservationId": options.reservation_id,
+                "reason": options.reason,
+            }),
+            dry_run: false,
+            delta: GraphDelta {
+                update_nodes: vec![updated],
+                ..GraphDelta::default()
+            },
+        },
+    )
+}
+
+fn evaluate_work_reservation_policy(
+    graph: &Graph,
+    scope: &WorkReservationRequestScope,
+    require_reservation: bool,
+    requested_reservation_id: Option<&str>,
+) -> WorkReservationPolicyOutcome {
+    let mut has_matching_reservation = false;
+    let mut conflicts = Vec::new();
+    let mut stale = Vec::new();
+
+    for reservation in graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "WorkReservation")
+    {
+        let Some(status) = work_reservation_status_from_node(reservation) else {
+            continue;
+        };
+        if status.state != "Active" || !reservation_scope_overlaps(&status, scope) {
+            continue;
+        }
+        if status.expired {
+            stale.push(status.reservation_id);
+            continue;
+        }
+        let requested_matches = requested_reservation_id
+            .map(|id| id == status.reservation_id)
+            .unwrap_or(true);
+        if status.actor == scope.actor || reservation_is_shared_same_action(&status, scope) {
+            if requested_matches {
+                has_matching_reservation = true;
+            }
+        } else {
+            conflicts.push(status.reservation_id);
+        }
+    }
+
+    if !conflicts.is_empty() {
+        return WorkReservationPolicyOutcome::Conflict { conflicts, stale };
+    }
+    if require_reservation && !has_matching_reservation {
+        return WorkReservationPolicyOutcome::Missing { stale };
+    }
+    WorkReservationPolicyOutcome::Satisfied
+}
+
+fn reservation_is_shared_same_action(
+    status: &WorkReservationStatus,
+    scope: &WorkReservationRequestScope,
+) -> bool {
+    status.spec == scope.spec
+        && status.graph_branch == scope.graph_branch
+        && status.action.as_deref() == Some(scope.action.as_str())
+}
+
+fn reservation_scope_overlaps(
+    status: &WorkReservationStatus,
+    scope: &WorkReservationRequestScope,
+) -> bool {
+    if status.spec != scope.spec || status.graph_branch != scope.graph_branch {
+        return false;
+    }
+    scope
+        .file
+        .as_deref()
+        .is_some_and(|file| status.files.iter().any(|reserved| reserved == file))
+        || scope
+            .symbol
+            .as_deref()
+            .is_some_and(|symbol| status.symbols.iter().any(|reserved| reserved == symbol))
+        || scope
+            .module
+            .as_deref()
+            .is_some_and(|module| status.modules.iter().any(|reserved| reserved == module))
+        || (status.files.is_empty() && status.symbols.is_empty() && status.modules.is_empty())
+}
+
+fn work_reservation_status_from_node(node: &Node) -> Option<WorkReservationStatus> {
+    if node.node_type != "WorkReservation" {
+        return None;
+    }
+    let reservation_id = node_attr(node, "reservationId")
+        .or_else(|| node.stable_key.strip_prefix("work-reservation:"))?
+        .to_string();
+    let expires_at = node_attr(node, "expiresAt").map(ToString::to_string);
+    let expired = node_is_expired(node);
+    Some(WorkReservationStatus {
+        reservation_id,
+        actor: node_attr(node, "actor").unwrap_or("").to_string(),
+        spec: node_attr(node, "spec").unwrap_or("").to_string(),
+        action: node_attr(node, "action").map(ToString::to_string),
+        commit_plan: node_attr(node, "commitPlan").map(ToString::to_string),
+        graph_branch: node_attr(node, "graphBranch").unwrap_or("").to_string(),
+        files: node_string_array(node, "files"),
+        symbols: node_string_array(node, "symbols"),
+        modules: node_string_array(node, "modules"),
+        expires_at,
+        state: node_attr(node, "state").unwrap_or("Unknown").to_string(),
+        expired,
+        stale: expired,
+        reason: node_attr(node, "reason").map(ToString::to_string),
+    })
+}
+
+fn find_work_reservation_node<'a>(graph: &'a Graph, reservation_id: &str) -> Option<&'a Node> {
+    graph.nodes.values().find(|node| {
+        node.node_type == "WorkReservation"
+            && (node_attr(node, "reservationId") == Some(reservation_id)
+                || node.stable_key == format!("work-reservation:{reservation_id}"))
+    })
+}
+
+fn node_string_array(node: &Node, key: &str) -> Vec<String> {
+    node.attributes
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 struct BlockedCodePlan {
@@ -13701,6 +14036,189 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn workflow_code_plan_requires_reservation_in_team_mode() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
+                require_reservation: true,
+                reservation_id: None,
+                actor: "local:agent-b".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(plan.blocked);
+        assert_eq!(plan.decision, "reservation-required");
+        assert!(plan
+            .required_operations
+            .contains(&"WorkReservation.Create".to_string()));
+    }
+
+    #[test]
+    fn workflow_code_plan_blocks_conflicting_reservation_and_allows_same_action_share() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "WorkReservation.Create".to_string(),
+                actor: "local:agent-a".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"reservation": "AUTH-001/implementation/agent-a"}),
+                dry_run: false,
+                delta: work_reservation_create_delta(
+                    "AUTH-001/implementation/agent-a",
+                    "local:agent-a",
+                ),
+            },
+        )
+        .unwrap();
+
+        let shared = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
+                require_reservation: true,
+                reservation_id: None,
+                actor: "local:agent-b".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(shared.allowed);
+        assert_eq!(shared.decision, "edit-permit");
+
+        let conflicting = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "maintenance".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
+                actor: "local:agent-b".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(!conflicting.allowed);
+        assert!(conflicting.blocked);
+        assert_eq!(conflicting.decision, "reservation-conflict");
+        assert!(conflicting.missing_graph_facts.iter().any(|fact| {
+            fact == "conflicting-work-reservation:AUTH-001/implementation/agent-a"
+        }));
+    }
+
+    #[test]
+    fn work_reservation_status_lists_show_and_release() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "WorkReservation.Create".to_string(),
+                actor: "local:agent".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"reservation": "AUTH-001/implementation/local-agent"}),
+                dry_run: false,
+                delta: work_reservation_create_delta(
+                    "AUTH-001/implementation/local-agent",
+                    "local:agent",
+                ),
+            },
+        )
+        .unwrap();
+
+        let active = list_work_reservations(tmp.path(), false).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(
+            active[0].reservation_id,
+            "AUTH-001/implementation/local-agent"
+        );
+        assert!(!active[0].expired);
+
+        let shown = show_work_reservation(tmp.path(), "AUTH-001/implementation/local-agent")
+            .unwrap()
+            .unwrap();
+        assert_eq!(shown.files, vec!["src/identity/password-reset.rs"]);
+        assert_eq!(shown.symbols, vec!["requestPasswordReset"]);
+
+        let receipt = release_work_reservation(
+            tmp.path(),
+            ReleaseWorkReservationOptions {
+                reservation_id: "AUTH-001/implementation/local-agent".to_string(),
+                reason: "done".to_string(),
+                actor: "local:agent".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt.operation, "WorkReservation.Release");
+        assert!(list_work_reservations(tmp.path(), false)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            list_work_reservations(tmp.path(), true).unwrap()[0].state,
+            "Released"
+        );
+    }
+
+    #[test]
+    fn expired_reservations_are_stale_and_do_not_satisfy_team_permit() {
+        let reservation_id = "AUTH-001/implementation/expired-agent";
+        let mut graph = Graph::default();
+        let mut delta = work_reservation_create_delta(reservation_id, "local:agent-a");
+        let mut reservation = delta.create_nodes.pop().unwrap();
+        reservation
+            .attributes
+            .insert("expiresAt".to_string(), json!("2000-01-01T00:00:00Z"));
+        graph.nodes.insert(reservation.id.clone(), reservation);
+        let scope = WorkReservationRequestScope {
+            spec: "AUTH-001".to_string(),
+            action: "implementation".to_string(),
+            graph_branch: "main".to_string(),
+            actor: "local:agent-b".to_string(),
+            file: Some("src/identity/password-reset.rs".to_string()),
+            symbol: Some("requestPasswordReset".to_string()),
+            module: Some("Identity".to_string()),
+        };
+
+        let outcome = evaluate_work_reservation_policy(&graph, &scope, true, None);
+        assert_eq!(
+            outcome,
+            WorkReservationPolicyOutcome::Missing {
+                stale: vec![reservation_id.to_string()]
+            }
+        );
+        let status = graph
+            .nodes
+            .values()
+            .find_map(work_reservation_status_from_node)
+            .unwrap();
+        assert!(status.expired);
+        assert!(status.stale);
+    }
+
+    #[test]
     fn action_fail_requires_escalation_after_repeated_failure() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -13993,6 +14511,8 @@ acceptanceCriteria:
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14030,6 +14550,8 @@ acceptanceCriteria:
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14150,6 +14672,8 @@ acceptanceCriteria:
                 file: None,
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14332,6 +14856,8 @@ acceptanceCriteria:
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14380,6 +14906,8 @@ acceptanceCriteria:
                 file: None,
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14421,6 +14949,8 @@ acceptanceCriteria:
                 file: None,
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14451,6 +14981,8 @@ acceptanceCriteria:
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: Some("sha256:stale".to_string()),
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14491,6 +15023,8 @@ acceptanceCriteria:
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14515,6 +15049,8 @@ acceptanceCriteria:
                     file: "src/identity/password-reset.rs".to_string(),
                     sha256: expected_hash,
                 }],
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14548,6 +15084,8 @@ acceptanceCriteria:
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14580,6 +15118,8 @@ acceptanceCriteria:
                 file: None,
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14602,6 +15142,8 @@ acceptanceCriteria:
                 file: None,
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14662,6 +15204,8 @@ acceptanceCriteria:
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14700,6 +15244,8 @@ acceptanceCriteria:
                 file: None,
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "agent:codex".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14759,6 +15305,8 @@ acceptanceCriteria:
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "agent:codex".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14847,6 +15395,8 @@ acceptanceCriteria:
                 file: None,
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "agent:codex".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14879,6 +15429,8 @@ acceptanceCriteria:
                 file: None,
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -14905,6 +15457,8 @@ acceptanceCriteria:
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
                 expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },

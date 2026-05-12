@@ -132,8 +132,9 @@ Current completed slices:
 - **Phase 0.3B — Agent autonomy policy and risky-operation gates** added a built-in autonomy policy table for auto-allowed, approval-required, and forbidden coding-agent operations; made obvious private `CodeObject.LinkExisting` non-blocking; and blocks module creation, public API edits, dependency/migration/release/security-sensitive intents, and direct secret edits unless scoped human approval exists where applicable.
 - **Phase 0.3C — Autonomous audit trails and user-choice blockers** added `userChoiceBlockers` and `autonomyAuditTrail` to workflow code-plan decisions, records rule/evidence/confidence/rollback/replan data for automatic link/edit choices, blocks ambiguous module placement with `HumanDecision.Record`, rejects expired scoped approvals, and completes the Phase 0.3 gate tests.
 - **Phase 0.4A — Work reservation model and lifecycle ABI** added `WorkReservation` graph facts, stable-key/ontology/operation ABI support, semantic validation for create/extend/release/force-release, required reservation scope/expiration/owner links, actor-owned release, force-release approval evidence, and tests for reservation lifecycle plus approved force release.
+- **Phase 0.4B — Reservation enforcement in workflow permits** added strict/team reservation requirements to `sg workflow code-plan`, conflict detection for active file/symbol/module reservations, same spec/action shared-reservation policy, expired reservation stale handling, `sg workflow reservations list/show/release`, and tests for missing/conflicting/shared/stale/released reservations.
 
-Next focus: **Phase 0.4B — Reservation enforcement in workflow permits**. Start from the latest `development`, require or create reservations before strict/team edit permits, detect conflicting active reservations by file/symbol/module, allow same-action sharing by policy, handle expired reservations deterministically, and add reservation status commands/tests.
+Next focus: **Phase 0.5 — Config, dependency, generated-code, contract, and documentation governance**. Start from the latest `development`, model declared config/secrets/dependencies/generated files/contracts/docs evidence, block unsafe direct edits or public changes without compatibility/docs evidence, and add tests/gates.
 
 ---
 
@@ -431,21 +432,21 @@ Prevent multiple agents or developers from editing the same files, symbols, modu
 
 - [x] **Add reservation operations.** Add `WorkReservation.Create`, `WorkReservation.Extend`, `WorkReservation.Release`, and `WorkReservation.ForceRelease` Operation ABI entries. Force release must require permission/approval.
 
-- [ ] **Reserve before edit permit.** `sg workflow code-plan` should create or require a reservation for intended files/symbols before returning edit permission in strict/team mode.
+- [x] **Reserve before edit permit.** `sg workflow code-plan` should create or require a reservation for intended files/symbols before returning edit permission in strict/team mode.
 
-- [ ] **Detect reservation conflicts.** Block a second actor from editing reserved files/symbols unless the reservation is shared for the same spec/action or explicitly approved.
+- [x] **Detect reservation conflicts.** Block a second actor from editing reserved files/symbols unless the reservation is shared for the same spec/action or explicitly approved.
 
-- [ ] **Handle stale reservations.** Expired reservations should warn or auto-release depending on policy. Stale reservations from abandoned branches should be visible in status reports.
+- [x] **Handle stale reservations.** Expired reservations should warn or auto-release depending on policy. Stale reservations from abandoned branches should be visible in status reports.
 
-- [ ] **Add reservation status commands.** Add `sg workflow reservations list`, `sg workflow reservations show`, and `sg workflow reservations release`.
+- [x] **Add reservation status commands.** Add `sg workflow reservations list`, `sg workflow reservations show`, and `sg workflow reservations release`.
 
-- [ ] **Add tests.** Cover successful reservation, conflicting reservation blocked, same-action shared reservation allowed by policy, expired reservation handling, and force release approval.
+- [x] **Add tests.** Cover successful reservation, conflicting reservation blocked, same-action shared reservation allowed by policy, expired reservation handling, and force release approval.
 
 ## Phase Gate
 
-- [ ] Two agents cannot unknowingly edit the same governed symbol/file.
-- [ ] Reservation conflicts are detected before code edits, not only during graph merge.
-- [ ] Stale reservations have deterministic cleanup behavior.
+- [x] Two agents cannot unknowingly edit the same governed symbol/file.
+- [x] Reservation conflicts are detected before code edits, not only during graph merge.
+- [x] Stale reservations have deterministic cleanup behavior.
 
 ---
 

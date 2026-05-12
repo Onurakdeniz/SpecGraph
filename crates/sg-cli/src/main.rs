@@ -48,9 +48,10 @@ use sg_store::{
     GenerateActionGraphOptions, GrantRoleOptions, InitOptions, InterfaceVisibility,
     LinkModuleCapabilityOptions, ModuleDefinition, ModuleInterface, ModuleLifecycleOptions,
     ModuleLifecycleState, ProjectProfileInput, RecordApprovalOptions, RecordCommitOptions,
-    RecordPolicyReportOptions, ReplayOptions, ReplayReport, SpecGraphStore, TransitionSpecOptions,
-    UpsertActorOptions, UpsertModuleGraphOptions, UpsertProjectProfileOptions,
-    WorkflowCodePlanOptions, WorkflowExpectedFileHash, WorkflowPlanOptions,
+    RecordPolicyReportOptions, ReleaseWorkReservationOptions, ReplayOptions, ReplayReport,
+    SpecGraphStore, TransitionSpecOptions, UpsertActorOptions, UpsertModuleGraphOptions,
+    UpsertProjectProfileOptions, WorkflowCodePlanOptions, WorkflowExpectedFileHash,
+    WorkflowPlanOptions,
 };
 use sg_testgraph::{
     validate_required_tests_pass, validate_trace_links, LinksManifest, TestCaseResult, TestLink,
@@ -624,6 +625,8 @@ enum WorkflowCommand {
     Plan(WorkflowPlanArgs),
     /// Authorize or block a coding edit before files are changed.
     CodePlan(WorkflowCodePlanArgs),
+    /// Inspect and release work reservations.
+    Reservations(WorkflowReservationsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -668,6 +671,50 @@ struct WorkflowCodePlanArgs {
     expected_state_hash: Option<String>,
     #[arg(long = "expected-file-hash", value_name = "FILE=SHA256")]
     expected_file_hashes: Vec<String>,
+    #[arg(long = "require-reservation")]
+    require_reservation: bool,
+    #[arg(long = "reservation-id")]
+    reservation_id: Option<String>,
+    #[arg(long, default_value = "local:planner")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowReservationsArgs {
+    #[command(subcommand)]
+    command: WorkflowReservationsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum WorkflowReservationsCommand {
+    /// List active work reservations.
+    List(WorkflowReservationsListArgs),
+    /// Show one work reservation by reservation id.
+    Show(WorkflowReservationsShowArgs),
+    /// Release an active work reservation owned by the actor.
+    Release(WorkflowReservationsReleaseArgs),
+}
+
+#[derive(Debug, Args)]
+struct WorkflowReservationsListArgs {
+    #[arg(long = "include-released")]
+    include_released: bool,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowReservationsShowArgs {
+    #[arg(long = "reservation-id")]
+    reservation_id: String,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowReservationsReleaseArgs {
+    #[arg(long = "reservation-id")]
+    reservation_id: String,
+    #[arg(long)]
+    reason: String,
     #[arg(long, default_value = "local:planner")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -2203,6 +2250,8 @@ fn handle_workflow(
                 file: args.file,
                 expected_state_hash: args.expected_state_hash,
                 expected_file_hashes,
+                require_reservation: args.require_reservation,
+                reservation_id: args.reservation_id,
                 actor: args.actor,
                 graph_branch: args.graph_branch,
             })?;
@@ -2250,6 +2299,92 @@ fn handle_workflow(
                 }
             }
         }
+        WorkflowCommand::Reservations(args) => match args.command {
+            WorkflowReservationsCommand::List(args) => {
+                let reservations = store.list_work_reservations(args.include_released)?;
+                if output.json() {
+                    print_json(&json!({
+                        "schemaVersion": "specgraph.cli/v1",
+                        "command": "sg workflow reservations list",
+                        "status": "ok",
+                        "reservations": reservations,
+                    }))?;
+                } else if !output.quiet {
+                    for reservation in reservations {
+                        println!(
+                            "reservation: {} actor={} spec={} action={} branch={} state={} expired={} stale={} files={} symbols={} modules={}",
+                            reservation.reservation_id,
+                            reservation.actor,
+                            reservation.spec,
+                            reservation.action.as_deref().unwrap_or(""),
+                            reservation.graph_branch,
+                            reservation.state,
+                            reservation.expired,
+                            reservation.stale,
+                            reservation.files.join(","),
+                            reservation.symbols.join(","),
+                            reservation.modules.join(","),
+                        );
+                    }
+                }
+            }
+            WorkflowReservationsCommand::Show(args) => {
+                let reservation = store.show_work_reservation(&args.reservation_id)?;
+                if output.json() {
+                    print_json(&json!({
+                        "schemaVersion": "specgraph.cli/v1",
+                        "command": "sg workflow reservations show",
+                        "status": "ok",
+                        "reservation": reservation,
+                    }))?;
+                } else if !output.quiet {
+                    if let Some(reservation) = reservation {
+                        println!("reservationId: {}", reservation.reservation_id);
+                        println!("actor: {}", reservation.actor);
+                        println!("spec: {}", reservation.spec);
+                        println!("action: {}", reservation.action.as_deref().unwrap_or(""));
+                        println!(
+                            "commitPlan: {}",
+                            reservation.commit_plan.as_deref().unwrap_or("")
+                        );
+                        println!("graphBranch: {}", reservation.graph_branch);
+                        println!("state: {}", reservation.state);
+                        println!("expired: {}", reservation.expired);
+                        println!("stale: {}", reservation.stale);
+                        println!("files: {}", reservation.files.join(","));
+                        println!("symbols: {}", reservation.symbols.join(","));
+                        println!("modules: {}", reservation.modules.join(","));
+                        println!(
+                            "expiresAt: {}",
+                            reservation.expires_at.as_deref().unwrap_or("")
+                        );
+                        println!("reason: {}", reservation.reason.as_deref().unwrap_or(""));
+                    } else {
+                        println!("reservation: not-found");
+                    }
+                }
+            }
+            WorkflowReservationsCommand::Release(args) => {
+                let receipt = store.release_work_reservation(ReleaseWorkReservationOptions {
+                    reservation_id: args.reservation_id,
+                    reason: args.reason,
+                    actor: args.actor,
+                    graph_branch: args.graph_branch,
+                })?;
+                if output.json() {
+                    print_json(&json!({
+                        "schemaVersion": "specgraph.cli/v1",
+                        "command": "sg workflow reservations release",
+                        "status": "ok",
+                        "receipt": receipt,
+                    }))?;
+                } else if !output.quiet {
+                    println!("operation: {}", receipt.operation);
+                    println!("accepted: {}", receipt.accepted);
+                    println!("postStateHash: {}", receipt.post_state_hash);
+                }
+            }
+        },
     }
     Ok(())
 }
