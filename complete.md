@@ -131,8 +131,9 @@ Current completed slices:
 - **Phase 0.3A — Human decision graph facts** added `HumanDecision.Record`, `HumanDecision`, `DecisionOption`, `DecisionRationale`, and `DecisionScope` ontology/stable-key support, scoped target links, semantic checks for selected options/rationale/scopes/expiration, and tests for valid scoped choices plus expired broad unscoped blockers.
 - **Phase 0.3B — Agent autonomy policy and risky-operation gates** added a built-in autonomy policy table for auto-allowed, approval-required, and forbidden coding-agent operations; made obvious private `CodeObject.LinkExisting` non-blocking; and blocks module creation, public API edits, dependency/migration/release/security-sensitive intents, and direct secret edits unless scoped human approval exists where applicable.
 - **Phase 0.3C — Autonomous audit trails and user-choice blockers** added `userChoiceBlockers` and `autonomyAuditTrail` to workflow code-plan decisions, records rule/evidence/confidence/rollback/replan data for automatic link/edit choices, blocks ambiguous module placement with `HumanDecision.Record`, rejects expired scoped approvals, and completes the Phase 0.3 gate tests.
+- **Phase 0.4A — Work reservation model and lifecycle ABI** added `WorkReservation` graph facts, stable-key/ontology/operation ABI support, semantic validation for create/extend/release/force-release, required reservation scope/expiration/owner links, actor-owned release, force-release approval evidence, and tests for reservation lifecycle plus approved force release.
 
-Next focus: **Phase 0.4 — Work Reservation and Multi-Agent Coordination**. Start from the latest `development`, add reservation graph facts and operations, wire reservations into strict/team edit permits, detect conflicts, handle expiry, expose status commands, and add tests.
+Next focus: **Phase 0.4B — Reservation enforcement in workflow permits**. Start from the latest `development`, require or create reservations before strict/team edit permits, detect conflicting active reservations by file/symbol/module, allow same-action sharing by policy, handle expired reservations deterministically, and add reservation status commands/tests.
 
 ---
 
@@ -426,9 +427,9 @@ Prevent multiple agents or developers from editing the same files, symbols, modu
 
 ## Checklist
 
-- [ ] **Add work reservation model.** Add `WorkReservation` facts with reservation id, actor, spec, action, commit plan, graph branch, files, symbols, modules, expiration, state, and reason.
+- [x] **Add work reservation model.** Add `WorkReservation` facts with reservation id, actor, spec, action, commit plan, graph branch, files, symbols, modules, expiration, state, and reason.
 
-- [ ] **Add reservation operations.** Add `WorkReservation.Create`, `WorkReservation.Extend`, `WorkReservation.Release`, and `WorkReservation.ForceRelease` Operation ABI entries. Force release must require permission/approval.
+- [x] **Add reservation operations.** Add `WorkReservation.Create`, `WorkReservation.Extend`, `WorkReservation.Release`, and `WorkReservation.ForceRelease` Operation ABI entries. Force release must require permission/approval.
 
 - [ ] **Reserve before edit permit.** `sg workflow code-plan` should create or require a reservation for intended files/symbols before returning edit permission in strict/team mode.
 

@@ -5989,6 +5989,15 @@ fn validate_operation_semantic_preconditions(
         "HumanDecision.Record" => {
             validate_human_decision_record_semantic_preconditions(graph, delta)
         }
+        "WorkReservation.Create"
+        | "WorkReservation.Extend"
+        | "WorkReservation.Release"
+        | "WorkReservation.ForceRelease" => validate_work_reservation_semantic_preconditions(
+            request.operation.as_str(),
+            graph,
+            request,
+            delta,
+        ),
         "Proposal.Accept" => validate_proposal_accept_semantic_preconditions(graph, request, delta),
         _ => Vec::new(),
     }
@@ -7500,6 +7509,229 @@ fn human_decision_approval_scope_matches(
         || decision_scopes
             .iter()
             .any(|decision_scope| decision_scope == scope)
+}
+
+fn validate_work_reservation_semantic_preconditions(
+    operation: &str,
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    match operation {
+        "WorkReservation.Create" => {
+            let reservations = delta
+                .create_nodes
+                .iter()
+                .filter(|node| node.node_type == "WorkReservation")
+                .collect::<Vec<_>>();
+            if reservations.len() != 1 {
+                findings.push(semantic_finding(
+                    "semantic.work_reservation.create_required",
+                    "WorkReservation.Create must create exactly one WorkReservation.",
+                ));
+                return findings;
+            }
+            let reservation = reservations[0];
+            validate_work_reservation_required_fields(reservation, &mut findings);
+            if node_attr(reservation, "state") != Some("Active") {
+                findings.push(semantic_finding(
+                    "semantic.work_reservation.invalid_initial_state",
+                    "WorkReservation.Create must create reservations in Active state.",
+                ));
+            }
+            validate_future_timestamp(
+                reservation,
+                "expiresAt",
+                "semantic.work_reservation.invalid_expiration",
+                "WorkReservation expiresAt must be a future RFC3339 timestamp.",
+                &mut findings,
+            );
+            if !work_reservation_has_scope(reservation, delta) {
+                findings.push(semantic_finding(
+                    "semantic.work_reservation.scope_required",
+                    "WorkReservation.Create requires at least one file, symbol, module, spec, action, commit plan, or code object scope.",
+                ));
+            }
+            let has_owner_link = delta.create_edges.iter().any(|edge| {
+                edge.to == reservation.id
+                    && edge.edge_type == "HAS_WORK_RESERVATION"
+                    && (node_exists_with_type(graph, delta, &edge.from, "Project")
+                        || node_exists_with_type(graph, delta, &edge.from, "Spec")
+                        || node_exists_with_type(graph, delta, &edge.from, "ActionNode"))
+            });
+            if !has_owner_link {
+                findings.push(semantic_finding(
+                    "semantic.work_reservation.owner_link_required",
+                    "WorkReservation.Create must link the reservation from Project, Spec, or ActionNode with HAS_WORK_RESERVATION.",
+                ));
+            }
+        }
+        "WorkReservation.Extend" | "WorkReservation.Release" | "WorkReservation.ForceRelease" => {
+            let reservations = delta
+                .update_nodes
+                .iter()
+                .filter(|node| node.node_type == "WorkReservation")
+                .collect::<Vec<_>>();
+            if reservations.len() != 1 {
+                findings.push(semantic_finding(
+                    "semantic.work_reservation.update_required",
+                    format!("{operation} must update exactly one WorkReservation."),
+                ));
+                return findings;
+            }
+            let updated = reservations[0];
+            let Some(previous) = graph.nodes.get(&updated.id) else {
+                findings.push(semantic_finding(
+                    "semantic.work_reservation.existing_required",
+                    format!("{operation} must update an existing WorkReservation."),
+                ));
+                return findings;
+            };
+            if previous.node_type != "WorkReservation" {
+                findings.push(semantic_finding(
+                    "semantic.work_reservation.existing_type_required",
+                    format!("{operation} target must be an existing WorkReservation."),
+                ));
+                return findings;
+            }
+            validate_work_reservation_identity_preserved(previous, updated, &mut findings);
+            match operation {
+                "WorkReservation.Extend" => {
+                    if node_attr(updated, "state") != Some("Active") {
+                        findings.push(semantic_finding(
+                            "semantic.work_reservation.extend_active_required",
+                            "WorkReservation.Extend must keep the reservation Active.",
+                        ));
+                    }
+                    validate_future_timestamp(
+                        updated,
+                        "expiresAt",
+                        "semantic.work_reservation.invalid_extension_expiration",
+                        "WorkReservation.Extend expiresAt must be a future RFC3339 timestamp.",
+                        &mut findings,
+                    );
+                }
+                "WorkReservation.Release" => {
+                    if node_attr(updated, "state") != Some("Released") {
+                        findings.push(semantic_finding(
+                            "semantic.work_reservation.release_state_required",
+                            "WorkReservation.Release must set state to Released.",
+                        ));
+                    }
+                    if node_attr(previous, "actor") != Some(request.actor.as_str()) {
+                        findings.push(semantic_finding(
+                            "semantic.work_reservation.release_actor_mismatch",
+                            "WorkReservation.Release can only be performed by the reservation actor; use ForceRelease with approval otherwise.",
+                        ));
+                    }
+                }
+                "WorkReservation.ForceRelease" => {
+                    if !matches!(
+                        node_attr(updated, "state"),
+                        Some("ForceReleased" | "Released")
+                    ) {
+                        findings.push(semantic_finding(
+                            "semantic.work_reservation.force_release_state_required",
+                            "WorkReservation.ForceRelease must set state to ForceReleased or Released.",
+                        ));
+                    }
+                    let approval_id = node_attr(updated, "approvalId").unwrap_or("");
+                    if approval_id.trim().is_empty()
+                        || approval_node_for_id(graph, approval_id).is_none()
+                    {
+                        findings.push(semantic_finding(
+                            "semantic.work_reservation.force_release_approval_required",
+                            "WorkReservation.ForceRelease requires approvalId referencing an existing Approval.",
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+
+    findings
+}
+
+fn validate_work_reservation_required_fields(reservation: &Node, findings: &mut Vec<Finding>) {
+    for field in [
+        "reservationId",
+        "actor",
+        "spec",
+        "graphBranch",
+        "state",
+        "expiresAt",
+        "reason",
+    ] {
+        if node_attr(reservation, field).is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.work_reservation.field_required",
+                format!("WorkReservation requires non-empty `{field}`."),
+            ));
+        }
+    }
+}
+
+fn validate_work_reservation_identity_preserved(
+    previous: &Node,
+    updated: &Node,
+    findings: &mut Vec<Finding>,
+) {
+    for field in [
+        "reservationId",
+        "actor",
+        "spec",
+        "action",
+        "commitPlan",
+        "graphBranch",
+    ] {
+        if previous.attributes.get(field) != updated.attributes.get(field) {
+            findings.push(semantic_finding(
+                "semantic.work_reservation.identity_drift",
+                format!("WorkReservation update must preserve `{field}`."),
+            ));
+        }
+    }
+}
+
+fn work_reservation_has_scope(reservation: &Node, delta: &GraphDelta) -> bool {
+    ["files", "symbols", "modules"].iter().any(|field| {
+        reservation
+            .attributes
+            .get(*field)
+            .and_then(Value::as_array)
+            .is_some_and(|values| !values.is_empty())
+    }) || delta.create_edges.iter().any(|edge| {
+        edge.from == reservation.id
+            && matches!(
+                edge.edge_type.as_str(),
+                "RESERVES_SPEC"
+                    | "RESERVES_ACTION"
+                    | "RESERVES_COMMIT_PLAN"
+                    | "RESERVES_CODE_OBJECT"
+                    | "RESERVES_FILE"
+                    | "RESERVES_SYMBOL"
+                    | "RESERVES_MODULE"
+            )
+    })
+}
+
+fn validate_future_timestamp(
+    node: &Node,
+    field: &str,
+    code: &str,
+    message: &str,
+    findings: &mut Vec<Finding>,
+) {
+    let Some(value) = node_attr(node, field) else {
+        return;
+    };
+    match OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339) {
+        Ok(timestamp) if timestamp > OffsetDateTime::now_utc() => {}
+        _ => findings.push(semantic_finding(code, message)),
+    }
 }
 
 fn validate_proposal_accept_semantic_preconditions(
@@ -13302,6 +13534,173 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn work_reservation_create_extend_and_release_records_scope() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let reservation_id = "AUTH-001/implementation/local-agent";
+        let reservation_node_id = node_id("work_reservation", reservation_id);
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "WorkReservation.Create".to_string(),
+                actor: "local:agent".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"reservation": reservation_id}),
+                dry_run: false,
+                delta: work_reservation_create_delta(reservation_id, "local:agent"),
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt.operation, "WorkReservation.Create");
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let mut reservation = replay.graph.nodes[&reservation_node_id].clone();
+        reservation
+            .attributes
+            .insert("expiresAt".to_string(), json!("2099-01-02T00:00:00Z"));
+        let extended = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "WorkReservation.Extend".to_string(),
+                actor: "local:agent".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "reservationId": reservation_id,
+                    "expiresAt": "2099-01-02T00:00:00Z",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    update_nodes: vec![reservation],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(extended.operation, "WorkReservation.Extend");
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let mut reservation = replay.graph.nodes[&reservation_node_id].clone();
+        reservation
+            .attributes
+            .insert("state".to_string(), json!("Released"));
+        reservation
+            .attributes
+            .insert("releasedReason".to_string(), json!("Done"));
+        let released = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "WorkReservation.Release".to_string(),
+                actor: "local:agent".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "reservationId": reservation_id,
+                    "reason": "Done",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    update_nodes: vec![reservation],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(released.operation, "WorkReservation.Release");
+    }
+
+    #[test]
+    fn work_reservation_force_release_requires_approval() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let reservation_id = "AUTH-001/implementation/local-agent";
+        let reservation_node_id = node_id("work_reservation", reservation_id);
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "WorkReservation.Create".to_string(),
+                actor: "local:agent".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"reservation": reservation_id}),
+                dry_run: false,
+                delta: work_reservation_create_delta(reservation_id, "local:agent"),
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let mut reservation = replay.graph.nodes[&reservation_node_id].clone();
+        reservation
+            .attributes
+            .insert("state".to_string(), json!("ForceReleased"));
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "WorkReservation.ForceRelease".to_string(),
+                actor: "local:lead".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "reservationId": reservation_id,
+                    "reason": "Abandoned",
+                    "approvalId": "reservation-force-release",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![reservation.clone()],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "WorkReservation.ForceRelease"
+        ));
+
+        add_policy_approver(tmp.path(), "local:lead");
+        record_approval(
+            tmp.path(),
+            RecordApprovalOptions {
+                approval_id: "reservation-force-release".to_string(),
+                approval: "work-reservation-force-release".to_string(),
+                policy: None,
+                scope: Some(format!("work-reservation:{reservation_id}")),
+                reason: Some("Reservation owner is unavailable".to_string()),
+                approved_by: "local:lead".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        reservation
+            .attributes
+            .insert("approvalId".to_string(), json!("reservation-force-release"));
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "WorkReservation.ForceRelease".to_string(),
+                actor: "local:lead".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "reservationId": reservation_id,
+                    "reason": "Abandoned",
+                    "approvalId": "reservation-force-release",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![reservation],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        assert!(receipt.dry_run);
+    }
+
+    #[test]
     fn action_fail_requires_escalation_after_repeated_failure() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -14936,6 +15335,55 @@ acceptanceCriteria:
                     &validation_id,
                 ),
                 edge(&refactor_node_id, "REFACTORS_CODE_OBJECT", target_id),
+            ],
+            ..GraphDelta::default()
+        }
+    }
+
+    fn work_reservation_create_delta(reservation_id: &str, actor: &str) -> GraphDelta {
+        let reservation_node_id = node_id("work_reservation", reservation_id);
+        GraphDelta {
+            create_nodes: vec![Node {
+                id: reservation_node_id.clone(),
+                stable_key: format!("work-reservation:{reservation_id}"),
+                node_type: "WorkReservation".to_string(),
+                attributes: BTreeMap::from([
+                    ("reservationId".to_string(), json!(reservation_id)),
+                    ("actor".to_string(), json!(actor)),
+                    ("spec".to_string(), json!("AUTH-001")),
+                    ("action".to_string(), json!("implementation")),
+                    (
+                        "commitPlan".to_string(),
+                        json!("commit-plan:AUTH-001/Implementation"),
+                    ),
+                    ("graphBranch".to_string(), json!("main")),
+                    (
+                        "files".to_string(),
+                        json!(["src/identity/password-reset.rs"]),
+                    ),
+                    ("symbols".to_string(), json!(["requestPasswordReset"])),
+                    ("modules".to_string(), json!(["Identity"])),
+                    ("expiresAt".to_string(), json!("2099-01-01T00:00:00Z")),
+                    ("state".to_string(), json!("Active")),
+                    ("reason".to_string(), json!("Implement password reset")),
+                ]),
+            }],
+            create_edges: vec![
+                edge(
+                    &node_id("spec", "AUTH-001"),
+                    "HAS_WORK_RESERVATION",
+                    &reservation_node_id,
+                ),
+                edge(
+                    &reservation_node_id,
+                    "RESERVES_SPEC",
+                    &node_id("spec", "AUTH-001"),
+                ),
+                edge(
+                    &reservation_node_id,
+                    "RESERVES_MODULE",
+                    &node_id("module", "Identity"),
+                ),
             ],
             ..GraphDelta::default()
         }

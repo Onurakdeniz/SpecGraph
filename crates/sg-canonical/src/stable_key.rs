@@ -585,6 +585,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         description: "Policy waiver evidence",
         example: "waiver:WAIVER-001",
     },
+    StableKeyFamily {
+        prefix: "work-reservation",
+        description: "Reservation of files, symbols, modules, specs, actions, or commit plans for coordinated work",
+        example: "work-reservation:AUTH-001/implementation/local-agent",
+    },
 ];
 
 pub fn built_in_stable_key_registry() -> StableKeyRegistry {
@@ -795,6 +800,7 @@ mod tests {
             "validator-execution",
             "finding",
             "proposal",
+            "work-reservation",
             "edge",
         ] {
             assert!(registry.family(family).is_some(), "{family}");
@@ -837,6 +843,7 @@ mod tests {
             "finding:run-001/0/trace.missing",
             "code-file:src/identity/password-reset.js",
             "code-symbol:src/lib.rs/function/main",
+            "work-reservation:AUTH-001/implementation/local-agent",
             "git-branch:spec/AUTH-001-password-reset",
             "git-commit:abc123",
             "graph-snapshot:sha256:abc123",
