@@ -119,8 +119,9 @@ Current completed slices:
 - **Phase 0E — Index reconciliation and strict-mode blockers** added strict code-index findings for undeclared symbols, wrong placement, and private cross-module imports; explicit existing-baseline acceptance; `CodeObject.Reconcile`; and declared-but-missing validation for implemented declarations.
 - **Phase 0F — Scenario tests and documentation examples** added coding-agent governed edit tests plus a cataloged happy/failure example showing when to declare, link/reuse, accept baseline, reconcile, replan, or stop.
 - **Phase 0.1A — Workflow intent/no-op planner** added runtime intent clarification models, ambiguity questions, safe/risky assumption reporting, feature duplicate detection, `no-op`/`docs-only`/reference guidance for workflow plans, code-plan no-op/docs-only exits, CLI output, and tests.
+- **Phase 0.1B — Persisted intent decisions and wider existing-feature evidence** added `Intent.RecordDecision`, ontology/stable-key support for intent clarification facts, scoped approval enforcement for risky assumptions, and broader existing-feature evidence from endpoints, tests, PRs, docs, and CodeGraph-linked symbols.
 
-Next focus: **Phase 0.1B — Persisted intent decisions and wider existing-feature evidence**. Start from the latest `development`, add Operation Runtime facts for accepted intent answers/assumptions and broaden feature detection evidence across endpoints, tests, PRs, docs, and CodeGraph facts before moving to Phase 0.2.
+Next focus: **Phase 0.2 — Change lifecycle semantics, scope expansion, and stale work permits**. Start from the latest `development`, audit lifecycle operation gaps, then implement the first small slice with operation ABI, runtime validation, tests, and gates.
 
 ---
 
@@ -311,21 +312,21 @@ Normal coding agents first understand the request, inspect the current implement
 
 ## Checklist
 
-- [~] **Add intent clarification model.** Add graph/runtime models for `IntentQuestion`, `IntentAnswer`, `IntentAssumption`, and `IntentClarification`. A request should be blocked before spec/action creation if required product, security, data, API, or acceptance details are missing.
+- [x] **Add intent clarification model.** Add graph/runtime models for `IntentQuestion`, `IntentAnswer`, `IntentAssumption`, and `IntentClarification`. A request should be blocked before spec/action creation if required product, security, data, API, or acceptance details are missing.
 
 - [x] **Add ambiguity detector.** From user text, spec text, issue title/body, proposal text, and examples, detect missing required decisions such as endpoint shape, response semantics, error behavior, auth requirements, data retention, rate limits, compatibility, rollout, and acceptance scenarios.
 
 - [x] **Add required-question planner.** Extend `sg workflow plan` to output required questions before `Spec.Create` or `Spec.Import` when intent is incomplete. Questions must include why they are required and which graph fact they unblock.
 
-- [~] **Add assumption policy.** Define which missing details can be assumed safely and which require explicit human input. Store assumptions as graph facts and require approval for risky assumptions such as security, data loss, public API behavior, or production rollout.
+- [x] **Add assumption policy.** Define which missing details can be assumed safely and which require explicit human input. Store assumptions as graph facts and require approval for risky assumptions such as security, data loss, public API behavior, or production rollout.
 
-- [~] **Add already-implemented feature detection.** Before creating a spec/action or issuing an edit permit, search existing specs, releases, CodeGraph facts, endpoints, tests, validation runs, PRs, and docs to determine whether the requested feature already exists.
+- [x] **Add already-implemented feature detection.** Before creating a spec/action or issuing an edit permit, search existing specs, releases, CodeGraph facts, endpoints, tests, validation runs, PRs, and docs to determine whether the requested feature already exists.
 
 - [x] **Add no-op decision result.** `sg workflow plan` and `sg workflow code-plan` must be able to return `decision: no-op`, `decision: reference-existing`, or `decision: docs-only` instead of forcing a code change.
 
 - [x] **Add feature duplicate prevention.** If a semantically similar spec/issue/feature exists, block creation of a new duplicate spec unless the user explicitly chooses to extend, supersede, fork, or create a variant.
 
-- [~] **Add semantic similarity evidence.** Store why two requests/specs/features are considered similar: matching endpoint, matching module, matching entity, matching behavior, matching tests, or matching code symbols.
+- [x] **Add semantic similarity evidence.** Store why two requests/specs/features are considered similar: matching endpoint, matching module, matching entity, matching behavior, matching tests, or matching code symbols.
 
 - [x] **Add tests.** Cover ambiguous request blocked with questions, safe assumption recorded, risky assumption requiring approval, existing fully implemented feature producing no-op, similar existing spec requiring user decision, and docs-only decision.
 

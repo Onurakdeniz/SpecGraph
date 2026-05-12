@@ -215,6 +215,26 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "layer:application",
     },
     StableKeyFamily {
+        prefix: "intent-answer",
+        description: "Human or approved answer to an intent clarification question",
+        example: "intent-answer:AUTH-001/intent-1/intent.required_behavior/local:developer",
+    },
+    StableKeyFamily {
+        prefix: "intent-assumption",
+        description: "Recorded safe or approved assumption for intent clarification",
+        example: "intent-assumption:AUTH-001/intent-1/assumption.priority.normal",
+    },
+    StableKeyFamily {
+        prefix: "intent-clarification",
+        description: "Intent clarification record for a spec or project",
+        example: "intent-clarification:AUTH-001/intent-1",
+    },
+    StableKeyFamily {
+        prefix: "intent-question",
+        description: "Required or optional question that blocks an intent decision",
+        example: "intent-question:AUTH-001/intent-1/intent.required_behavior",
+    },
+    StableKeyFamily {
         prefix: "issue",
         description: "IssueGraph issue fact",
         example: "issue:BUG-001",

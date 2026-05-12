@@ -258,6 +258,18 @@ pub struct WorkflowPlanOptions {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct RecordIntentDecisionOptions {
+    pub spec: Option<String>,
+    pub clarification_id: Option<String>,
+    pub questions: Vec<IntentQuestion>,
+    pub answers: Vec<IntentAnswer>,
+    pub assumptions: Vec<IntentAssumption>,
+    pub approval_ids: Vec<String>,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct WorkflowCodePlanOptions {
     pub spec: String,
     pub action: String,
@@ -643,6 +655,13 @@ impl SpecGraphStore {
 
     pub fn plan_workflow(&self, options: WorkflowPlanOptions) -> Result<WorkflowPlan> {
         plan_workflow(self.root(), options)
+    }
+
+    pub fn record_intent_decision(
+        &self,
+        options: RecordIntentDecisionOptions,
+    ) -> Result<OperationReceipt> {
+        record_intent_decision(self.root(), options)
     }
 
     pub fn plan_code_workflow(&self, options: WorkflowCodePlanOptions) -> Result<WorkflowCodePlan> {
@@ -1092,6 +1111,158 @@ pub fn plan_workflow(root: &Path, options: WorkflowPlanOptions) -> Result<Workfl
         existing_features,
         human_message,
     })
+}
+
+pub fn record_intent_decision(
+    root: &Path,
+    options: RecordIntentDecisionOptions,
+) -> Result<OperationReceipt> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let target_id = if let Some(spec) = options.spec.as_deref() {
+        find_spec_node(&replay.graph, spec)
+            .ok_or_else(|| StoreError::SpecNotFound(spec.to_string()))?
+            .id
+            .clone()
+    } else {
+        find_project_node(&replay.graph)
+            .ok_or(StoreError::ProjectNotFound)?
+            .id
+            .clone()
+    };
+    let clarification_key = options.clarification_id.clone().unwrap_or_else(|| {
+        format!(
+            "{}:{}",
+            options.spec.as_deref().unwrap_or("project"),
+            Uuid::new_v4().simple()
+        )
+    });
+    let clarification_id = intent_clarification_node_id(&clarification_key);
+    let clarification_node = Node {
+        id: clarification_id.clone(),
+        stable_key: format!("intent-clarification:{clarification_key}"),
+        node_type: "IntentClarification".to_string(),
+        attributes: BTreeMap::from([
+            ("clarificationId".to_string(), json!(clarification_key)),
+            ("spec".to_string(), json!(options.spec)),
+            ("recordedBy".to_string(), json!(options.actor)),
+        ]),
+    };
+
+    let mut create_nodes = vec![clarification_node];
+    let mut create_edges = vec![edge(
+        &target_id,
+        "HAS_INTENT_CLARIFICATION",
+        &clarification_id,
+    )];
+
+    for question in &options.questions {
+        let question_node_id = intent_question_node_id(&clarification_id, &question.id);
+        create_nodes.push(Node {
+            id: question_node_id.clone(),
+            stable_key: format!("intent-question:{clarification_id}:{}", question.id),
+            node_type: "IntentQuestion".to_string(),
+            attributes: BTreeMap::from([
+                ("questionId".to_string(), json!(question.id)),
+                ("area".to_string(), json!(question.area)),
+                ("prompt".to_string(), json!(question.prompt)),
+                ("reason".to_string(), json!(question.reason)),
+                (
+                    "blocksOperation".to_string(),
+                    json!(question.blocks_operation),
+                ),
+                ("risky".to_string(), json!(question.risky)),
+            ]),
+        });
+        create_edges.push(edge(
+            &clarification_id,
+            "CLARIFICATION_HAS_QUESTION",
+            &question_node_id,
+        ));
+    }
+
+    for answer in &options.answers {
+        let answer_node_id =
+            intent_answer_node_id(&clarification_id, &answer.question_id, &answer.answered_by);
+        create_nodes.push(Node {
+            id: answer_node_id.clone(),
+            stable_key: format!(
+                "intent-answer:{clarification_id}:{}:{}",
+                answer.question_id, answer.answered_by
+            ),
+            node_type: "IntentAnswer".to_string(),
+            attributes: BTreeMap::from([
+                ("questionId".to_string(), json!(answer.question_id)),
+                ("answer".to_string(), json!(answer.answer)),
+                ("answeredBy".to_string(), json!(answer.answered_by)),
+                ("evidence".to_string(), json!(answer.evidence)),
+            ]),
+        });
+        create_edges.push(edge(
+            &intent_question_node_id(&clarification_id, &answer.question_id),
+            "QUESTION_ANSWERED_BY",
+            &answer_node_id,
+        ));
+    }
+
+    for assumption in &options.assumptions {
+        let assumption_node_id = intent_assumption_node_id(&clarification_id, &assumption.id);
+        create_nodes.push(Node {
+            id: assumption_node_id.clone(),
+            stable_key: format!("intent-assumption:{clarification_id}:{}", assumption.id),
+            node_type: "IntentAssumption".to_string(),
+            attributes: BTreeMap::from([
+                ("assumptionId".to_string(), json!(assumption.id)),
+                ("area".to_string(), json!(assumption.area)),
+                ("assumption".to_string(), json!(assumption.assumption)),
+                ("risk".to_string(), json!(assumption.risk)),
+                (
+                    "requiresApproval".to_string(),
+                    json!(assumption.requires_approval),
+                ),
+            ]),
+        });
+        create_edges.push(edge(
+            &clarification_id,
+            "CLARIFICATION_HAS_ASSUMPTION",
+            &assumption_node_id,
+        ));
+        if assumption.requires_approval {
+            for approval_id in &options.approval_ids {
+                if let Some(approval_node) = approval_node_for_id(&replay.graph, approval_id) {
+                    create_edges.push(edge(
+                        &approval_node.id,
+                        "APPROVES_ASSUMPTION",
+                        &assumption_node_id,
+                    ));
+                }
+            }
+        }
+    }
+
+    append_operation(
+        root,
+        AppendOperationOptions {
+            operation: "Intent.RecordDecision".to_string(),
+            actor: options.actor,
+            graph_branch: options.graph_branch,
+            input: json!({
+                "intent": {
+                    "spec": options.spec,
+                    "clarificationId": clarification_key,
+                    "questions": options.questions,
+                    "answers": options.answers,
+                    "assumptions": options.assumptions,
+                    "approvalIds": options.approval_ids,
+                }
+            }),
+            dry_run: false,
+            delta: GraphDelta {
+                create_nodes,
+                create_edges,
+                ..GraphDelta::default()
+            },
+        },
+    )
 }
 
 pub fn plan_code_workflow(
@@ -2004,7 +2175,8 @@ fn existing_feature_matches(
                 return None;
             }
             let existing_title = node_attr(spec_node, "title").unwrap_or("");
-            let existing_terms = spec_feature_terms(graph, spec_node);
+            let feature_evidence = spec_feature_evidence(graph, spec_node);
+            let existing_terms = text_terms(&feature_evidence.text.join("\n"));
             let title_similarity = if request_title_norm.is_empty() || existing_title.is_empty() {
                 0.0
             } else {
@@ -2063,6 +2235,7 @@ fn existing_feature_matches(
             if planned_overlap {
                 evidence.push("matching-planned-object".to_string());
             }
+            evidence.extend(feature_evidence.evidence);
             if released {
                 evidence.push("release-evidence".to_string());
             } else if implemented {
@@ -2364,24 +2537,126 @@ fn workflow_request_terms(options: &WorkflowPlanOptions) -> Vec<String> {
     text_terms(&workflow_request_text(options))
 }
 
-fn spec_feature_terms(graph: &Graph, spec_node: &Node) -> Vec<String> {
-    let mut parts = Vec::new();
+#[derive(Debug, Default)]
+struct FeatureEvidence {
+    text: Vec<String>,
+    evidence: Vec<String>,
+}
+
+fn spec_feature_evidence(graph: &Graph, spec_node: &Node) -> FeatureEvidence {
+    let mut feature = FeatureEvidence::default();
     for key in ["spec", "title", "module", "state"] {
         if let Some(value) = node_attr(spec_node, key) {
-            parts.push(value.to_string());
+            feature.text.push(value.to_string());
         }
     }
     for key in ["requirements", "acceptanceCriteria"] {
         if let Some(values) = spec_node.attributes.get(key).and_then(Value::as_array) {
             for value in values {
                 if let Some(text) = value.get("text").and_then(Value::as_str) {
-                    parts.push(text.to_string());
+                    feature.text.push(text.to_string());
+                    if key == "acceptanceCriteria" {
+                        feature
+                            .evidence
+                            .push("matching-acceptance-scenario".to_string());
+                    } else {
+                        feature.evidence.push("matching-behavior".to_string());
+                    }
                 }
             }
         }
     }
-    parts.extend(spec_touched_modules(graph, &spec_node.id));
-    text_terms(&parts.join("\n"))
+    for module in spec_touched_modules(graph, &spec_node.id) {
+        feature.text.push(module.clone());
+        feature.evidence.push(format!("matching-module:{module}"));
+    }
+    let spec = node_attr(spec_node, "spec");
+    for linked in graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == spec_node.id)
+        .filter_map(|edge| {
+            graph
+                .nodes
+                .get(&edge.to)
+                .map(|node| (edge.edge_type.as_str(), node))
+        })
+    {
+        collect_feature_node_evidence(&mut feature, linked.0, linked.1);
+    }
+    if let Some(spec) = spec {
+        for node in graph.nodes.values().filter(|node| {
+            node_attr(node, "spec") == Some(spec)
+                && !matches!(node.node_type.as_str(), "Spec" | "Release")
+        }) {
+            collect_feature_node_evidence(&mut feature, "SPEC_ATTR_MATCH", node);
+            for realized in graph
+                .edges
+                .values()
+                .filter(|edge| edge.from == node.id && edge.edge_type == "CODE_OBJECT_REALIZED_BY")
+                .filter_map(|edge| graph.nodes.get(&edge.to))
+            {
+                collect_feature_node_evidence(&mut feature, "CODE_OBJECT_REALIZED_BY", realized);
+            }
+        }
+    }
+    feature.evidence.sort();
+    feature.evidence.dedup();
+    feature
+}
+
+fn collect_feature_node_evidence(feature: &mut FeatureEvidence, edge_type: &str, node: &Node) {
+    match node.node_type.as_str() {
+        "Endpoint" | "CodeRoute" => {
+            for key in ["method", "path", "route", "name", "title"] {
+                if let Some(value) = node_attr(node, key) {
+                    feature.text.push(value.to_string());
+                }
+            }
+            feature.evidence.push("matching-endpoint".to_string());
+        }
+        "TestCase" | "TestRun" | "TestResult" | "ValidationRun" => {
+            for key in ["name", "title", "test", "runId", "status", "description"] {
+                if let Some(value) = node_attr(node, key) {
+                    feature.text.push(value.to_string());
+                }
+            }
+            feature.evidence.push("matching-test".to_string());
+        }
+        "CodeObjectDeclaration" | "CodeSymbol" | "CodeFile" => {
+            for key in ["name", "symbol", "kind", "path", "file", "expectedFile"] {
+                if let Some(value) = node_attr(node, key) {
+                    feature.text.push(value.to_string());
+                }
+            }
+            if node.node_type == "CodeFile"
+                && node_attr(node, "path").is_some_and(|path| path.ends_with(".md"))
+            {
+                feature.evidence.push("matching-docs".to_string());
+            } else {
+                feature.evidence.push("matching-code-symbol".to_string());
+            }
+        }
+        "PullRequest" => {
+            for key in ["title", "number", "url", "state"] {
+                if let Some(value) = node_attr(node, key) {
+                    feature.text.push(value.to_string());
+                }
+            }
+            feature.evidence.push("matching-pr".to_string());
+        }
+        "Behavior" | "UseCase" | "DomainEntity" | "DataObject" => {
+            for key in ["name", "title", "description"] {
+                if let Some(value) = node_attr(node, key) {
+                    feature.text.push(value.to_string());
+                }
+            }
+            feature
+                .evidence
+                .push(format!("matching-{}", edge_type.to_ascii_lowercase()));
+        }
+        _ => {}
+    }
 }
 
 fn text_terms(value: &str) -> Vec<String> {
@@ -4859,6 +5134,9 @@ fn validate_operation_semantic_preconditions(
         "Validation.Record" => {
             validate_validation_record_semantic_preconditions(graph, request, delta)
         }
+        "Intent.RecordDecision" => {
+            validate_intent_record_decision_semantic_preconditions(graph, delta)
+        }
         "Proposal.Accept" => validate_proposal_accept_semantic_preconditions(graph, request, delta),
         _ => Vec::new(),
     }
@@ -5441,6 +5719,172 @@ fn validate_validation_record_semantic_preconditions(
     findings
 }
 
+fn validate_intent_record_decision_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    let clarifications = delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "IntentClarification")
+        .collect::<Vec<_>>();
+    if clarifications.len() != 1 {
+        findings.push(semantic_finding(
+            "semantic.intent_record.clarification_required",
+            "Intent.RecordDecision must create exactly one IntentClarification node.",
+        ));
+        return findings;
+    }
+    let clarification = clarifications[0];
+    let clarification_id = node_attr(clarification, "clarificationId").unwrap_or("");
+    if clarification_id.trim().is_empty() {
+        findings.push(semantic_finding(
+            "semantic.intent_record.empty_clarification_id",
+            "IntentClarification requires non-empty clarificationId.",
+        ));
+    }
+
+    for question in delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "IntentQuestion")
+    {
+        let question_id = node_attr(question, "questionId").unwrap_or("");
+        if question_id.trim().is_empty()
+            || node_attr(question, "prompt").is_none_or(str::is_empty)
+            || node_attr(question, "blocksOperation").is_none_or(str::is_empty)
+        {
+            findings.push(semantic_finding(
+                "semantic.intent_record.invalid_question",
+                "IntentQuestion requires questionId, prompt, and blocksOperation.",
+            ));
+        }
+        if !delta.create_edges.iter().any(|edge| {
+            edge.from == clarification.id
+                && edge.to == question.id
+                && edge.edge_type == "CLARIFICATION_HAS_QUESTION"
+        }) {
+            findings.push(semantic_finding(
+                "semantic.intent_record.question_link_required",
+                format!(
+                    "IntentQuestion `{}` must be linked from IntentClarification.",
+                    question.id
+                ),
+            ));
+        }
+    }
+
+    for answer in delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "IntentAnswer")
+    {
+        let question_id = node_attr(answer, "questionId").unwrap_or("");
+        if question_id.trim().is_empty() || node_attr(answer, "answer").is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.intent_record.invalid_answer",
+                "IntentAnswer requires questionId and answer.",
+            ));
+        }
+        let linked_question = delta
+            .create_edges
+            .iter()
+            .find(|edge| edge.to == answer.id && edge.edge_type == "QUESTION_ANSWERED_BY");
+        if linked_question
+            .is_none_or(|edge| !node_exists_with_type(graph, delta, &edge.from, "IntentQuestion"))
+        {
+            findings.push(semantic_finding(
+                "semantic.intent_record.answer_link_required",
+                format!(
+                    "IntentAnswer `{}` must link to an IntentQuestion with QUESTION_ANSWERED_BY.",
+                    answer.id
+                ),
+            ));
+        }
+    }
+
+    for assumption in delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "IntentAssumption")
+    {
+        let assumption_id = node_attr(assumption, "assumptionId").unwrap_or("");
+        if assumption_id.trim().is_empty()
+            || node_attr(assumption, "assumption").is_none_or(str::is_empty)
+        {
+            findings.push(semantic_finding(
+                "semantic.intent_record.invalid_assumption",
+                "IntentAssumption requires assumptionId and assumption.",
+            ));
+        }
+        if !delta.create_edges.iter().any(|edge| {
+            edge.from == clarification.id
+                && edge.to == assumption.id
+                && edge.edge_type == "CLARIFICATION_HAS_ASSUMPTION"
+        }) {
+            findings.push(semantic_finding(
+                "semantic.intent_record.assumption_link_required",
+                format!(
+                    "IntentAssumption `{}` must be linked from IntentClarification.",
+                    assumption.id
+                ),
+            ));
+        }
+        let requires_approval = assumption
+            .attributes
+            .get("requiresApproval")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || node_attr(assumption, "risk")
+                .is_some_and(|risk| matches!(risk, "high" | "critical"));
+        if requires_approval {
+            let approval_edges = delta
+                .create_edges
+                .iter()
+                .filter(|edge| edge.to == assumption.id && edge.edge_type == "APPROVES_ASSUMPTION")
+                .collect::<Vec<_>>();
+            if approval_edges.is_empty() {
+                findings.push(semantic_finding(
+                    "semantic.intent_record.risky_assumption_approval_required",
+                    format!(
+                        "Risky IntentAssumption `{assumption_id}` requires an APPROVES_ASSUMPTION edge from an existing Approval."
+                    ),
+                ));
+            }
+            for approval_edge in approval_edges {
+                let approval_node = graph.nodes.get(&approval_edge.from);
+                if approval_node.is_none_or(|node| node.node_type != "Approval") {
+                    findings.push(semantic_finding(
+                        "semantic.intent_record.approval_node_required",
+                        format!(
+                            "APPROVES_ASSUMPTION source `{}` must be an existing Approval.",
+                            approval_edge.from
+                        ),
+                    ));
+                    continue;
+                }
+                let approval_node = approval_node.expect("checked above");
+                if !approval_scope_matches_assumption(
+                    approval_node,
+                    clarification_id,
+                    assumption_id,
+                ) {
+                    findings.push(semantic_finding(
+                        "semantic.intent_record.approval_scope_mismatch",
+                        format!(
+                            "Approval `{}` must be scoped to `intent:{clarification_id}` or `intent-assumption:{assumption_id}`.",
+                            approval_edge.from
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    findings
+}
+
 fn validate_proposal_accept_semantic_preconditions(
     graph: &Graph,
     request: &OperationRequest,
@@ -5668,6 +6112,23 @@ fn node_attr_eq(node: &Node, key: &str, expected: &str) -> bool {
 
 fn node_attr<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
     node.attributes.get(key).and_then(Value::as_str)
+}
+
+fn node_exists_with_type(
+    graph: &Graph,
+    delta: &GraphDelta,
+    node_id: &str,
+    node_type: &str,
+) -> bool {
+    graph
+        .nodes
+        .get(node_id)
+        .is_some_and(|node| node.node_type == node_type)
+        || delta
+            .create_nodes
+            .iter()
+            .chain(delta.update_nodes.iter())
+            .any(|node| node.id == node_id && node.node_type == node_type)
 }
 
 fn node_attr_required<'a>(
@@ -6354,6 +6815,25 @@ fn approval_node(options: &RecordApprovalOptions) -> Node {
     }
 }
 
+fn approval_node_for_id<'a>(graph: &'a Graph, approval_id: &str) -> Option<&'a Node> {
+    graph.nodes.values().find(|node| {
+        node.node_type == "Approval"
+            && node_attr(node, "approvalId").is_some_and(|value| value == approval_id)
+    })
+}
+
+fn approval_scope_matches_assumption(
+    approval: &Node,
+    clarification_id: &str,
+    assumption_id: &str,
+) -> bool {
+    let clarification_scope = format!("intent:{clarification_id}");
+    let assumption_scope = format!("intent-assumption:{assumption_id}");
+    node_attr(approval, "scope").is_some_and(|scope| {
+        scope == "*" || scope == clarification_scope || scope == assumption_scope
+    })
+}
+
 fn waiver_node(options: &CreateWaiverOptions) -> Node {
     let mut attributes = BTreeMap::from([
         ("waiverId".to_string(), json!(options.waiver_id)),
@@ -6542,6 +7022,35 @@ fn edge(from: &str, edge_type: &str, to: &str) -> Edge {
         to: to.to_string(),
         attributes: BTreeMap::new(),
     }
+}
+
+fn intent_clarification_node_id(clarification_id: &str) -> String {
+    node_id("intent_clarification", clarification_id)
+}
+
+fn intent_question_node_id(clarification_node_id: &str, question_id: &str) -> String {
+    node_id(
+        "intent_question",
+        &format!("{clarification_node_id}/{question_id}"),
+    )
+}
+
+fn intent_answer_node_id(
+    clarification_node_id: &str,
+    question_id: &str,
+    answered_by: &str,
+) -> String {
+    node_id(
+        "intent_answer",
+        &format!("{clarification_node_id}/{question_id}/{answered_by}"),
+    )
+}
+
+fn intent_assumption_node_id(clarification_node_id: &str, assumption_id: &str) -> String {
+    node_id(
+        "intent_assumption",
+        &format!("{clarification_node_id}/{assumption_id}"),
+    )
 }
 
 fn node_id(kind: &str, value: &str) -> String {
@@ -7998,6 +8507,53 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn workflow_plan_existing_feature_evidence_includes_code_docs_and_pr_facts() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_code_symbol_docs_and_pr_evidence(tmp.path(), "AUTH-001");
+
+        let plan = plan_workflow(
+            tmp.path(),
+            WorkflowPlanOptions {
+                spec: Some("AUTH-002".to_string()),
+                title: Some("requestPasswordReset".to_string()),
+                touches_modules: vec!["Identity".to_string()],
+                requirements: vec![sg_spec::TextItem {
+                    id: "REQ-001".to_string(),
+                    text: "Authenticated requestPasswordReset behavior exists".to_string(),
+                }],
+                acceptance_criteria: vec![sg_spec::TextItem {
+                    id: "AC-001".to_string(),
+                    text: "Authenticated requestPasswordReset docs and pull request evidence exist"
+                        .to_string(),
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..WorkflowPlanOptions::default()
+            },
+        )
+        .unwrap();
+
+        let feature = plan
+            .existing_features
+            .iter()
+            .find(|feature| feature.spec.as_deref() == Some("AUTH-001"))
+            .expect("existing feature is detected");
+        assert!(feature
+            .evidence
+            .iter()
+            .any(|evidence| evidence == "matching-code-symbol"));
+        assert!(feature
+            .evidence
+            .iter()
+            .any(|evidence| evidence == "matching-docs"));
+        assert!(feature
+            .evidence
+            .iter()
+            .any(|evidence| evidence == "matching-pr"));
+    }
+
+    #[test]
     fn workflow_plan_returns_docs_only_for_documentation_request() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -8025,6 +8581,135 @@ acceptanceCriteria:
         assert!(matches!(plan.status, WorkflowPlanStatus::Ready));
         assert_eq!(plan.decision, "docs-only");
         assert!(plan.required_questions.is_empty());
+    }
+
+    #[test]
+    fn intent_record_decision_persists_questions_answers_and_safe_assumptions() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let receipt = record_intent_decision(
+            tmp.path(),
+            RecordIntentDecisionOptions {
+                spec: Some("AUTH-001".to_string()),
+                clarification_id: Some("AUTH-001/intent-1".to_string()),
+                questions: vec![intent_question(
+                    "intent.required_behavior",
+                    "IntentClarification",
+                    "What behavior is required?",
+                    "Need explicit intent.",
+                    "Spec.Create",
+                    false,
+                )],
+                answers: vec![IntentAnswer {
+                    question_id: "intent.required_behavior".to_string(),
+                    answer: "Users can request password reset.".to_string(),
+                    answered_by: "test".to_string(),
+                    evidence: vec!["user-confirmed".to_string()],
+                }],
+                assumptions: vec![IntentAssumption {
+                    id: "assumption.priority.normal".to_string(),
+                    area: "Planning".to_string(),
+                    assumption: "Treat priority as normal.".to_string(),
+                    risk: "low".to_string(),
+                    requires_approval: false,
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..RecordIntentDecisionOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "Intent.RecordDecision");
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "IntentClarification"));
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "IntentAnswer"
+                && node_attr(node, "answer") == Some("Users can request password reset.")));
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "QUESTION_ANSWERED_BY"));
+        assert!(validate_specs(tmp.path()).unwrap().findings.is_empty());
+    }
+
+    #[test]
+    fn intent_record_decision_rejects_risky_assumption_without_approval() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let error = record_intent_decision(
+            tmp.path(),
+            RecordIntentDecisionOptions {
+                spec: Some("AUTH-001".to_string()),
+                clarification_id: Some("AUTH-001/risky".to_string()),
+                assumptions: vec![security_risky_assumption()],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..RecordIntentDecisionOptions::default()
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "Intent.RecordDecision"
+        ));
+    }
+
+    #[test]
+    fn intent_record_decision_accepts_risky_assumption_with_scoped_approval() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_policy_approver(tmp.path(), "local:intent-approver");
+        record_approval(
+            tmp.path(),
+            RecordApprovalOptions {
+                approval_id: "approval-intent-security".to_string(),
+                approval: "intent-risk".to_string(),
+                policy: None,
+                scope: Some("intent-assumption:assumption.security.requires_approval".to_string()),
+                reason: Some("Reviewed security assumption boundary.".to_string()),
+                approved_by: "local:intent-approver".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let receipt = record_intent_decision(
+            tmp.path(),
+            RecordIntentDecisionOptions {
+                spec: Some("AUTH-001".to_string()),
+                clarification_id: Some("AUTH-001/risky-approved".to_string()),
+                assumptions: vec![security_risky_assumption()],
+                approval_ids: vec!["approval-intent-security".to_string()],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..RecordIntentDecisionOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "Intent.RecordDecision");
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "APPROVES_ASSUMPTION"));
     }
 
     #[test]
@@ -10895,6 +11580,137 @@ acceptanceCriteria:
         .unwrap();
     }
 
+    fn add_code_symbol_docs_and_pr_evidence(root: &Path, spec: &str) {
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": spec}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    spec,
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "CodeGraph.Upsert".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeGraph": "symbol-and-docs"}),
+                dry_run: false,
+                delta: code_symbol_and_docs_delta(spec),
+            },
+        )
+        .unwrap();
+        let replay = replay_events(root, ReplayOptions { check_hashes: true }).unwrap();
+        let declaration = find_code_object_declaration(
+            &replay.graph,
+            spec,
+            "function",
+            "requestPasswordReset",
+            Some("Identity"),
+        )
+        .unwrap();
+        let symbol_id = node_id(
+            "code_symbol",
+            "src/identity/password-reset.rs/function/requestPasswordReset",
+        );
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "CodeObject.LinkExisting".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": spec}, "existing": "requestPasswordReset"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_edges: vec![edge(
+                        &declaration.id,
+                        "CODE_OBJECT_REALIZED_BY",
+                        &symbol_id,
+                    )],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "GitGraph.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"gitGraph": "pull-request"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: node_id("pull_request", &format!("{spec}/42")),
+                        stable_key: format!("pull-request:{spec}/42"),
+                        node_type: "PullRequest".to_string(),
+                        attributes: BTreeMap::from([
+                            ("spec".to_string(), json!(spec)),
+                            (
+                                "title".to_string(),
+                                json!("Implement requestPasswordReset behavior"),
+                            ),
+                            ("state".to_string(), json!("merged")),
+                        ]),
+                    }],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+    }
+
+    fn add_policy_approver(root: &Path, actor_id: &str) {
+        upsert_actor(
+            root,
+            UpsertActorOptions {
+                actor_id: actor_id.to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        grant_role(
+            root,
+            GrantRoleOptions {
+                actor_id: actor_id.to_string(),
+                role: "policy-approver".to_string(),
+                permissions: vec!["policy.approve".to_string()],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+    }
+
+    fn security_risky_assumption() -> IntentAssumption {
+        IntentAssumption {
+            id: "assumption.security.requires_approval".to_string(),
+            area: "Security".to_string(),
+            assumption: "No security-sensitive behavior will be invented without approval."
+                .to_string(),
+            risk: "high".to_string(),
+            requires_approval: true,
+        }
+    }
+
     fn add_project_profile(root: &Path) {
         upsert_project_profile(
             root,
@@ -11035,5 +11851,33 @@ acceptanceCriteria:
             create_edges: vec![edge(&file_id, "DEFINES_SYMBOL", &symbol_id)],
             ..GraphDelta::default()
         }
+    }
+
+    fn code_symbol_and_docs_delta(spec: &str) -> GraphDelta {
+        let mut delta = code_symbol_delta(
+            "src/identity/password-reset.rs",
+            "function",
+            "requestPasswordReset",
+        );
+        delta.create_nodes.push(Node {
+            id: node_id("code_file", "docs/password-reset.md"),
+            stable_key: "code-file:docs/password-reset.md".to_string(),
+            node_type: "CodeFile".to_string(),
+            attributes: BTreeMap::from([
+                ("spec".to_string(), json!(spec)),
+                ("path".to_string(), json!("docs/password-reset.md")),
+                (
+                    "title".to_string(),
+                    json!("requestPasswordReset documentation"),
+                ),
+            ]),
+        });
+        if let Some(symbol) = delta.create_nodes.iter_mut().find(|node| {
+            node.node_type == "CodeSymbol"
+                && node_attr(node, "name") == Some("requestPasswordReset")
+        }) {
+            symbol.attributes.insert("spec".to_string(), json!(spec));
+        }
+        delta
     }
 }

@@ -272,6 +272,28 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Intent.RecordDecision",
+            category: "intent",
+            description: "Record accepted intent clarification questions, answers, assumptions, and approval links.",
+            required_input_fields: &["intent"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "IntentClarification",
+                "IntentQuestion",
+                "IntentAnswer",
+                "IntentAssumption",
+            ],
+            allowed_create_edge_types: &[
+                "HAS_INTENT_CLARIFICATION",
+                "CLARIFICATION_HAS_QUESTION",
+                "CLARIFICATION_HAS_ASSUMPTION",
+                "QUESTION_ANSWERED_BY",
+                "APPROVES_ASSUMPTION",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Spec.BindBranch",
             category: "git",
             description: "Bind a spec to a Git branch and graph snapshot.",
