@@ -5266,6 +5266,42 @@ pub fn transition_action(
             ),
         ]),
     };
+    let mut create_nodes = vec![attempt];
+    let mut create_edges = vec![edge(&action.id, "HAS_EXECUTION_ATTEMPT", &attempt_id)];
+    let mut delete_edges = Vec::new();
+    if operation == "Action.Replan" {
+        let replan_uuid = Uuid::new_v4();
+        let replacement_id = node_id(
+            "action_node",
+            &format!("{}/replanned/{replan_uuid}", action.id),
+        );
+        let mut replacement = action.clone();
+        replacement.id = replacement_id.clone();
+        replacement.stable_key = format!("action-node:{}/replanned/{replan_uuid}", action.id);
+        replacement
+            .attributes
+            .insert("state".to_string(), json!("Ready"));
+        replacement
+            .attributes
+            .insert("replansAction".to_string(), json!(action.id.clone()));
+        create_nodes.push(replacement);
+        create_edges.push(edge(&action.id, "REPLANNED_BY", &replacement_id));
+        for existing_edge in replay.graph.edges.values() {
+            match existing_edge.edge_type.as_str() {
+                "HAS_ACTION" if existing_edge.to == action.id => {
+                    create_edges.push(edge(&existing_edge.from, "HAS_ACTION", &replacement_id));
+                }
+                "DEPENDS_ON" if existing_edge.from == action.id => {
+                    create_edges.push(edge(&replacement_id, "DEPENDS_ON", &existing_edge.to));
+                }
+                "DEPENDS_ON" if existing_edge.to == action.id => {
+                    delete_edges.push(existing_edge.id.clone());
+                    create_edges.push(edge(&existing_edge.from, "DEPENDS_ON", &replacement_id));
+                }
+                _ => {}
+            }
+        }
+    }
 
     append_operation(
         root,
@@ -5275,9 +5311,10 @@ pub fn transition_action(
             graph_branch: options.graph_branch,
             input: json!({"action": options.action, "state": target_state}),
             delta: GraphDelta {
-                create_nodes: vec![attempt],
+                create_nodes,
                 update_nodes: vec![updated],
-                create_edges: vec![edge(&action.id, "HAS_EXECUTION_ATTEMPT", &attempt_id)],
+                create_edges,
+                delete_edges,
                 ..GraphDelta::default()
             },
             dry_run: false,
@@ -5287,6 +5324,19 @@ pub fn transition_action(
 
 fn action_lifecycle_blockers(graph: &Graph, action_id: &str, target_state: &str) -> Vec<String> {
     let mut blockers = Vec::new();
+    if graph
+        .nodes
+        .get(action_id)
+        .and_then(|node| node.attributes.get("state"))
+        .and_then(Value::as_str)
+        .is_some_and(|state| state == "Replanned")
+        && target_state != "Replanned"
+    {
+        blockers.push(format!(
+            "action `{action_id}` has been replanned and cannot continue; use the replacement ActionNode"
+        ));
+    }
+
     if target_state == "InProgress" {
         for dependency in graph
             .edges
@@ -11116,6 +11166,27 @@ fn find_spec_node<'a>(graph: &'a Graph, spec: &str) -> Option<&'a Node> {
     })
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionGraphTemplateSchema {
+    pub schema_version: String,
+    pub name: String,
+    pub action_groups: Vec<ActionGraphTemplateGroup>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionGraphTemplateGroup {
+    pub name: String,
+    pub actions: Vec<String>,
+    pub dependencies: Vec<String>,
+    pub allowed_file_scopes: Vec<String>,
+    pub required_validations: Vec<String>,
+    pub expected_node_types: Vec<String>,
+    pub expected_edge_types: Vec<String>,
+    pub forbidden_effects: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 struct ActionGraphCodeScope {
     declaration_ids: Vec<String>,
@@ -11126,13 +11197,14 @@ struct ActionGraphCodeScope {
 fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDelta {
     let action_graph_id = node_id("action_graph", spec);
     let declaration_scopes = action_graph_code_scopes(graph, spec_node_id);
+    let templates = select_action_templates(graph, spec_node_id);
     let mut create_nodes = vec![Node {
         id: action_graph_id.clone(),
         stable_key: format!("action-graph:{spec}"),
         node_type: "ActionGraph".to_string(),
         attributes: BTreeMap::from([
             ("spec".to_string(), json!(spec)),
-            ("template".to_string(), json!("code-object-aware")),
+            ("template".to_string(), json!("built-in/code-object-aware")),
             (
                 "codeObjectDeclarations".to_string(),
                 json!(declaration_scopes
@@ -11144,9 +11216,11 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
     }];
     let mut create_edges = vec![edge(spec_node_id, "HAS_ACTION_GRAPH", &action_graph_id)];
 
-    for template in ACTION_GROUP_TEMPLATES {
+    let mut action_ids_by_group = BTreeMap::new();
+    for template in templates {
         let group_id = node_id("action_group", &format!("{spec}/{}", template.name));
         let action_id = node_id("action_node", &format!("{spec}/{}", template.name));
+        action_ids_by_group.insert(template.name, action_id.clone());
         let commit_plan_id = node_id("commit_plan", &format!("{spec}/{}", template.name));
         let scope = declaration_scopes.get(template.name);
         let scoped_files = scope.map(|scope| scope.files.clone()).unwrap_or_default();
@@ -11222,6 +11296,18 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
                     "expectedGraphDelta".to_string(),
                     json!(template.name == "graph"),
                 ),
+                (
+                    "expectedNodeTypes".to_string(),
+                    json!(template.expected_node_types),
+                ),
+                (
+                    "expectedEdgeTypes".to_string(),
+                    json!(template.expected_edge_types),
+                ),
+                (
+                    "forbiddenEffects".to_string(),
+                    json!(template.forbidden_effects),
+                ),
             ]),
         });
         append_validation_recipe_nodes(
@@ -11238,12 +11324,73 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
         create_edges.push(edge(&group_id, "HAS_ACTION", &action_id));
         create_edges.push(edge(&group_id, "HAS_COMMIT_PLAN", &commit_plan_id));
     }
+    for template in templates {
+        let Some(action_id) = action_ids_by_group.get(template.name) else {
+            continue;
+        };
+        for dependency in template.dependencies {
+            if let Some(dependency_id) = action_ids_by_group.get(dependency) {
+                create_edges.push(edge(action_id, "DEPENDS_ON", dependency_id));
+            }
+        }
+    }
 
     GraphDelta {
         create_nodes,
         create_edges,
         ..GraphDelta::default()
     }
+}
+
+pub fn built_in_action_template_schema() -> ActionGraphTemplateSchema {
+    ActionGraphTemplateSchema {
+        schema_version: "specgraph.action-template/v1".to_string(),
+        name: "built-in/code-object-aware".to_string(),
+        action_groups: ACTION_GROUP_TEMPLATES
+            .iter()
+            .map(|template| ActionGraphTemplateGroup {
+                name: template.name.to_string(),
+                actions: vec![template.action.to_string()],
+                dependencies: template
+                    .dependencies
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
+                allowed_file_scopes: template
+                    .allowed_paths
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
+                required_validations: template
+                    .required_validation
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
+                expected_node_types: template
+                    .expected_node_types
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
+                expected_edge_types: template
+                    .expected_edge_types
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
+                forbidden_effects: template
+                    .forbidden_effects
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+fn select_action_templates<'a>(
+    _graph: &'a Graph,
+    _spec_node_id: &str,
+) -> &'a [ActionGroupTemplate] {
+    ACTION_GROUP_TEMPLATES
 }
 
 fn action_graph_code_scopes(
@@ -11401,6 +11548,10 @@ struct ActionGroupTemplate {
     allowed_paths: &'static [&'static str],
     required_validation: &'static [&'static str],
     required_recipes: &'static [&'static str],
+    dependencies: &'static [&'static str],
+    expected_node_types: &'static [&'static str],
+    expected_edge_types: &'static [&'static str],
+    forbidden_effects: &'static [&'static str],
 }
 
 const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
@@ -11412,6 +11563,27 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         allowed_paths: &[".specgraph/**", "specs/**", "docs/**"],
         required_validation: &["replay", "spec"],
         required_recipes: &["replay", "spec"],
+        dependencies: &[],
+        expected_node_types: &[
+            "Spec",
+            "ActionGraph",
+            "ActionGroup",
+            "ActionNode",
+            "CommitPlan",
+            "ValidationRecipe",
+            "ValidationCommand",
+        ],
+        expected_edge_types: &[
+            "HAS_ACTION_GRAPH",
+            "HAS_ACTION_GROUP",
+            "HAS_ACTION",
+            "HAS_COMMIT_PLAN",
+            "ACTION_REQUIRES_VALIDATION_RECIPE",
+            "COMMIT_PLAN_REQUIRES_VALIDATION_RECIPE",
+            "VALIDATION_RECIPE_HAS_COMMAND",
+            "DEPENDS_ON",
+        ],
+        forbidden_effects: &["deleteNodes"],
     },
     ActionGroupTemplate {
         name: "tests",
@@ -11421,6 +11593,15 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         allowed_paths: &["tests/**", "**/*test*", "**/*spec*"],
         required_validation: &["trace"],
         required_recipes: &["test-intent", "trace"],
+        dependencies: &["graph"],
+        expected_node_types: &["TestCase", "TestRun", "TestResult", "ValidationRun"],
+        expected_edge_types: &[
+            "HAS_TEST_CASE",
+            "HAS_TEST_RUN",
+            "HAS_TEST_RESULT",
+            "VALIDATED_BY",
+        ],
+        forbidden_effects: &["deleteNodes"],
     },
     ActionGroupTemplate {
         name: "implementation",
@@ -11430,6 +11611,10 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         allowed_paths: &["src/**", "crates/**", "packages/**", "apps/**"],
         required_validation: &[],
         required_recipes: &["build", "typecheck", "lint", "format"],
+        dependencies: &["graph"],
+        expected_node_types: &["CodeFile", "CodeSymbol", "CodeRoute"],
+        expected_edge_types: &["DEFINES_SYMBOL", "DECLARES_ROUTE", "HANDLED_BY_SYMBOL"],
+        forbidden_effects: &["deleteNodes"],
     },
     ActionGroupTemplate {
         name: "interface",
@@ -11445,6 +11630,10 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         ],
         required_validation: &[],
         required_recipes: &["build", "typecheck", "lint", "format", "public-contract"],
+        dependencies: &["implementation"],
+        expected_node_types: &["ApiContract", "RequestType", "ResponseType", "CodeRoute"],
+        expected_edge_types: &["DECLARES_ROUTE", "HANDLED_BY_SYMBOL"],
+        forbidden_effects: &["deleteNodes"],
     },
     ActionGroupTemplate {
         name: "validation",
@@ -11454,6 +11643,10 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         allowed_paths: &[".github/**", ".specgraph/validation/**", "docs/**"],
         required_validation: &["replay", "spec", "trace", "commit"],
         required_recipes: &["replay", "spec", "trace", "commit"],
+        dependencies: &["graph", "tests", "implementation"],
+        expected_node_types: &["ValidationRun", "ValidatorExecution", "Finding"],
+        expected_edge_types: &["VALIDATED_BY", "HAS_VALIDATOR_EXECUTION", "HAS_FINDING"],
+        forbidden_effects: &["deleteNodes", "deleteEdges"],
     },
 ];
 
@@ -14169,6 +14362,57 @@ acceptanceCriteria:
         .unwrap();
 
         let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        let graph_action_id = node_id("action_node", "AUTH-001/graph");
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Validation.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "runId": "graph-validation",
+                    "status": "Passed",
+                    "checks": ["replay", "spec"],
+                    "stateHash": replay.state_hash,
+                }),
+                dry_run: false,
+                delta: validation_run_for_action_recipes_delta(
+                    &replay.graph,
+                    &graph_action_id,
+                    "graph-validation",
+                    false,
+                    false,
+                    false,
+                    false,
+                ),
+            },
+        )
+        .unwrap();
+        transition_action(
+            tmp.path(),
+            ActionLifecycleOptions {
+                action: graph_action_id.clone(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                reason: Some("Start graph action".to_string()),
+            },
+            "Action.Start",
+            "InProgress",
+        )
+        .unwrap();
+        transition_action(
+            tmp.path(),
+            ActionLifecycleOptions {
+                action: graph_action_id,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                reason: Some("Graph validation recipe evidence recorded".to_string()),
+            },
+            "Action.Complete",
+            "Completed",
+        )
+        .unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let action_id = node_id("action_node", "AUTH-001/implementation");
         let blockers = action_lifecycle_blockers(&replay.graph, &action_id, "Completed");
         assert!(blockers
@@ -14227,6 +14471,147 @@ acceptanceCriteria:
         )
         .unwrap();
         assert_eq!(completed.operation, "Action.Complete");
+    }
+
+    #[test]
+    fn action_template_schema_dependencies_and_expected_delta_are_generated() {
+        let schema = built_in_action_template_schema();
+        assert_eq!(schema.schema_version, "specgraph.action-template/v1");
+        assert_eq!(schema.name, "built-in/code-object-aware");
+        let implementation_template = schema
+            .action_groups
+            .iter()
+            .find(|group| group.name == "implementation")
+            .unwrap();
+        assert_eq!(implementation_template.dependencies, vec!["graph"]);
+        assert!(implementation_template
+            .expected_node_types
+            .contains(&"CodeFile".to_string()));
+        assert!(implementation_template
+            .forbidden_effects
+            .contains(&"deleteNodes".to_string()));
+
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_action_graph_for_valid_spec(tmp.path());
+
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        let graph_action_id = node_id("action_node", "AUTH-001/graph");
+        let implementation_action_id = node_id("action_node", "AUTH-001/implementation");
+        let implementation_commit_plan_id = node_id("commit_plan", "AUTH-001/implementation");
+
+        assert!(replay.graph.edges.values().any(|edge| {
+            edge.from == implementation_action_id
+                && edge.to == graph_action_id
+                && edge.edge_type == "DEPENDS_ON"
+        }));
+        let implementation_commit_plan = replay
+            .graph
+            .nodes
+            .get(&implementation_commit_plan_id)
+            .unwrap();
+        assert!(implementation_commit_plan
+            .attributes
+            .get("expectedNodeTypes")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str() == Some("CodeFile")));
+        assert!(implementation_commit_plan
+            .attributes
+            .get("forbiddenEffects")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str() == Some("deleteNodes")));
+
+        let blocked = transition_action(
+            tmp.path(),
+            ActionLifecycleOptions {
+                action: implementation_action_id,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                reason: Some("Start before graph work is complete".to_string()),
+            },
+            "Action.Start",
+            "InProgress",
+        )
+        .unwrap_err();
+        assert!(matches!(blocked, StoreError::OperationValidationFailed(_)));
+    }
+
+    #[test]
+    fn action_replan_creates_replacement_and_rewires_dependents() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_action_graph_for_valid_spec(tmp.path());
+
+        let graph_action_id = node_id("action_node", "AUTH-001/graph");
+        let implementation_action_id = node_id("action_node", "AUTH-001/implementation");
+        let interface_action_id = node_id("action_node", "AUTH-001/interface");
+        transition_action(
+            tmp.path(),
+            ActionLifecycleOptions {
+                action: implementation_action_id.clone(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                reason: Some("Scope changed during implementation".to_string()),
+            },
+            "Action.Replan",
+            "Replanned",
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        let original = replay.graph.nodes.get(&implementation_action_id).unwrap();
+        assert_eq!(node_attr(original, "state"), Some("Replanned"));
+        let replacement_edge = replay
+            .graph
+            .edges
+            .values()
+            .find(|edge| edge.from == implementation_action_id && edge.edge_type == "REPLANNED_BY")
+            .unwrap();
+        let replacement = replay.graph.nodes.get(&replacement_edge.to).unwrap();
+        assert_eq!(replacement.node_type, "ActionNode");
+        assert_eq!(node_attr(replacement, "state"), Some("Ready"));
+        assert_eq!(
+            node_attr(replacement, "replansAction"),
+            Some(implementation_action_id.as_str())
+        );
+        assert!(replay
+            .graph
+            .edges
+            .values()
+            .any(|edge| { edge.edge_type == "HAS_ACTION" && edge.to == replacement.id }));
+        assert!(replay.graph.edges.values().any(|edge| {
+            edge.from == replacement.id
+                && edge.to == graph_action_id
+                && edge.edge_type == "DEPENDS_ON"
+        }));
+        assert!(replay.graph.edges.values().any(|edge| {
+            edge.from == interface_action_id
+                && edge.to == replacement.id
+                && edge.edge_type == "DEPENDS_ON"
+        }));
+        assert!(!replay.graph.edges.values().any(|edge| {
+            edge.from == interface_action_id
+                && edge.to == implementation_action_id
+                && edge.edge_type == "DEPENDS_ON"
+        }));
+
+        let blocked = transition_action(
+            tmp.path(),
+            ActionLifecycleOptions {
+                action: implementation_action_id,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                reason: Some("Try to continue stale action".to_string()),
+            },
+            "Action.Start",
+            "InProgress",
+        )
+        .unwrap_err();
+        assert!(matches!(blocked, StoreError::OperationValidationFailed(_)));
     }
 
     #[test]

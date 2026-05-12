@@ -351,6 +351,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
                 "ACTION_REQUIRES_VALIDATION_RECIPE",
                 "COMMIT_PLAN_REQUIRES_VALIDATION_RECIPE",
                 "VALIDATION_RECIPE_HAS_COMMAND",
+                "DEPENDS_ON",
             ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
@@ -385,7 +386,12 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             required_input_fields: &["action", "state"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
             allowed_create_node_types: &["ActionNode", "ExecutionAttempt"],
-            allowed_create_edge_types: &["HAS_EXECUTION_ATTEMPT", "DEPENDS_ON", "REPLANNED_BY"],
+            allowed_create_edge_types: &[
+                "HAS_EXECUTION_ATTEMPT",
+                "HAS_ACTION",
+                "DEPENDS_ON",
+                "REPLANNED_BY",
+            ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {

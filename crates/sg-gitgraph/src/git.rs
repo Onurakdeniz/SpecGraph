@@ -1,6 +1,6 @@
 use globset::{Glob, GlobSetBuilder};
 use serde::{Deserialize, Serialize};
-use sg_model::{Finding, FindingLocation, FindingSeverity, Graph};
+use sg_model::{Finding, FindingLocation, FindingSeverity, Graph, GraphDelta};
 use sg_validation::{CORE_VALIDATOR_VERSION, VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING};
 use std::collections::BTreeMap;
 
@@ -291,7 +291,101 @@ pub fn validate_commit_plan_requirements(
             ),
         ));
     }
+    findings.extend(validate_expected_graph_delta(commit_plan, input, trailers));
 
+    findings
+}
+
+fn validate_expected_graph_delta(
+    commit_plan: &sg_model::Node,
+    input: &CommitValidationInput,
+    trailers: &CommitTrailers,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let expected_node_types =
+        string_array_attr(commit_plan, "expectedNodeTypes").unwrap_or_default();
+    let expected_edge_types =
+        string_array_attr(commit_plan, "expectedEdgeTypes").unwrap_or_default();
+    let forbidden_effects = string_array_attr(commit_plan, "forbiddenEffects").unwrap_or_default();
+    if expected_node_types.is_empty()
+        && expected_edge_types.is_empty()
+        && forbidden_effects.is_empty()
+    {
+        return findings;
+    }
+    let Some(raw_delta) = trailers
+        .graph_delta
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return findings;
+    };
+    let Ok(delta) = serde_json::from_str::<GraphDelta>(raw_delta) else {
+        findings.push(finding(
+            "commit_plan.graph_delta_invalid",
+            format!(
+                "Commit `{}` GraphDelta trailer is not valid GraphDelta JSON.",
+                input.commit
+            ),
+        ));
+        return findings;
+    };
+    if forbidden_effects
+        .iter()
+        .any(|effect| effect == "deleteNodes")
+        && !delta.delete_nodes.is_empty()
+    {
+        findings.push(finding(
+            "commit_plan.forbidden_effect",
+            format!(
+                "Commit `{}` deletes nodes but CommitPlan `{}` forbids deleteNodes.",
+                input.commit, commit_plan.id
+            ),
+        ));
+    }
+    if forbidden_effects
+        .iter()
+        .any(|effect| effect == "deleteEdges")
+        && !delta.delete_edges.is_empty()
+    {
+        findings.push(finding(
+            "commit_plan.forbidden_effect",
+            format!(
+                "Commit `{}` deletes edges but CommitPlan `{}` forbids deleteEdges.",
+                input.commit, commit_plan.id
+            ),
+        ));
+    }
+    for node in delta.create_nodes.iter().chain(delta.update_nodes.iter()) {
+        if !expected_node_types.is_empty()
+            && !expected_node_types
+                .iter()
+                .any(|expected| expected == &node.node_type)
+        {
+            findings.push(finding(
+                "commit_plan.unexpected_node_type",
+                format!(
+                    "Commit `{}` changes node type `{}` outside CommitPlan `{}` expectedNodeTypes.",
+                    input.commit, node.node_type, commit_plan.id
+                ),
+            ));
+        }
+    }
+    for edge in delta.create_edges.iter().chain(delta.update_edges.iter()) {
+        if !expected_edge_types.is_empty()
+            && !expected_edge_types
+                .iter()
+                .any(|expected| expected == &edge.edge_type)
+        {
+            findings.push(finding(
+                "commit_plan.unexpected_edge_type",
+                format!(
+                    "Commit `{}` changes edge type `{}` outside CommitPlan `{}` expectedEdgeTypes.",
+                    input.commit, edge.edge_type, commit_plan.id
+                ),
+            ));
+        }
+    }
     findings
 }
 
@@ -498,5 +592,56 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "commit_plan.graph_delta_trailer_missing"));
+    }
+
+    #[test]
+    fn commit_plan_rejects_unexpected_delta_and_forbidden_delete() {
+        let plan = sg_model::Node {
+            id: "node_commit_plan".to_string(),
+            stable_key: "commit-plan:AUTH-001/graph".to_string(),
+            node_type: "CommitPlan".to_string(),
+            attributes: BTreeMap::from([
+                ("expectedNodeTypes".to_string(), serde_json::json!(["Spec"])),
+                (
+                    "expectedEdgeTypes".to_string(),
+                    serde_json::json!(["HAS_REQUIREMENT"]),
+                ),
+                (
+                    "forbiddenEffects".to_string(),
+                    serde_json::json!(["deleteNodes"]),
+                ),
+            ]),
+        };
+        let delta = GraphDelta {
+            create_nodes: vec![sg_model::Node {
+                id: "node_code_file".to_string(),
+                stable_key: "code-file:src/lib.rs".to_string(),
+                node_type: "CodeFile".to_string(),
+                attributes: BTreeMap::new(),
+            }],
+            delete_nodes: vec!["node_old".to_string()],
+            ..GraphDelta::default()
+        };
+        let input = CommitValidationInput {
+            commit: "abc123".to_string(),
+            message: "feat: test".to_string(),
+            changed_files: vec![],
+            changed_symbols: vec![],
+        };
+        let findings = validate_commit_plan_requirements(
+            &Graph::default(),
+            &plan,
+            &input,
+            &CommitTrailers {
+                graph_delta: Some(serde_json::to_string(&delta).unwrap()),
+                ..CommitTrailers::default()
+            },
+        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "commit_plan.unexpected_node_type"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "commit_plan.forbidden_effect"));
     }
 }

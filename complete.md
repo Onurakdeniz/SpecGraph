@@ -146,8 +146,9 @@ Current completed slices:
 - **Phase 4A — Scoped release/PR/merge evidence semantics** added spec-scoped validation/PR/release/merge ontology edges, release artifact/checksum/evidence graph facts, scoped `Released` blockers, spec-scoped PR validation/record links, GitMerge-to-GraphMerge binding requirements, and tests for unrelated evidence blockers and graph merge binding.
 - **Phase 4B — Release CLI hardening and Phase 4 gate** added `sg release validate`, `sg release artifact add`, hardened `sg release record` to require validation run, graph snapshot, evidence path, and artifact checksums, updated release docs, and extended tests for unrelated evidence, missing snapshot, missing checksum, scoped release success, and GraphMerge/GitMerge binding.
 - **Phase 5 — Hosting provider integration foundations** added a hosting provider trait, GitHub provider fetch/check/comment/webhook support, config-gated GitLab webhook mapping, `sg pr sync --from-provider`, `sg pr publish-check`, GitHub webhook HTTP endpoint, structured provider error mapping, and mock-provider tests that keep provider facts observed/untrusted.
+- **Phase 6A — Action template planning foundations** added a versioned built-in action template schema/registry foundation, template-generated `DEPENDS_ON` edges with start blockers, CommitPlan expected GraphDelta type/effect matching, and replan replacement evidence that blocks stale action continuation.
 
-Next focus: **Phase 6 — ActionGraph and CommitPlan Productionization**. Start from the latest `development` and continue the five-checklist-item branch policy with action template schema/registry, template-based dependencies, expected-delta matching, replan lifecycle, and action status/blocker commands.
+Next focus: **Phase 6B — Pack templates and action blocker CLI**. Keep the five-checklist-item branch policy: finish architecture-pack-provided template selection, add `sg action status`/`sg action blockers` JSON output, and close the remaining Phase 6 pack-selection gate.
 
 ---
 
@@ -709,25 +710,25 @@ Replace fixed MVP action templates with pack-aware planning, dependency ordering
 
 ## Checklist
 
-- [ ] **Add ActionGraph template schema.** Define a versioned YAML/JSON template schema with action groups, actions, dependencies, allowed file scopes, required validations, expected node types, expected edge types, and forbidden effects.
+- [x] **Add ActionGraph template schema.** Define a versioned YAML/JSON template schema with action groups, actions, dependencies, allowed file scopes, required validations, expected node types, expected edge types, and forbidden effects.
 
-- [ ] **Add template registry.** Load built-in templates and architecture-pack-provided templates. Select template by project profile, module graph, spec intent, and architecture pack.
+- [~] **Add template registry.** Load built-in templates and architecture-pack-provided templates. Select template by project profile, module graph, spec intent, and architecture pack.
 
-- [ ] **Generate dependencies.** When generating ActionGraph, create `DEPENDS_ON` edges from template dependencies and validate dependency ordering before action start.
+- [x] **Generate dependencies.** When generating ActionGraph, create `DEPENDS_ON` edges from template dependencies and validate dependency ordering before action start.
 
-- [ ] **Implement expected delta matching.** Extend CommitPlan validation so recorded commits and graph deltas are checked against expected node types, expected edge types, allowed files, required validation, and forbidden effects.
+- [x] **Implement expected delta matching.** Extend CommitPlan validation so recorded commits and graph deltas are checked against expected node types, expected edge types, allowed files, required validation, and forbidden effects.
 
-- [ ] **Add replan lifecycle.** `sg action replan` should accept impact queue input, update affected actions to `Replanned`, create `REPLANNED_BY` evidence, and block continuation until a new valid plan exists.
+- [~] **Add replan lifecycle.** `sg action replan` should accept impact queue input, update affected actions to `Replanned`, create `REPLANNED_BY` evidence, and block continuation until a new valid plan exists.
 
 - [ ] **Add action status/blockers commands.** Add `sg action status` and `sg action blockers` with JSON output. Include dependency blockers, validation blockers, policy blockers, impact blockers, and expected-delta blockers.
 
-- [ ] **Add tests.** Cover pack template selection, dependency enforcement, expected-delta success/failure, forbidden effect failure, impact-driven replan, and action continuation blocked until replan.
+- [~] **Add tests.** Cover pack template selection, dependency enforcement, expected-delta success/failure, forbidden effect failure, impact-driven replan, and action continuation blocked until replan.
 
 ## Phase Gate
 
 - [ ] ActionGraph generated from a pack differs from MVP default when pack is selected.
-- [ ] Commit outside expected delta fails.
-- [ ] Impacted action cannot continue until replanned.
+- [x] Commit outside expected delta fails.
+- [x] Impacted action cannot continue until replanned.
 
 ---
 
