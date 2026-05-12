@@ -6,14 +6,21 @@ use sg_codegraph::{
 };
 use sg_model::{Edge, Finding, FindingSeverity, GraphDelta, Node};
 use sg_validation::{CORE_VALIDATOR_VERSION, VALIDATOR_ADAPTER_TRUST};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+pub const CODE_INDEX_CACHE_SCHEMA_VERSION: &str = "specgraph.code-index-cache/v1";
+pub const CODE_INDEXER_CONTRACT_SCHEMA_VERSION: &str = "specgraph.semantic-code-indexer/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeIndexObservation {
     pub file: String,
     pub language: String,
+    #[serde(default)]
+    pub provenance: IndexerProvenance,
     #[serde(default)]
     pub framework: Option<String>,
     #[serde(default)]
@@ -33,6 +40,8 @@ pub struct CodeIndexObservation {
 pub struct CodeSymbolObservation {
     pub name: String,
     pub kind: String,
+    #[serde(default)]
+    pub visibility: Option<String>,
     #[serde(default)]
     pub line: Option<u32>,
     #[serde(default)]
@@ -72,8 +81,85 @@ pub struct ConfigAccessObservation {
     pub location: Option<SourceLocation>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexerProvenance {
+    pub contract_schema_version: String,
+    pub language_id: String,
+    pub indexer_version: String,
+    pub supported_file_extensions: Vec<String>,
+    pub content_hash: String,
+    pub deterministic: bool,
+    #[serde(default)]
+    pub language_pack: Option<String>,
+}
+
+impl Default for IndexerProvenance {
+    fn default() -> Self {
+        Self {
+            contract_schema_version: CODE_INDEXER_CONTRACT_SCHEMA_VERSION.to_string(),
+            language_id: "unknown".to_string(),
+            indexer_version: "unknown".to_string(),
+            supported_file_extensions: Vec::new(),
+            content_hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
+            deterministic: true,
+            language_pack: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeIndexCacheEntry {
+    pub schema_version: String,
+    pub file: String,
+    pub content_hash: String,
+    pub ontology_version: String,
+    pub language_pack: Option<String>,
+    pub indexer_language: String,
+    pub indexer_version: String,
+    pub observation: CodeIndexObservation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedCodeIndexObservation {
+    pub observation: CodeIndexObservation,
+    pub cache_hit: bool,
+    pub cache_path: PathBuf,
+}
+
+pub trait SemanticCodeIndexer {
+    fn language_id(&self) -> &'static str;
+    fn indexer_version(&self) -> &'static str;
+    fn supported_file_extensions(&self) -> &'static [&'static str];
+    fn index_file_semantic(&self, path: &str, source: &str) -> CodeIndexObservation;
+
+    fn provenance(&self, source: &str, language_pack: Option<&str>) -> IndexerProvenance {
+        IndexerProvenance {
+            contract_schema_version: CODE_INDEXER_CONTRACT_SCHEMA_VERSION.to_string(),
+            language_id: self.language_id().to_string(),
+            indexer_version: self.indexer_version().to_string(),
+            supported_file_extensions: self
+                .supported_file_extensions()
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            content_hash: content_hash(source),
+            deterministic: true,
+            language_pack: language_pack.map(ToOwned::to_owned),
+        }
+    }
+}
+
 pub trait CodeIndexer {
     fn language(&self) -> &'static str;
+    fn indexer_version(&self) -> &'static str {
+        "legacy"
+    }
+    fn supported_file_extensions(&self) -> &'static [&'static str] {
+        &[]
+    }
     fn index_file(&self, path: &str, source: &str) -> Vec<CodeIndexObservation>;
 }
 
@@ -103,16 +189,123 @@ impl CodeIndexer for FrameworkAwareCodeIndexer {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RustSemanticIndexer;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TypeScriptSemanticIndexer;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PythonSemanticIndexer;
+
+impl SemanticCodeIndexer for RustSemanticIndexer {
+    fn language_id(&self) -> &'static str {
+        "rust"
+    }
+
+    fn indexer_version(&self) -> &'static str {
+        "semantic-rust/v1"
+    }
+
+    fn supported_file_extensions(&self) -> &'static [&'static str] {
+        &["rs"]
+    }
+
+    fn index_file_semantic(&self, path: &str, source: &str) -> CodeIndexObservation {
+        semantic_index_source_file(path, "rust", self.provenance(source, None), source)
+    }
+}
+
+impl SemanticCodeIndexer for TypeScriptSemanticIndexer {
+    fn language_id(&self) -> &'static str {
+        "typescript-javascript"
+    }
+
+    fn indexer_version(&self) -> &'static str {
+        "semantic-typescript-javascript/v1"
+    }
+
+    fn supported_file_extensions(&self) -> &'static [&'static str] {
+        &["ts", "tsx", "js", "jsx", "mjs", "cjs"]
+    }
+
+    fn index_file_semantic(&self, path: &str, source: &str) -> CodeIndexObservation {
+        let language = language_for_path(path).unwrap_or("typescript");
+        semantic_index_source_file(path, language, self.provenance(source, None), source)
+    }
+}
+
+impl SemanticCodeIndexer for PythonSemanticIndexer {
+    fn language_id(&self) -> &'static str {
+        "python"
+    }
+
+    fn indexer_version(&self) -> &'static str {
+        "semantic-python/v1"
+    }
+
+    fn supported_file_extensions(&self) -> &'static [&'static str] {
+        &["py"]
+    }
+
+    fn index_file_semantic(&self, path: &str, source: &str) -> CodeIndexObservation {
+        semantic_index_source_file(path, "python", self.provenance(source, None), source)
+    }
+}
+
+impl<T: SemanticCodeIndexer> CodeIndexer for T {
+    fn language(&self) -> &'static str {
+        self.language_id()
+    }
+
+    fn indexer_version(&self) -> &'static str {
+        SemanticCodeIndexer::indexer_version(self)
+    }
+
+    fn supported_file_extensions(&self) -> &'static [&'static str] {
+        SemanticCodeIndexer::supported_file_extensions(self)
+    }
+
+    fn index_file(&self, path: &str, source: &str) -> Vec<CodeIndexObservation> {
+        vec![self.index_file_semantic(path, source)]
+    }
+}
+
 pub fn index_source_file(path: &str, source: &str) -> CodeIndexObservation {
     let language = language_for_path(path).unwrap_or("unknown").to_string();
-    let framework = framework_for_source(path, &language, source).map(str::to_string);
-    let symbols = extract_symbols(path, &language, source);
-    let imports = extract_imports(path, &language, source);
-    let routes = extract_routes(path, &language, framework.as_deref(), source);
-    let config_accesses = extract_config_accesses(path, &language, source);
+    let indexer = semantic_indexer_for_language(&language);
+    let provenance = indexer
+        .as_ref()
+        .map(|indexer| indexer.provenance(source, None))
+        .unwrap_or_else(|| IndexerProvenance {
+            language_id: language.clone(),
+            indexer_version: "semantic-generic/v1".to_string(),
+            supported_file_extensions: Path::new(path)
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| vec![value.to_string()])
+                .unwrap_or_default(),
+            content_hash: content_hash(source),
+            ..IndexerProvenance::default()
+        });
+    semantic_index_source_file(path, &language, provenance, source)
+}
+
+fn semantic_index_source_file(
+    path: &str,
+    language: &str,
+    provenance: IndexerProvenance,
+    source: &str,
+) -> CodeIndexObservation {
+    let framework = framework_for_source(path, language, source).map(str::to_string);
+    let symbols = extract_symbols(path, language, source);
+    let imports = extract_imports(path, language, source);
+    let routes = extract_routes(path, language, framework.as_deref(), source);
+    let config_accesses = extract_config_accesses(path, language, source);
     CodeIndexObservation {
         file: path.to_string(),
-        language,
+        language: language.to_string(),
+        provenance,
         framework,
         generated: is_generated_source(path, source),
         symbols,
@@ -120,6 +313,123 @@ pub fn index_source_file(path: &str, source: &str) -> CodeIndexObservation {
         routes,
         config_accesses,
     }
+}
+
+fn semantic_indexer_for_language(language: &str) -> Option<Box<dyn SemanticCodeIndexer>> {
+    match language {
+        "rust" => Some(Box::new(RustSemanticIndexer)),
+        "typescript" | "javascript" => Some(Box::new(TypeScriptSemanticIndexer)),
+        "python" => Some(Box::new(PythonSemanticIndexer)),
+        _ => None,
+    }
+}
+
+pub fn index_source_file_with_cache(
+    root: &Path,
+    path: &str,
+    source: &str,
+    ontology_version: &str,
+    language_pack: Option<&str>,
+) -> Result<CachedCodeIndexObservation, String> {
+    let language = language_for_path(path).unwrap_or("unknown").to_string();
+    let indexer = semantic_indexer_for_language(&language);
+    let mut observation = indexer
+        .as_ref()
+        .map(|indexer| {
+            let mut observation = indexer.index_file_semantic(path, source);
+            observation.provenance = indexer.provenance(source, language_pack);
+            observation
+        })
+        .unwrap_or_else(|| {
+            let mut observation = index_source_file(path, source);
+            observation.provenance.language_pack = language_pack.map(ToOwned::to_owned);
+            observation
+        });
+    let cache_path = code_index_cache_path(
+        root,
+        path,
+        &observation.provenance.content_hash,
+        &observation.provenance.indexer_version,
+        ontology_version,
+        language_pack,
+    );
+    if let Ok(bytes) = fs::read(&cache_path) {
+        if let Ok(entry) = serde_json::from_slice::<CodeIndexCacheEntry>(&bytes) {
+            if entry.file == path
+                && entry.content_hash == observation.provenance.content_hash
+                && entry.ontology_version == ontology_version
+                && entry.language_pack.as_deref() == language_pack
+                && entry.indexer_version == observation.provenance.indexer_version
+            {
+                return Ok(CachedCodeIndexObservation {
+                    observation: entry.observation,
+                    cache_hit: true,
+                    cache_path,
+                });
+            }
+        }
+    }
+
+    let entry = CodeIndexCacheEntry {
+        schema_version: CODE_INDEX_CACHE_SCHEMA_VERSION.to_string(),
+        file: path.to_string(),
+        content_hash: observation.provenance.content_hash.clone(),
+        ontology_version: ontology_version.to_string(),
+        language_pack: language_pack.map(ToOwned::to_owned),
+        indexer_language: observation.provenance.language_id.clone(),
+        indexer_version: observation.provenance.indexer_version.clone(),
+        observation: observation.clone(),
+    };
+    if let Some(parent) = cache_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create code index cache directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    let bytes = serde_json::to_vec_pretty(&entry)
+        .map_err(|error| format!("failed to serialize code index cache entry: {error}"))?;
+    fs::write(&cache_path, bytes).map_err(|error| {
+        format!(
+            "failed to write code index cache {}: {error}",
+            cache_path.display()
+        )
+    })?;
+    observation = entry.observation;
+    Ok(CachedCodeIndexObservation {
+        observation,
+        cache_hit: false,
+        cache_path,
+    })
+}
+
+pub fn code_index_cache_path(
+    root: &Path,
+    path: &str,
+    content_hash: &str,
+    indexer_version: &str,
+    ontology_version: &str,
+    language_pack: Option<&str>,
+) -> PathBuf {
+    let key = format!(
+        "{}:{}:{}:{}:{}",
+        path,
+        content_hash,
+        indexer_version,
+        ontology_version,
+        language_pack.unwrap_or("default")
+    );
+    root.join(".specgraph")
+        .join("index")
+        .join("code")
+        .join(format!("{}.json", stable_fragment(&key)))
+}
+
+pub fn content_hash(source: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(source.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
 }
 
 pub fn framework_for_source(path: &str, language: &str, source: &str) -> Option<&'static str> {
@@ -192,6 +502,22 @@ pub fn observations_to_delta(observations: &[CodeIndexObservation]) -> GraphDelt
                 ("language".to_string(), json!(observation.language)),
                 ("framework".to_string(), json!(observation.framework)),
                 ("generated".to_string(), json!(observation.generated)),
+                (
+                    "indexerLanguage".to_string(),
+                    json!(observation.provenance.language_id.clone()),
+                ),
+                (
+                    "indexerVersion".to_string(),
+                    json!(observation.provenance.indexer_version.clone()),
+                ),
+                (
+                    "contentHash".to_string(),
+                    json!(observation.provenance.content_hash.clone()),
+                ),
+                (
+                    "indexerDeterministic".to_string(),
+                    json!(observation.provenance.deterministic),
+                ),
                 ("symbolCount".to_string(), json!(observation.symbols.len())),
                 ("importCount".to_string(), json!(observation.imports.len())),
                 ("routeCount".to_string(), json!(observation.routes.len())),
@@ -218,6 +544,7 @@ pub fn observations_to_delta(observations: &[CodeIndexObservation]) -> GraphDelt
                     ("framework".to_string(), json!(observation.framework)),
                     ("name".to_string(), json!(symbol.name)),
                     ("kind".to_string(), json!(symbol.kind)),
+                    ("visibility".to_string(), json!(symbol.visibility)),
                     ("line".to_string(), json!(symbol.line)),
                 ]));
                 insert_location(&mut attributes, &symbol.location);
@@ -357,6 +684,9 @@ pub fn observations_to_delta(observations: &[CodeIndexObservation]) -> GraphDelt
 }
 
 fn extract_symbols(path: &str, language: &str, source: &str) -> Vec<CodeSymbolObservation> {
+    if language == "rust" {
+        return extract_rust_symbols(path, source);
+    }
     let mut symbols = Vec::new();
     let mut seen = BTreeSet::new();
 
@@ -368,6 +698,7 @@ fn extract_symbols(path: &str, language: &str, source: &str) -> Vec<CodeSymbolOb
                 symbols.push(CodeSymbolObservation {
                     name,
                     kind,
+                    visibility: symbol_visibility(language, line),
                     line: Some(line_number),
                     location: Some(SourceLocation {
                         file: path.to_string(),
@@ -382,6 +713,99 @@ fn extract_symbols(path: &str, language: &str, source: &str) -> Vec<CodeSymbolOb
     }
 
     symbols
+}
+
+fn extract_rust_symbols(path: &str, source: &str) -> Vec<CodeSymbolObservation> {
+    let mut symbols = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut brace_depth = 0usize;
+    let mut impl_stack: Vec<(String, usize)> = Vec::new();
+
+    for (index, raw_line) in source.lines().enumerate() {
+        let line_number = (index + 1) as u32;
+        let line = strip_line_comment(raw_line, "//");
+        while impl_stack
+            .last()
+            .is_some_and(|(_, depth)| brace_depth < *depth)
+        {
+            impl_stack.pop();
+        }
+        let current_impl = impl_stack.last().map(|(name, _)| name.clone());
+        for (mut kind, mut name) in rust_symbols_from_line(line) {
+            if kind == "function" {
+                if let Some(parent) = &current_impl {
+                    kind = "method".to_string();
+                    name = format!("{parent}::{name}");
+                }
+            }
+            let key = (kind.clone(), name.clone());
+            if seen.insert(key) {
+                symbols.push(CodeSymbolObservation {
+                    name,
+                    kind,
+                    visibility: symbol_visibility("rust", line),
+                    line: Some(line_number),
+                    location: Some(SourceLocation {
+                        file: path.to_string(),
+                        start_line: Some(line_number),
+                        end_line: Some(line_number),
+                        start_column: None,
+                        end_column: None,
+                    }),
+                });
+            }
+        }
+        if let Some(impl_name) = rust_impl_target(line) {
+            let impl_body_depth = brace_depth + line.matches('{').count();
+            if impl_body_depth > brace_depth {
+                impl_stack.push((impl_name, impl_body_depth));
+            }
+        }
+        brace_depth = brace_depth.saturating_add(line.matches('{').count());
+        brace_depth = brace_depth.saturating_sub(line.matches('}').count());
+    }
+
+    symbols
+}
+
+fn symbol_visibility(language: &str, line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    match language {
+        "rust" => Some(
+            if trimmed.starts_with("pub") {
+                "public"
+            } else {
+                "private"
+            }
+            .to_string(),
+        ),
+        "typescript" | "javascript" => Some(
+            if trimmed.starts_with("export ")
+                || trimmed.starts_with("export\t")
+                || trimmed.starts_with("export default")
+            {
+                "public"
+            } else {
+                "private"
+            }
+            .to_string(),
+        ),
+        "python" => Some(
+            if trimmed
+                .strip_prefix("def ")
+                .or_else(|| trimmed.strip_prefix("async def "))
+                .or_else(|| trimmed.strip_prefix("class "))
+                .and_then(clean_identifier)
+                .is_some_and(|name| name.starts_with('_'))
+            {
+                "private"
+            } else {
+                "public"
+            }
+            .to_string(),
+        ),
+        _ => None,
+    }
 }
 
 fn extract_imports(path: &str, language: &str, source: &str) -> Vec<CodeImportObservation> {
@@ -795,6 +1219,20 @@ fn rust_symbols_from_line(line: &str) -> Vec<(String, String)> {
     symbols
 }
 
+fn rust_impl_target(line: &str) -> Option<String> {
+    let line = strip_line_comment(line, "//");
+    let normalized = normalize_leading_keywords(line.trim(), &["unsafe", "default"]);
+    let mut rest = strip_leading_keyword(normalized, "impl")?.trim_start();
+    if rest.starts_with('<') {
+        rest = rest.split_once('>')?.1.trim_start();
+    }
+    if let Some((_, target)) = rest.split_once(" for ") {
+        clean_identifier(target)
+    } else {
+        clean_identifier(rest)
+    }
+}
+
 fn javascript_symbols_from_line(line: &str) -> Vec<(String, String)> {
     let mut symbols = Vec::new();
     let line = strip_line_comment(line, "//");
@@ -1091,6 +1529,8 @@ impl Store {}
 
         assert_eq!(observation.language, "rust");
         assert_eq!(observation.symbols.len(), 6);
+        assert_eq!(observation.provenance.language_id, "rust");
+        assert_eq!(observation.provenance.indexer_version, "semantic-rust/v1");
         assert!(delta
             .create_nodes
             .iter()
@@ -1108,6 +1548,117 @@ impl Store {}
                 .count(),
             6
         );
+    }
+
+    #[test]
+    fn semantic_rust_indexer_extracts_methods_visibility_and_provenance() {
+        let indexer = RustSemanticIndexer;
+        assert_eq!(indexer.language_id(), "rust");
+        assert!(SemanticCodeIndexer::supported_file_extensions(&indexer).contains(&"rs"));
+        let observation = indexer.index_file_semantic(
+            "crates/demo/src/lib.rs",
+            r#"
+pub struct Store {}
+impl Store {
+    pub fn new() -> Self { Store {} }
+    fn helper(&self) {}
+}
+"#,
+        );
+
+        assert!(observation.symbols.iter().any(|symbol| {
+            symbol.kind == "struct"
+                && symbol.name == "Store"
+                && symbol.visibility.as_deref() == Some("public")
+        }));
+        assert!(observation.symbols.iter().any(|symbol| {
+            symbol.kind == "method"
+                && symbol.name == "Store::new"
+                && symbol.visibility.as_deref() == Some("public")
+        }));
+        assert!(observation.symbols.iter().any(|symbol| {
+            symbol.kind == "method"
+                && symbol.name == "Store::helper"
+                && symbol.visibility.as_deref() == Some("private")
+        }));
+        assert_eq!(
+            observation.provenance.contract_schema_version,
+            CODE_INDEXER_CONTRACT_SCHEMA_VERSION
+        );
+        assert!(observation.provenance.deterministic);
+    }
+
+    #[test]
+    fn semantic_typescript_and_python_indexers_extract_exports_routes_and_imports() {
+        let ts = TypeScriptSemanticIndexer.index_file_semantic(
+            "apps/api/src/routes.ts",
+            r#"
+import express from "express";
+export class UserController {}
+const app = express();
+function resetPassword(req, res) {}
+app.post("/password-reset", resetPassword);
+"#,
+        );
+        assert_eq!(ts.language, "typescript");
+        assert!(ts.symbols.iter().any(|symbol| {
+            symbol.name == "UserController" && symbol.visibility.as_deref() == Some("public")
+        }));
+        assert!(ts.routes.iter().any(|route| {
+            route.method == "POST"
+                && route.path == "/password-reset"
+                && route.handler_symbol.as_deref() == Some("resetPassword")
+        }));
+
+        let py = PythonSemanticIndexer.index_file_semantic(
+            "app/main.py",
+            r#"
+from fastapi import FastAPI
+app = FastAPI()
+@app.get("/users")
+def list_users():
+    pass
+"#,
+        );
+        assert_eq!(py.language, "python");
+        assert!(py
+            .imports
+            .iter()
+            .any(|import| import.specifier.as_deref() == Some("fastapi")));
+        assert!(py
+            .routes
+            .iter()
+            .any(|route| route.method == "GET" && route.path == "/users"));
+    }
+
+    #[test]
+    fn code_index_cache_reuses_unchanged_semantic_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = "pub struct Store {}\n";
+        let first = index_source_file_with_cache(
+            tmp.path(),
+            "crates/demo/src/lib.rs",
+            source,
+            "ontology/v1",
+            Some("rust-pack/v1"),
+        )
+        .unwrap();
+        assert!(!first.cache_hit);
+        assert!(first.cache_path.exists());
+        let first_delta = observations_to_delta(std::slice::from_ref(&first.observation));
+
+        let second = index_source_file_with_cache(
+            tmp.path(),
+            "crates/demo/src/lib.rs",
+            source,
+            "ontology/v1",
+            Some("rust-pack/v1"),
+        )
+        .unwrap();
+        assert!(second.cache_hit);
+        assert_eq!(first.observation, second.observation);
+        let second_delta = observations_to_delta(std::slice::from_ref(&second.observation));
+        assert_eq!(first_delta, second_delta);
     }
 
     #[test]
@@ -1192,11 +1743,13 @@ const rawConfig = readFileSync("config/default.json", "utf8");
         let findings = validate_code_index_observations(&[CodeIndexObservation {
             file: "src/app.js".to_string(),
             language: "javascript".to_string(),
+            provenance: IndexerProvenance::default(),
             framework: Some("express".to_string()),
             generated: false,
             symbols: vec![CodeSymbolObservation {
                 name: "handler".to_string(),
                 kind: "function".to_string(),
+                visibility: None,
                 line: None,
                 location: None,
             }],

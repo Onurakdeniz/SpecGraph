@@ -577,6 +577,8 @@ dependencies = [
  "sg-codegraph",
  "sg-model",
  "sg-validation",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]

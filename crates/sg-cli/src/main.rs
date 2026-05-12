@@ -3,7 +3,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use serde_json::json;
 use sg_adapter_api::{built_in_adapter_catalog, validate_adapter_catalog};
-use sg_adapter_code::{index_source_file, observations_to_delta, CodeIndexObservation};
+use sg_adapter_code::{index_source_file_with_cache, observations_to_delta, CodeIndexObservation};
 use sg_adapter_hosting::{
     validate_provider_check_report, GitHubProvider, HostingProvider, ProviderCheckReport,
 };
@@ -29,7 +29,7 @@ use sg_merge::{
 use sg_model::{
     Edge, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt, Snapshot,
 };
-use sg_ontology::{load_pack, validate_pack};
+use sg_ontology::{load_pack, validate_pack, CORE_ONTOLOGY_VERSION};
 use sg_operation::built_in_operations;
 use sg_policy::{
     built_in_non_waivable_policies, evaluate_policies, evaluate_policies_with_manifests,
@@ -3553,6 +3553,7 @@ fn handle_code(store: &SpecGraphStore, root: &Path, args: CodeArgs) -> anyhow::R
                     "observedSymbols": symbol_count,
                     "strict": args.strict,
                     "acceptBaseline": args.accept_baseline,
+                    "indexCache": ".specgraph/index/code",
                 }),
                 delta,
                 dry_run: false,
@@ -6172,9 +6173,17 @@ fn code_index_observations(
                 let bytes = fs::read(&path)
                     .with_context(|| format!("failed to read {}", path.display()))?;
                 let source = String::from_utf8_lossy(&bytes);
-                Ok(index_source_file(file, &source))
+                Ok(
+                    index_source_file_with_cache(root, file, &source, CORE_ONTOLOGY_VERSION, None)
+                        .map_err(anyhow::Error::msg)?
+                        .observation,
+                )
             } else {
-                Ok(index_source_file(file, ""))
+                Ok(
+                    index_source_file_with_cache(root, file, "", CORE_ONTOLOGY_VERSION, None)
+                        .map_err(anyhow::Error::msg)?
+                        .observation,
+                )
             }
         })
         .collect()

@@ -149,8 +149,9 @@ Current completed slices:
 - **Phase 6A — Action template planning foundations** added a versioned built-in action template schema/registry foundation, template-generated `DEPENDS_ON` edges with start blockers, CommitPlan expected GraphDelta type/effect matching, and replan replacement evidence that blocks stale action continuation.
 - **Phase 6B — Pack templates and action blocker CLI** added architecture-pack-provided action templates, pack selection from the project architecture profile, `sg action status`, `sg action blockers`, blocker-category JSON output, and tests proving pack-generated ActionGraphs differ from the built-in default.
 - **Phase 6C — Impact queue replan closure** wired impact queue input into `sg action replan`, records `RevalidationQueue` evidence through `Impact.Revalidate`, replans invalidated actions with replacement ActionNodes, and tests impact-driven stale action blockers.
+- **Phase 7A — Semantic indexer and cache foundations** added a versioned semantic indexer contract, deterministic Rust/TypeScript-JavaScript/Python indexers with provenance metadata, source visibility/location extraction, and `.specgraph/index/code` cache reuse with stable graph output.
 
-Next focus: **Phase 7 — Production Code Indexing and Drift Detection**. Start from the latest `development` and continue the five-checklist-item branch policy with semantic indexer trait and the first language indexer/cache slice.
+Next focus after Phase 7A: **Phase 7B — Drift detection and trust promotion hardening**. Continue the five-checklist-item branch policy with route/symbol drift blockers, accepted-fact promotion gates, and broader fixture coverage.
 
 ---
 
@@ -742,25 +743,25 @@ Replace lightweight source scanning with deterministic semantic indexing and str
 
 ## Checklist
 
-- [ ] **Define semantic indexer trait.** Add a trait with language id, indexer version, supported file extensions, deterministic output contract, and provenance metadata.
+- [x] **Define semantic indexer trait.** Add a trait with language id, indexer version, supported file extensions, deterministic output contract, and provenance metadata.
 
-- [ ] **Add Rust semantic indexer.** Use an AST/parser approach to extract modules, structs/enums/traits/functions, visibility, imports, route registrations where supported, and source locations.
+- [x] **Add Rust semantic indexer.** Use an AST/parser approach to extract modules, structs/enums/traits/functions, visibility, imports, route registrations where supported, and source locations.
 
-- [ ] **Add TypeScript/JavaScript semantic indexer.** Extract exports, functions/classes/types, imports, framework routes, and source locations. Keep output deterministic and avoid executing project code.
+- [x] **Add TypeScript/JavaScript semantic indexer.** Extract exports, functions/classes/types, imports, framework routes, and source locations. Keep output deterministic and avoid executing project code.
 
-- [ ] **Add Python semantic indexer.** Extract functions/classes/imports/FastAPI/Flask routes and source locations without executing project code.
+- [x] **Add Python semantic indexer.** Extract functions/classes/imports/FastAPI/Flask routes and source locations without executing project code.
 
-- [ ] **Add incremental index cache.** Store cache under `.specgraph/index/code/` keyed by file path, content hash, indexer version, ontology version, and selected language pack.
+- [x] **Add incremental index cache.** Store cache under `.specgraph/index/code/` keyed by file path, content hash, indexer version, ontology version, and selected language pack.
 
 - [ ] **Separate observations from accepted CodeGraph facts.** Ensure indexer output remains observed. Add/strengthen `CodeGraph.Upsert` flow to accept selected observations as trusted graph facts through Operation Runtime.
 
 - [ ] **Expand drift detection.** Detect missing symbol, renamed symbol, missing route, route method/path mismatch, stale trace link, entity not represented, and use-case not implemented.
 
-- [ ] **Add tests and fixtures.** Include Rust, TypeScript/Express, TypeScript/Next-like, Python/FastAPI, Python/Flask, generated-code, and renamed-symbol fixtures.
+- [~] **Add tests and fixtures.** Include Rust, TypeScript/Express, TypeScript/Next-like, Python/FastAPI, Python/Flask, generated-code, and renamed-symbol fixtures.
 
 ## Phase Gate
 
-- [ ] Re-indexing unchanged files uses cache and produces same graph output.
+- [x] Re-indexing unchanged files uses cache and produces same graph output.
 - [ ] Renamed or missing route/symbol produces blocking drift finding.
 - [ ] Observed CodeGraph facts cannot become trusted without accepted operation.
 
