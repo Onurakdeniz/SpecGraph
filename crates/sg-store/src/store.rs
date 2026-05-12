@@ -1807,6 +1807,49 @@ pub fn plan_code_workflow(
         .file
         .clone()
         .or_else(|| node_attr(declaration_node, "expectedFile").map(ToString::to_string));
+    if let Some(file) = allowed_file.as_deref() {
+        if let Some(generated) = generated_file_status(&replay.graph, file) {
+            return Ok(blocked_code_plan(BlockedCodePlan {
+                state_hash: replay.state_hash,
+                decision: "generated-file-direct-edit-blocked".to_string(),
+                change_type,
+                graph_branch: options.graph_branch,
+                action_id: action_binding.0,
+                commit_plan_id: action_binding.1,
+                file_hashes,
+                required_operations: vec!["GeneratedCode.Record".to_string(), "Action.Replan".to_string()],
+                missing_graph_facts: vec![format!("generated-file:{file}")],
+                human_message: format!(
+                    "`{file}` is generated; edit the generation source `{}` and regenerate instead of editing the generated output directly.",
+                    generated.source.unwrap_or_else(|| "<source artifact>".to_string())
+                ),
+            }));
+        }
+    }
+    if node_attr(declaration_node, "visibility") == Some("public")
+        && !public_change_has_documentation(&replay.graph, declaration_node)
+        && has_scoped_human_approval(
+            &replay.graph,
+            spec_node,
+            "CodeObject.Update",
+            "publicApi",
+            node_attr(declaration_node, "name").unwrap_or(declaration_node.id.as_str()),
+            Some(&declaration_node.id),
+        )
+    {
+        return Ok(blocked_code_plan(BlockedCodePlan {
+            state_hash: replay.state_hash,
+            decision: "documentation-required".to_string(),
+            change_type,
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
+            required_operations: vec!["PublicContract.Record".to_string(), "Docs.Update".to_string()],
+            missing_graph_facts: vec![format!("documentation-update:{}", declaration_node.stable_key)],
+            human_message: "Public API changes require DocumentationUpdate, ExampleUpdate, or ChangelogEntry evidence before an edit permit is issued.".to_string(),
+        }));
+    }
     let requested_scope = WorkReservationRequestScope {
         spec: options.spec.clone(),
         action: options.action.clone(),
@@ -6363,6 +6406,10 @@ fn validate_operation_semantic_preconditions(
         "Dependency.Add" | "Dependency.Update" | "Dependency.Remove" => {
             validate_dependency_semantic_preconditions(graph, request, delta)
         }
+        "GeneratedCode.Record" => validate_generated_code_semantic_preconditions(graph, delta),
+        "PublicContract.Record" => {
+            validate_public_contract_semantic_preconditions(graph, request, delta)
+        }
         "Config.Declare" => validate_config_declare_semantic_preconditions(graph, request, delta),
         "GitCommit.Record" => validate_git_commit_semantic_preconditions(graph, request, delta),
         "Validation.Record" => {
@@ -7896,6 +7943,302 @@ fn human_decision_approval_scope_matches(
             .any(|decision_scope| decision_scope == scope)
 }
 
+#[derive(Debug, Clone)]
+struct GeneratedFileStatus {
+    source: Option<String>,
+}
+
+fn generated_file_status(graph: &Graph, file: &str) -> Option<GeneratedFileStatus> {
+    let generated_node = graph.nodes.values().find(|node| {
+        (node.node_type == "GeneratedFile" || node.node_type == "CodeFile")
+            && node_attr(node, "path") == Some(file)
+            && (node.node_type == "GeneratedFile" || node_bool_attr(node, "generated"))
+    })?;
+    let source = node_attr(generated_node, "sourcePath")
+        .map(ToString::to_string)
+        .or_else(|| {
+            graph
+                .edges
+                .values()
+                .filter(|edge| edge.from == generated_node.id && edge.edge_type == "GENERATED_FROM")
+                .filter_map(|edge| graph.nodes.get(&edge.to))
+                .find_map(|node| node_attr(node, "path").map(ToString::to_string))
+        });
+    Some(GeneratedFileStatus { source })
+}
+
+fn public_change_has_documentation(graph: &Graph, declaration: &Node) -> bool {
+    if has_contract_documentation_edge(graph, &declaration.id) {
+        return true;
+    }
+
+    let Some(spec_key) = node_attr(declaration, "spec") else {
+        return false;
+    };
+    let Some(spec_node) = graph.nodes.values().find(|node| {
+        node.node_type == "Spec"
+            && (node.stable_key == format!("spec:{spec_key}")
+                || node_attr(node, "id") == Some(spec_key)
+                || node_attr(node, "key") == Some(spec_key))
+    }) else {
+        return false;
+    };
+
+    graph.edges.values().any(|edge| {
+        edge.from == spec_node.id
+            && edge.edge_type == "HAS_API_CONTRACT"
+            && has_contract_documentation_edge(graph, &edge.to)
+    })
+}
+
+fn has_contract_documentation_edge(graph: &Graph, node_id: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.from == node_id
+            && matches!(
+                edge.edge_type.as_str(),
+                "CONTRACT_DOCUMENTED_BY"
+                    | "CONTRACT_HAS_EXAMPLE_UPDATE"
+                    | "CONTRACT_HAS_CHANGELOG_ENTRY"
+            )
+    })
+}
+
+pub fn generated_projection_drift_findings(graph: &Graph) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for node in graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "GeneratedFile")
+    {
+        if let (Some(expected), Some(actual)) = (
+            node_attr(node, "sourceHash"),
+            node_attr(node, "currentSourceHash"),
+        ) {
+            if expected != actual {
+                findings.push(code_index_finding(
+                    "generated_projection.stale",
+                    format!(
+                        "GeneratedFile `{}` was produced from source hash `{expected}` but source is now `{actual}`. Remediation: regenerate from the GenerationSource and record updated GeneratedCode evidence.",
+                        node_attr(node, "path").unwrap_or(node.stable_key.as_str())
+                    ),
+                ));
+            }
+        }
+    }
+    for contract in graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "ApiContract")
+    {
+        if node_bool_attr(contract, "projectionRequired")
+            && !graph.edges.values().any(|edge| {
+                edge.from == contract.id
+                    && matches!(
+                        edge.edge_type.as_str(),
+                        "CONTRACT_DOCUMENTED_BY"
+                            | "CONTRACT_HAS_EXAMPLE_UPDATE"
+                            | "CONTRACT_HAS_CHANGELOG_ENTRY"
+                    )
+            })
+        {
+            findings.push(code_index_finding(
+                "generated_projection.public_docs_missing",
+                format!(
+                    "ApiContract `{}` requires generated docs/examples/changelog projection evidence.",
+                    contract.stable_key
+                ),
+            ));
+        }
+    }
+    findings
+}
+
+fn validate_generated_code_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let generated = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "GeneratedFile")
+        .collect::<Vec<_>>();
+    if generated.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.generated_code.generated_file_required",
+            "GeneratedCode.Record must create or update at least one GeneratedFile.",
+        ));
+    }
+    for node in generated {
+        if node_attr(node, "path").is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.generated_code.path_required",
+                "GeneratedFile requires non-empty `path`.",
+            ));
+        }
+        if !delta
+            .create_edges
+            .iter()
+            .chain(graph.edges.values())
+            .any(|edge| {
+                edge.from == node.id
+                    && edge.edge_type == "GENERATED_FROM"
+                    && (node_exists_with_type(graph, delta, &edge.to, "GenerationSource")
+                        || node_exists_with_type(graph, delta, &edge.to, "CodeFile")
+                        || node_exists_with_type(graph, delta, &edge.to, "ApiContract"))
+            })
+        {
+            findings.push(semantic_finding(
+                "semantic.generated_code.source_required",
+                "GeneratedFile must link to a GenerationSource, CodeFile, or ApiContract with GENERATED_FROM.",
+            ));
+        }
+        if !delta
+            .create_edges
+            .iter()
+            .chain(graph.edges.values())
+            .any(|edge| {
+                edge.from == node.id
+                    && edge.edge_type == "GENERATED_BY"
+                    && node_exists_with_type(graph, delta, &edge.to, "Generator")
+            })
+        {
+            findings.push(semantic_finding(
+                "semantic.generated_code.generator_required",
+                "GeneratedFile must link to a Generator with GENERATED_BY.",
+            ));
+        }
+    }
+    findings
+}
+
+fn validate_public_contract_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let contracts = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "ApiContract")
+        .collect::<Vec<_>>();
+    if contracts.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.public_contract.contract_required",
+            "PublicContract.Record must create or update at least one ApiContract.",
+        ));
+    }
+    for contract in contracts {
+        if node_attr(contract, "name").is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.public_contract.name_required",
+                "ApiContract requires non-empty `name`.",
+            ));
+        }
+        if !contract_has_compatibility_check(graph, delta, contract) {
+            findings.push(semantic_finding(
+                "semantic.public_contract.compatibility_required",
+                "Public contract changes require CompatibilityCheck evidence.",
+            ));
+        }
+        if !contract_has_docs_evidence(graph, delta, contract) {
+            findings.push(semantic_finding(
+                "semantic.public_contract.documentation_required",
+                "Public contract changes require DocumentationUpdate, ExampleUpdate, or ChangelogEntry evidence.",
+            ));
+        }
+    }
+    for breaking in delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "BreakingChange")
+    {
+        if !breaking_change_has_compatibility_check(graph, delta, breaking) {
+            findings.push(semantic_finding(
+                "semantic.public_contract.breaking_compatibility_required",
+                "BreakingChange requires CompatibilityCheck evidence.",
+            ));
+        }
+        if !contract_or_breaking_has_approval(graph, delta, breaking, request) {
+            findings.push(semantic_finding(
+                "semantic.public_contract.breaking_approval_required",
+                "BreakingChange requires approval evidence.",
+            ));
+        }
+    }
+    findings
+}
+
+fn contract_has_compatibility_check(graph: &Graph, delta: &GraphDelta, contract: &Node) -> bool {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .any(|edge| {
+            edge.from == contract.id
+                && edge.edge_type == "CONTRACT_HAS_COMPATIBILITY_CHECK"
+                && node_exists_with_type(graph, delta, &edge.to, "CompatibilityCheck")
+        })
+}
+
+fn breaking_change_has_compatibility_check(
+    graph: &Graph,
+    delta: &GraphDelta,
+    breaking: &Node,
+) -> bool {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .any(|edge| {
+            edge.from == breaking.id
+                && edge.edge_type == "CONTRACT_HAS_COMPATIBILITY_CHECK"
+                && node_exists_with_type(graph, delta, &edge.to, "CompatibilityCheck")
+        })
+}
+
+fn contract_has_docs_evidence(graph: &Graph, delta: &GraphDelta, contract: &Node) -> bool {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .any(|edge| {
+            edge.from == contract.id
+                && matches!(
+                    edge.edge_type.as_str(),
+                    "CONTRACT_DOCUMENTED_BY"
+                        | "CONTRACT_HAS_EXAMPLE_UPDATE"
+                        | "CONTRACT_HAS_CHANGELOG_ENTRY"
+                )
+                && (node_exists_with_type(graph, delta, &edge.to, "DocumentationUpdate")
+                    || node_exists_with_type(graph, delta, &edge.to, "ExampleUpdate")
+                    || node_exists_with_type(graph, delta, &edge.to, "ChangelogEntry"))
+        })
+}
+
+fn contract_or_breaking_has_approval(
+    graph: &Graph,
+    delta: &GraphDelta,
+    node: &Node,
+    request: &OperationRequest,
+) -> bool {
+    request
+        .input
+        .get("approvalId")
+        .and_then(Value::as_str)
+        .and_then(|approval_id| approval_node_for_id(graph, approval_id))
+        .is_some()
+        || delta.create_edges.iter().any(|edge| {
+            edge.from == node.id
+                && edge.edge_type == "CONTRACT_HAS_APPROVAL"
+                && node_exists_with_type(graph, delta, &edge.to, "Approval")
+        })
+}
+
 fn validate_dependency_semantic_preconditions(
     graph: &Graph,
     request: &OperationRequest,
@@ -7954,6 +8297,12 @@ fn validate_dependency_semantic_preconditions(
         findings.push(semantic_finding(
             "semantic.dependency.advisory_required",
             "Dependency operation requires reviewed AdvisoryEvidence vulnerability evidence.",
+        ));
+    }
+    if !dependency_has_docs_evidence(graph, delta, dependency) {
+        findings.push(semantic_finding(
+            "semantic.dependency.documentation_required",
+            "Dependency changes require DocumentationUpdate evidence for operators and reviewers.",
         ));
     }
     if dependency_requires_approval(dependency)
@@ -8077,6 +8426,18 @@ fn dependency_has_advisory_evidence(graph: &Graph, delta: &GraphDelta, dependenc
                         )
                         && !matches!(node_attr(node, "severity"), Some("Critical" | "High"))
                 })
+        })
+}
+
+fn dependency_has_docs_evidence(graph: &Graph, delta: &GraphDelta, dependency: &Node) -> bool {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .any(|edge| {
+            edge.edge_type == "DEPENDENCY_DOCUMENTED_BY"
+                && edge.from == dependency.id
+                && node_exists_with_type(graph, delta, &edge.to, "DocumentationUpdate")
         })
 }
 
@@ -14761,6 +15122,226 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn generated_code_record_requires_source_and_generator() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let rejected = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "GeneratedCode.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"generated": "src/identity/client.generated.ts"}),
+                dry_run: true,
+                delta: generated_code_delta(false, false),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            rejected,
+            StoreError::SemanticValidationFailed { operation, .. }
+                if operation == "GeneratedCode.Record"
+        ));
+
+        let accepted = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "GeneratedCode.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"generated": "src/identity/client.generated.ts"}),
+                dry_run: true,
+                delta: generated_code_delta(true, true),
+            },
+        )
+        .unwrap();
+        assert!(accepted.dry_run);
+    }
+
+    #[test]
+    fn workflow_code_plan_blocks_generated_file_but_allows_source_file() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "generatedClient",
+                    "application",
+                    Some("src/identity/client.generated.ts"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "GeneratedCode.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"generated": "src/identity/client.generated.ts"}),
+                dry_run: false,
+                delta: generated_code_delta(true, true),
+            },
+        )
+        .unwrap();
+        let blocked = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:generatedClient".to_string()],
+                file: Some("src/identity/client.generated.ts".to_string()),
+                expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(blocked.decision, "generated-file-direct-edit-blocked");
+        assert!(blocked.human_message.contains("src/identity/openapi.yaml"));
+
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "generatedClientSource",
+                    "application",
+                    Some("src/identity/openapi.yaml"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        let source_allowed = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:generatedClientSource".to_string()],
+                file: Some("src/identity/openapi.yaml".to_string()),
+                expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
+                require_reservation: false,
+                reservation_id: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(source_allowed.allowed);
+    }
+
+    #[test]
+    fn public_contract_record_requires_compatibility_docs_and_breaking_approval() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let rejected = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "PublicContract.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"contract": "public-api/v1"}),
+                dry_run: true,
+                delta: public_contract_delta(false, false, false, false),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            rejected,
+            StoreError::SemanticValidationFailed { operation, .. }
+                if operation == "PublicContract.Record"
+        ));
+
+        add_policy_approver(tmp.path(), "local:lead");
+        record_approval(
+            tmp.path(),
+            RecordApprovalOptions {
+                approval_id: "public-contract-breaking".to_string(),
+                approval: "allow-breaking-contract-change".to_string(),
+                policy: None,
+                scope: Some("api-contract:public-api/v1".to_string()),
+                reason: Some("Breaking change approved with migration notice".to_string()),
+                approved_by: "local:lead".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let accepted = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "PublicContract.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"contract": "public-api/v1", "approvalId": "public-contract-breaking"}),
+                dry_run: true,
+                delta: public_contract_delta(true, true, true, true),
+            },
+        )
+        .unwrap();
+        assert!(accepted.dry_run);
+    }
+
+    #[test]
+    fn generated_projection_drift_reports_stale_generated_file_and_missing_public_docs() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "node_generated_file".to_string(),
+            Node {
+                id: "node_generated_file".to_string(),
+                stable_key: "generated-file:src/identity/client.generated.ts".to_string(),
+                node_type: "GeneratedFile".to_string(),
+                attributes: BTreeMap::from([
+                    (
+                        "path".to_string(),
+                        json!("src/identity/client.generated.ts"),
+                    ),
+                    ("sourceHash".to_string(), json!("sha256:old")),
+                    ("currentSourceHash".to_string(), json!("sha256:new")),
+                ]),
+            },
+        );
+        graph.nodes.insert(
+            "node_api_contract".to_string(),
+            Node {
+                id: "node_api_contract".to_string(),
+                stable_key: "api-contract:public-api/v1".to_string(),
+                node_type: "ApiContract".to_string(),
+                attributes: BTreeMap::from([("projectionRequired".to_string(), json!(true))]),
+            },
+        );
+        let findings = generated_projection_drift_findings(&graph);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "generated_projection.stale"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "generated_projection.public_docs_missing"));
+    }
+
+    #[test]
     fn dependency_add_requires_manifest_lock_license_and_advisory_evidence() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -16775,6 +17356,168 @@ acceptanceCriteria:
                 },
             ],
             create_edges: vec![edge(&file_id, "DEFINES_SYMBOL", &symbol_id)],
+            ..GraphDelta::default()
+        }
+    }
+
+    fn generated_code_delta(include_source: bool, include_generator: bool) -> GraphDelta {
+        let generated_id = node_id("generated_file", "src/identity/client.generated.ts");
+        let source_id = node_id("generation_source", "src/identity/openapi.yaml");
+        let generator_id = node_id("generator", "openapi-typescript");
+        let mut create_nodes = vec![Node {
+            id: generated_id.clone(),
+            stable_key: "generated-file:src/identity/client.generated.ts".to_string(),
+            node_type: "GeneratedFile".to_string(),
+            attributes: BTreeMap::from([
+                (
+                    "path".to_string(),
+                    json!("src/identity/client.generated.ts"),
+                ),
+                ("sourcePath".to_string(), json!("src/identity/openapi.yaml")),
+            ]),
+        }];
+        let mut create_edges = Vec::new();
+        if include_source {
+            create_nodes.push(Node {
+                id: source_id.clone(),
+                stable_key: "generation-source:src/identity/openapi.yaml".to_string(),
+                node_type: "GenerationSource".to_string(),
+                attributes: BTreeMap::from([(
+                    "path".to_string(),
+                    json!("src/identity/openapi.yaml"),
+                )]),
+            });
+            create_edges.push(edge(&generated_id, "GENERATED_FROM", &source_id));
+        }
+        if include_generator {
+            create_nodes.push(Node {
+                id: generator_id.clone(),
+                stable_key: "generator:openapi-typescript".to_string(),
+                node_type: "Generator".to_string(),
+                attributes: BTreeMap::from([("name".to_string(), json!("openapi-typescript"))]),
+            });
+            create_edges.push(edge(&generated_id, "GENERATED_BY", &generator_id));
+        }
+        GraphDelta {
+            create_nodes,
+            create_edges,
+            ..GraphDelta::default()
+        }
+    }
+
+    fn public_contract_delta(
+        include_compat: bool,
+        include_docs: bool,
+        include_breaking: bool,
+        include_approval: bool,
+    ) -> GraphDelta {
+        let contract_id = node_id("api_contract", "public-api/v1");
+        let request_id = node_id("request_type", "public-api/v1/CreateUserRequest");
+        let response_id = node_id("response_type", "public-api/v1/CreateUserResponse");
+        let compat_id = node_id("compatibility_check", "public-api/v1/check");
+        let docs_id = node_id("documentation_update", "public-api/v1/docs");
+        let example_id = node_id("example_update", "public-api/v1/example");
+        let changelog_id = node_id("changelog_entry", "public-api/v1/change");
+        let breaking_id = node_id("breaking_change", "public-api/v1/remove-field");
+        let approval_id = node_id("approval", "public-contract-breaking");
+        let mut create_nodes = vec![
+            Node {
+                id: contract_id.clone(),
+                stable_key: "api-contract:public-api/v1".to_string(),
+                node_type: "ApiContract".to_string(),
+                attributes: BTreeMap::from([
+                    ("name".to_string(), json!("public-api/v1")),
+                    ("projectionRequired".to_string(), json!(true)),
+                ]),
+            },
+            Node {
+                id: request_id.clone(),
+                stable_key: "request-type:POST-/users/CreateUserRequest".to_string(),
+                node_type: "RequestType".to_string(),
+                attributes: BTreeMap::from([("name".to_string(), json!("CreateUserRequest"))]),
+            },
+            Node {
+                id: response_id.clone(),
+                stable_key: "response-type:POST-/users/CreateUserResponse".to_string(),
+                node_type: "ResponseType".to_string(),
+                attributes: BTreeMap::from([("name".to_string(), json!("CreateUserResponse"))]),
+            },
+        ];
+        let mut create_edges = vec![
+            edge(
+                &node_id("spec", "AUTH-001"),
+                "HAS_API_CONTRACT",
+                &contract_id,
+            ),
+            edge(&contract_id, "CONTRACT_HAS_REQUEST_TYPE", &request_id),
+            edge(&contract_id, "CONTRACT_HAS_RESPONSE_TYPE", &response_id),
+        ];
+        if include_compat {
+            create_nodes.push(Node {
+                id: compat_id.clone(),
+                stable_key: "compatibility-check:public-api/v1/check".to_string(),
+                node_type: "CompatibilityCheck".to_string(),
+                attributes: BTreeMap::from([("status".to_string(), json!("Passed"))]),
+            });
+            create_edges.push(edge(
+                &contract_id,
+                "CONTRACT_HAS_COMPATIBILITY_CHECK",
+                &compat_id,
+            ));
+        }
+        if include_docs {
+            create_nodes.extend([
+                Node {
+                    id: docs_id.clone(),
+                    stable_key: "documentation-update:AUTH-001/public-api".to_string(),
+                    node_type: "DocumentationUpdate".to_string(),
+                    attributes: BTreeMap::from([("status".to_string(), json!("Updated"))]),
+                },
+                Node {
+                    id: example_id.clone(),
+                    stable_key: "example-update:AUTH-001/public-api".to_string(),
+                    node_type: "ExampleUpdate".to_string(),
+                    attributes: BTreeMap::from([("status".to_string(), json!("Updated"))]),
+                },
+                Node {
+                    id: changelog_id.clone(),
+                    stable_key: "changelog-entry:AUTH-001/public-api".to_string(),
+                    node_type: "ChangelogEntry".to_string(),
+                    attributes: BTreeMap::from([("status".to_string(), json!("Updated"))]),
+                },
+            ]);
+            create_edges.extend([
+                edge(&contract_id, "CONTRACT_DOCUMENTED_BY", &docs_id),
+                edge(&contract_id, "CONTRACT_HAS_EXAMPLE_UPDATE", &example_id),
+                edge(&contract_id, "CONTRACT_HAS_CHANGELOG_ENTRY", &changelog_id),
+            ]);
+        }
+        if include_breaking {
+            create_nodes.push(Node {
+                id: breaking_id.clone(),
+                stable_key: "breaking-change:public-api/v1/remove-field".to_string(),
+                node_type: "BreakingChange".to_string(),
+                attributes: BTreeMap::from([("summary".to_string(), json!("Remove field"))]),
+            });
+            create_edges.push(edge(
+                &contract_id,
+                "CONTRACT_HAS_BREAKING_CHANGE",
+                &breaking_id,
+            ));
+            if include_compat {
+                create_edges.push(edge(
+                    &breaking_id,
+                    "CONTRACT_HAS_COMPATIBILITY_CHECK",
+                    &compat_id,
+                ));
+            }
+            if include_approval {
+                create_edges.push(edge(&breaking_id, "CONTRACT_HAS_APPROVAL", &approval_id));
+            }
+        }
+        GraphDelta {
+            create_nodes,
+            create_edges,
             ..GraphDelta::default()
         }
     }

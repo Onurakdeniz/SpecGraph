@@ -125,6 +125,16 @@ impl MvpOntology {
                 "CodeObjectDeclaration",
                 "CodeRoute",
                 "CodeSymbol",
+                "GeneratedFile",
+                "Generator",
+                "GenerationSource",
+                "ApiContract",
+                "RequestType",
+                "ResponseType",
+                "Consumer",
+                "BreakingChange",
+                "ExampleUpdate",
+                "ChangelogEntry",
                 "RefactorSpec",
                 "PreservedBehavior",
                 "RefactorPlan",
@@ -320,6 +330,19 @@ impl MvpOntology {
                 "CODE_OBJECT_HAS_ALIAS",
                 "CODE_OBJECT_IMPLEMENTS",
                 "CODE_OBJECT_REALIZED_BY",
+                "GENERATED_FROM",
+                "GENERATED_BY",
+                "GENERATION_SOURCE_FOR_CONTRACT",
+                "HAS_API_CONTRACT",
+                "CONTRACT_HAS_REQUEST_TYPE",
+                "CONTRACT_HAS_RESPONSE_TYPE",
+                "CONTRACT_HAS_CONSUMER",
+                "CONTRACT_HAS_COMPATIBILITY_CHECK",
+                "CONTRACT_HAS_BREAKING_CHANGE",
+                "CONTRACT_DOCUMENTED_BY",
+                "CONTRACT_HAS_EXAMPLE_UPDATE",
+                "CONTRACT_HAS_CHANGELOG_ENTRY",
+                "CONTRACT_HAS_APPROVAL",
                 "HAS_REFACTOR_PLAN",
                 "PRESERVES_BEHAVIOR",
                 "HAS_EQUIVALENCE_VALIDATION",
@@ -1537,6 +1560,28 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
             &["CodeObjectDeclaration"],
             &["CodeSymbol", "CodeFile", "CodeRoute"],
         )),
+        "GENERATED_FROM" => Some((
+            &["GeneratedFile", "CodeFile"],
+            &["GenerationSource", "CodeFile", "ApiContract"],
+        )),
+        "GENERATED_BY" => Some((&["GeneratedFile", "CodeFile"], &["Generator"])),
+        "GENERATION_SOURCE_FOR_CONTRACT" => Some((&["GenerationSource"], &["ApiContract"])),
+        "HAS_API_CONTRACT" => Some((&["Project", "Module", "Spec"], &["ApiContract"])),
+        "CONTRACT_HAS_REQUEST_TYPE" => Some((&["ApiContract"], &["RequestType"])),
+        "CONTRACT_HAS_RESPONSE_TYPE" => Some((&["ApiContract"], &["ResponseType"])),
+        "CONTRACT_HAS_CONSUMER" => Some((&["ApiContract"], &["Consumer"])),
+        "CONTRACT_HAS_COMPATIBILITY_CHECK" => {
+            Some((&["ApiContract", "BreakingChange"], &["CompatibilityCheck"]))
+        }
+        "CONTRACT_HAS_BREAKING_CHANGE" => Some((&["ApiContract"], &["BreakingChange"])),
+        "CONTRACT_DOCUMENTED_BY" => {
+            Some((&["ApiContract", "BreakingChange"], &["DocumentationUpdate"]))
+        }
+        "CONTRACT_HAS_EXAMPLE_UPDATE" => Some((&["ApiContract"], &["ExampleUpdate"])),
+        "CONTRACT_HAS_CHANGELOG_ENTRY" => {
+            Some((&["ApiContract", "BreakingChange"], &["ChangelogEntry"]))
+        }
+        "CONTRACT_HAS_APPROVAL" => Some((&["ApiContract", "BreakingChange"], &["Approval"])),
         "HAS_REFACTOR_PLAN" => Some((&["RefactorSpec"], &["RefactorPlan"])),
         "PRESERVES_BEHAVIOR" => Some((&["RefactorSpec"], &["PreservedBehavior"])),
         "HAS_EQUIVALENCE_VALIDATION" => Some((&["RefactorSpec"], &["EquivalenceValidation"])),

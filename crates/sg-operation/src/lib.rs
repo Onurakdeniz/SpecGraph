@@ -687,6 +687,51 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "GeneratedCode.Record",
+            category: "governance",
+            description: "Record generated files, generators, and source artifacts so agents edit sources instead of generated outputs.",
+            required_input_fields: &["generated"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["GeneratedFile", "Generator", "GenerationSource", "CodeFile"],
+            allowed_create_edge_types: &["GENERATED_FROM", "GENERATED_BY"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "PublicContract.Record",
+            category: "governance",
+            description: "Record public API contract, request/response types, consumers, compatibility checks, breaking changes, docs, examples, and changelog evidence.",
+            required_input_fields: &["contract"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "ApiContract",
+                "RequestType",
+                "ResponseType",
+                "Consumer",
+                "CompatibilityCheck",
+                "BreakingChange",
+                "DocumentationUpdate",
+                "ExampleUpdate",
+                "ChangelogEntry",
+                "GenerationSource",
+            ],
+            allowed_create_edge_types: &[
+                "HAS_API_CONTRACT",
+                "CONTRACT_HAS_REQUEST_TYPE",
+                "CONTRACT_HAS_RESPONSE_TYPE",
+                "CONTRACT_HAS_CONSUMER",
+                "CONTRACT_HAS_COMPATIBILITY_CHECK",
+                "CONTRACT_HAS_BREAKING_CHANGE",
+                "CONTRACT_DOCUMENTED_BY",
+                "CONTRACT_HAS_EXAMPLE_UPDATE",
+                "CONTRACT_HAS_CHANGELOG_ENTRY",
+                "GENERATION_SOURCE_FOR_CONTRACT",
+                "CONTRACT_HAS_APPROVAL",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Dependency.Add",
             category: "governance",
             description: "Declare a new package dependency with manifest, lockfile, license, advisory, and approval evidence.",
@@ -1383,6 +1428,29 @@ mod tests {
         assert!(built_in_operations()
             .iter()
             .all(|definition| definition.schema_version == OPERATION_DEFINITION_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn generated_and_public_contract_operations_cover_docs_and_compatibility() {
+        let generated = find_operation("GeneratedCode.Record").unwrap();
+        assert!(generated
+            .allowed_create_node_types
+            .contains(&"GeneratedFile"));
+        assert!(generated
+            .allowed_create_edge_types
+            .contains(&"GENERATED_FROM"));
+
+        let contract = find_operation("PublicContract.Record").unwrap();
+        assert!(contract.allowed_create_node_types.contains(&"ApiContract"));
+        assert!(contract
+            .allowed_create_node_types
+            .contains(&"BreakingChange"));
+        assert!(contract
+            .allowed_create_edge_types
+            .contains(&"CONTRACT_HAS_COMPATIBILITY_CHECK"));
+        assert!(contract
+            .allowed_create_edge_types
+            .contains(&"CONTRACT_DOCUMENTED_BY"));
     }
 
     #[test]

@@ -135,8 +135,9 @@ Current completed slices:
 - **Phase 0.4B — Reservation enforcement in workflow permits** added strict/team reservation requirements to `sg workflow code-plan`, conflict detection for active file/symbol/module reservations, same spec/action shared-reservation policy, expired reservation stale handling, `sg workflow reservations list/show/release`, and tests for missing/conflicting/shared/stale/released reservations.
 - **Phase 0.5A — Config and secret declaration governance** added config/secret/runtime environment graph facts, stable-key/ontology/operation ABI support, config access detection in the code indexer, `Config.Declare` semantic gates for docs and approval evidence, strict index blockers for undeclared config/secret usage, and tests.
 - **Phase 0.5B — Dependency graph facts and operations** added dependency/package-manifest/version/lockfile/license/advisory facts, stable-key/ontology/operation ABI support for `Dependency.Add/Update/Remove`, semantic gates for manifest, lockfile consistency, license, advisory, and risky-dependency approval evidence, plus tests.
+- **Phase 0.5C — Generated-code, public contract, docs, and projection governance** added generated-file/source/generator facts, public API contract/request/response/consumer/breaking-change facts, example/changelog evidence, `GeneratedCode.Record` and `PublicContract.Record` ABI/semantic gates, generated-file edit permit blockers, public compatibility/docs requirements, projection drift findings, and tests.
 
-Next focus: **Phase 0.5C — Generated-code model and direct-edit blockers**. Start from the latest `development`, model generated files/sources/generators, block direct generated-file edits in workflow permits, and add source-edit allowed tests.
+Next focus: **Phase 0.6 — Review, validation recipes, test intent, rollout, observability, and post-release gates**. Start from the latest `development` after the Phase 0.5 gate passes.
 
 ---
 
@@ -470,24 +471,24 @@ Cover common production changes that are not just functions and types: environme
 
 - [x] **Add dependency operations.** Add `Dependency.Add`, `Dependency.Update`, and `Dependency.Remove`. Require manifest and lockfile consistency, license policy, vulnerability/advisory evidence, and approval for risky packages.
 
-- [ ] **Add generated code model.** Add `GeneratedFile`, `Generator`, `GenerationSource`, and `GeneratedFrom` facts. Generated files must point to their source schema/config.
+- [x] **Add generated code model.** Add `GeneratedFile`, `Generator`, `GenerationSource`, and `GeneratedFrom` facts. Generated files must point to their source schema/config.
 
-- [ ] **Block direct generated-file edits.** If a file is generated, the work permit must block direct edits and suggest editing the generation source, such as OpenAPI, Prisma schema, proto file, or template.
+- [x] **Block direct generated-file edits.** If a file is generated, the work permit must block direct edits and suggest editing the generation source, such as OpenAPI, Prisma schema, proto file, or template.
 
-- [ ] **Add public contract compatibility model.** Add `ApiContract`, `RequestType`, `ResponseType`, `Consumer`, `CompatibilityCheck`, and `BreakingChange` facts. Public API request/response/schema changes must run compatibility validation.
+- [x] **Add public contract compatibility model.** Add `ApiContract`, `RequestType`, `ResponseType`, `Consumer`, `CompatibilityCheck`, and `BreakingChange` facts. Public API request/response/schema changes must run compatibility validation.
 
-- [ ] **Require docs for public changes.** Public API, CLI, config, dependency, migration, and release changes must require `DocumentationUpdate`, `ExampleUpdate`, or `ChangelogEntry` facts as appropriate.
+- [x] **Require docs for public changes.** Public API, CLI, config, dependency, migration, and release changes must require `DocumentationUpdate`, `ExampleUpdate`, or `ChangelogEntry` facts as appropriate.
 
-- [ ] **Add generated projection drift checks.** If graph facts imply docs, CLI reference, OpenAPI/schema docs, SDK types, or examples should change, validation must detect stale projections.
+- [x] **Add generated projection drift checks.** If graph facts imply docs, CLI reference, OpenAPI/schema docs, SDK types, or examples should change, validation must detect stale projections.
 
-- [ ] **Add tests.** Cover env var without config declaration blocked, secret config approval required, dependency add with lockfile mismatch blocked, generated file edit blocked, source schema edit allowed, breaking API change requiring compatibility approval, and docs/changelog required for public change.
+- [x] **Add tests.** Cover env var without config declaration blocked, secret config approval required, dependency add with lockfile mismatch blocked, generated file edit blocked, source schema edit allowed, breaking API change requiring compatibility approval, and docs/changelog required for public change.
 
 ## Phase Gate
 
 - [x] New config/env/secret usage cannot enter trusted graph without declaration.
 - [x] Dependency changes require package/lock/license/advisory evidence.
-- [ ] Generated files are not edited directly when source artifacts exist.
-- [ ] Public contract changes require compatibility and docs evidence.
+- [x] Generated files are not edited directly when source artifacts exist.
+- [x] Public contract changes require compatibility and docs evidence.
 
 ---
 
