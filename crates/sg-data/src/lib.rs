@@ -8,6 +8,8 @@ pub use data_graph::{
     DataContractDefinition, DataGraphProjection, TableDefinition,
 };
 pub use migration_runtime::{
-    migration_node_id, migration_test_node_id, rollback_plan_node_id, validate_migration_runtime,
-    MigrationPlan, MigrationTestEvidence, RollbackPlan,
+    classify_migration_risk, migration_node_id, migration_observations_to_delta,
+    migration_test_node_id, observe_migration_file, rollback_plan_node_id,
+    validate_migration_runtime, MigrationChangeObservation, MigrationObservation, MigrationPlan,
+    MigrationTestEvidence, RollbackPlan,
 };

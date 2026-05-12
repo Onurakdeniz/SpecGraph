@@ -174,7 +174,12 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             description: "Record migration planning and execution evidence including owner, rollback, tests, approvals, and affected tables.",
             required_input_fields: &["migration"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
-            allowed_create_node_types: &["Migration", "RollbackPlan", "MigrationTestEvidence"],
+            allowed_create_node_types: &[
+                "Migration",
+                "RollbackPlan",
+                "MigrationTestEvidence",
+                "Table",
+            ],
             allowed_create_edge_types: &[
                 "OWNED_BY_MODULE",
                 "AFFECTS_TABLE",

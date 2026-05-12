@@ -15,6 +15,7 @@ use sg_codegraph::{
     code_route_node_id, code_symbol_node_id, resolve_code_object, CodeGraphProjection,
     CodeObjectDeclaration, CodeObjectQuery, SourceFallback,
 };
+use sg_data::{migration_observations_to_delta, observe_migration_file, MigrationObservation};
 use sg_gitgraph::{
     artifact_checksum_node_id, git_graph_stable, merge_node_id, pull_request_node_id,
     release_artifact_node_id, release_node_id, validate_commit_binding, validate_pr_hosting_graph,
@@ -164,6 +165,8 @@ enum Commands {
     Git(GitArgs),
     /// Code indexing and scope validation commands.
     Code(CodeArgs),
+    /// DataGraph and migration observation commands.
+    Data(DataArgs),
     /// Test traceability commands.
     Trace(TraceArgs),
     /// Test runner integration commands.
@@ -1153,6 +1156,30 @@ struct CodeArgs {
     command: CodeCommand,
 }
 
+#[derive(Debug, Args)]
+struct DataArgs {
+    #[command(subcommand)]
+    command: DataCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum DataCommand {
+    /// Observe migration/schema files as untrusted DataGraph facts.
+    Observe(DataObserveArgs),
+}
+
+#[derive(Debug, Args)]
+struct DataObserveArgs {
+    #[arg(long = "from")]
+    from: PathBuf,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+    #[arg(long)]
+    dry_run: bool,
+}
+
 #[derive(Debug, Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum CodeCommand {
@@ -1679,6 +1706,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Action(args) => handle_action(&store, args, output)?,
         Commands::Git(args) => handle_git(&store, &root, args)?,
         Commands::Code(args) => handle_code(&store, &root, args)?,
+        Commands::Data(args) => handle_data(&store, &root, args)?,
         Commands::Trace(args) => handle_trace(&store, &root, args)?,
         Commands::Test(args) => handle_test(&store, args)?,
         Commands::Ci(args) => handle_ci(&store, &root, args)?,
@@ -3505,6 +3533,46 @@ fn handle_git(store: &SpecGraphStore, root: &Path, args: GitArgs) -> anyhow::Res
             })?;
             println!("gitCommitRecorded: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
+        }
+    }
+    Ok(())
+}
+
+fn handle_data(store: &SpecGraphStore, root: &Path, args: DataArgs) -> anyhow::Result<()> {
+    match args.command {
+        DataCommand::Observe(args) => {
+            let observations = migration_observations_from_path(root, &args.from)?;
+            let delta = migration_observations_to_delta(&observations);
+            let destructive_count = observations
+                .iter()
+                .filter(|observation| observation.destructive)
+                .count();
+            let finding_count = observations
+                .iter()
+                .map(|observation| observation.findings.len())
+                .sum::<usize>();
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "Migration.Record".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({
+                    "migration": {
+                        "observedFiles": observations.len(),
+                        "destructive": destructive_count,
+                        "findings": finding_count,
+                    },
+                    "sourceTrust": "Observation",
+                }),
+                delta,
+                dry_run: args.dry_run,
+            })?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "receipt": receipt,
+                    "observations": observations,
+                }))?
+            );
         }
     }
     Ok(())
@@ -6187,6 +6255,70 @@ fn code_index_observations(
             }
         })
         .collect()
+}
+
+fn migration_observations_from_path(
+    root: &Path,
+    from: &Path,
+) -> anyhow::Result<Vec<MigrationObservation>> {
+    let path = resolve_path(root, from.to_path_buf());
+    let mut files = Vec::new();
+    collect_migration_files(&path, &mut files)?;
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let bytes =
+                fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+            let source = String::from_utf8_lossy(&bytes);
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+            Ok(observe_migration_file(&relative, &source))
+        })
+        .collect()
+}
+
+fn collect_migration_files(path: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    if path.is_file() {
+        if is_migration_observation_file(path) {
+            files.push(path.to_path_buf());
+        }
+        return Ok(());
+    }
+    if !path.exists() {
+        bail!(
+            "migration observation path does not exist: {}",
+            path.display()
+        );
+    }
+    for entry in fs::read_dir(path).with_context(|| format!("failed to read {}", path.display()))? {
+        let entry = entry?;
+        let child = entry.path();
+        if child.is_dir() {
+            collect_migration_files(&child, files)?;
+        } else if is_migration_observation_file(&child) {
+            files.push(child);
+        }
+    }
+    Ok(())
+}
+
+fn is_migration_observation_file(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let path_text = path.to_string_lossy().to_ascii_lowercase();
+    name.ends_with(".sql")
+        || name.ends_with(".prisma")
+        || (matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("ts" | "js")
+        ) && (path_text.contains("migration") || path_text.contains("schema")))
 }
 
 fn validation_run_delta(

@@ -151,8 +151,9 @@ Current completed slices:
 - **Phase 6C — Impact queue replan closure** wired impact queue input into `sg action replan`, records `RevalidationQueue` evidence through `Impact.Revalidate`, replans invalidated actions with replacement ActionNodes, and tests impact-driven stale action blockers.
 - **Phase 7A — Semantic indexer and cache foundations** added a versioned semantic indexer contract, deterministic Rust/TypeScript-JavaScript/Python indexers with provenance metadata, source visibility/location extraction, and `.specgraph/index/code` cache reuse with stable graph output.
 - **Phase 7B — Drift detection and trust promotion hardening** enforced observed-only `Code.Index` output, required accepted-observation evidence for observed CodeGraph promotion, expanded drift findings for missing/renamed symbols, route mismatch, stale trace links, missing use-case implementations, and unrepresented entities, and broadened language/framework fixture coverage.
+- **Phase 8A — Migration observation and risk policy foundations** added deterministic SQL/Prisma/Knex/TypeORM migration observers, `sg data observe --from`, observed-only migration/table facts, migration risk classification, and destructive/production-sensitive migration evidence policy checks.
 
-Next focus: **Phase 8 — DataGraph and Migration Runtime Productionization**. Start from the latest `development` and continue the five-checklist-item branch policy with migration parsers, framework parsers, schema observation, risk classification, and migration policy hardening.
+Next focus after Phase 8A: **Phase 8B — Migration execution evidence and release gates**. Continue the five-checklist-item branch policy with execution/rollback evidence, release validation, broader migration tests, and the remaining Phase 8 gates.
 
 ---
 
@@ -776,15 +777,15 @@ Make database schema and migration governance usable for production changes.
 
 ## Checklist
 
-- [ ] **Add migration parsers.** Parse common SQL migration files and detect create/alter/drop table, add/drop/rename column, index changes, constraints, and destructive operations.
+- [x] **Add migration parsers.** Parse common SQL migration files and detect create/alter/drop table, add/drop/rename column, index changes, constraints, and destructive operations.
 
-- [ ] **Add framework parsers.** Add deterministic parsers for common schema/migration formats used by the project, such as Prisma, Diesel, Knex, or TypeORM. Keep unsupported formats as explicit observations with findings.
+- [x] **Add framework parsers.** Add deterministic parsers for common schema/migration formats used by the project, such as Prisma, Diesel, Knex, or TypeORM. Keep unsupported formats as explicit observations with findings.
 
-- [ ] **Add schema observation command.** Implement `sg data observe --from migrations/` and optional database schema observation from configured environment variables. Output must be observed only.
+- [x] **Add schema observation command.** Implement `sg data observe --from migrations/` and optional database schema observation from configured environment variables. Output must be observed only.
 
-- [ ] **Add migration risk classification.** Classify migration changes as additive, compatible, destructive, data-loss-risk, rollback-required, or production-sensitive.
+- [x] **Add migration risk classification.** Classify migration changes as additive, compatible, destructive, data-loss-risk, rollback-required, or production-sensitive.
 
-- [ ] **Harden migration policy.** Destructive or production-sensitive migrations must require owner module, rollback plan, migration test evidence, approval, affected table links, and impacted action revalidation.
+- [x] **Harden migration policy.** Destructive or production-sensitive migrations must require owner module, rollback plan, migration test evidence, approval, affected table links, and impacted action revalidation.
 
 - [ ] **Add execution evidence model.** Add `MigrationExecution` and `MigrationRollbackExecution` facts with environment, actor, timestamp, migration id, checksum, result, and log hash.
 

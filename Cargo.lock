@@ -661,6 +661,7 @@ dependencies = [
  "sg-adapter-hosting",
  "sg-adoption",
  "sg-codegraph",
+ "sg-data",
  "sg-gitgraph",
  "sg-impact",
  "sg-merge",
