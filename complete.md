@@ -127,8 +127,9 @@ Current completed slices:
 - **Phase 0.2E — Public lifecycle compatibility gates** hardened `CodeObject.Rename` and `CodeObject.Move` so public symbols require `compatibilityEvidence` or `approvalId`, with tests proving public rename/move blockers and approved/evidenced dry-runs.
 - **Phase 0.2F — Rename/move alias migration evidence** added `CodeObjectAlias` graph facts, `CODE_OBJECT_HAS_ALIAS` links, stable-key support, ABI/ontology coverage, and semantic gates requiring alias migration evidence when referenced code objects are renamed or moved.
 - **Phase 0.2G — Broader delete safety** expanded `CodeObject.Delete` blockers across spec declarations, files, implementation links, endpoints/use cases/public interfaces, parent/child objects, impact/refactor/root-cause references, aliases, and released specs; approved removal plans can proceed.
+- **Phase 0.2H — Refactor closure and public API preservation** added semantic validation for `Refactor.Record`, requiring no behavior change, a refactor plan, preserved behavior, passed equivalence validation, target code objects, and public API preservation evidence for public targets.
 
-Next focus: **Phase 0.2H — Phase 0.2 closure audit and refactor/public API hardening**. Start from the latest `development`, audit Phase 0.2 against code/tests, then close any remaining refactor/public API gaps before marking Phase 0.2 complete.
+Next focus: **Phase 0.3 — Agent Autonomy and Human Decision Boundaries**. Start from the latest `development`, define auto-allowed vs approval-required operations, human decision facts, user-choice blockers, scoped approvals, autonomous audit trails, and tests.
 
 ---
 
@@ -363,7 +364,7 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [x] **Add delete safety checks.** Delete operations must be blocked if the object is referenced by specs, tests, public interfaces, endpoints, migrations, docs, or releases unless a deprecation/removal plan and approval exist.
 
-- [~] **Add refactor-only workflow.** Add `RefactorSpec`, `PreservedBehavior`, `RefactorPlan`, and `EquivalenceValidation` facts. Refactors must declare no intended behavior change, preserve public APIs unless approved, and revalidate existing behavior links.
+- [x] **Add refactor-only workflow.** Add `RefactorSpec`, `PreservedBehavior`, `RefactorPlan`, and `EquivalenceValidation` facts. Refactors must declare no intended behavior change, preserve public APIs unless approved, and revalidate existing behavior links.
 
 - [x] **Add bugfix workflow targeting.** Bugfix work must link IssueGraph root cause to exact module/function/type/route/data object. Fixes should update existing root-cause objects rather than create duplicate workaround implementations.
 

@@ -5432,6 +5432,7 @@ fn validate_operation_semantic_preconditions(
             request,
             delta,
         ),
+        "Refactor.Record" => validate_refactor_record_semantic_preconditions(graph, delta),
         "GitCommit.Record" => validate_git_commit_semantic_preconditions(graph, request, delta),
         "Validation.Record" => {
             validate_validation_record_semantic_preconditions(graph, request, delta)
@@ -6227,6 +6228,117 @@ fn code_object_delete_blocking_references(graph: &Graph, declaration: &Node) -> 
     blockers.sort();
     blockers.dedup();
     blockers
+}
+
+fn validate_refactor_record_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    let refactors = delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "RefactorSpec")
+        .collect::<Vec<_>>();
+    if refactors.len() != 1 {
+        findings.push(semantic_finding(
+            "semantic.refactor.spec_required",
+            "Refactor.Record must create exactly one RefactorSpec.",
+        ));
+        return findings;
+    }
+    let refactor = refactors[0];
+    if refactor.attributes.get("behaviorChange") != Some(&json!(false)) {
+        findings.push(semantic_finding(
+            "semantic.refactor.behavior_change_forbidden",
+            "Refactor.Record must declare behaviorChange=false; use a code update/bugfix workflow for behavior changes.",
+        ));
+    }
+
+    let has_plan = delta.create_edges.iter().any(|edge| {
+        edge.from == refactor.id
+            && edge.edge_type == "HAS_REFACTOR_PLAN"
+            && node_exists_with_type(graph, delta, &edge.to, "RefactorPlan")
+    });
+    if !has_plan {
+        findings.push(semantic_finding(
+            "semantic.refactor.plan_required",
+            "Refactor.Record requires a RefactorPlan linked with HAS_REFACTOR_PLAN.",
+        ));
+    }
+
+    let has_preserved_behavior = delta.create_edges.iter().any(|edge| {
+        edge.from == refactor.id
+            && edge.edge_type == "PRESERVES_BEHAVIOR"
+            && node_exists_with_type(graph, delta, &edge.to, "PreservedBehavior")
+    });
+    if !has_preserved_behavior {
+        findings.push(semantic_finding(
+            "semantic.refactor.preserved_behavior_required",
+            "Refactor.Record requires PreservedBehavior evidence.",
+        ));
+    }
+
+    let has_equivalence_validation = delta.create_edges.iter().any(|edge| {
+        edge.from == refactor.id
+            && edge.edge_type == "HAS_EQUIVALENCE_VALIDATION"
+            && node_exists_with_type(graph, delta, &edge.to, "EquivalenceValidation")
+            && node_by_id(graph, delta, &edge.to)
+                .and_then(|node| node_attr(node, "status"))
+                .is_some_and(|status| status == "Passed")
+    });
+    if !has_equivalence_validation {
+        findings.push(semantic_finding(
+            "semantic.refactor.equivalence_validation_required",
+            "Refactor.Record requires passed EquivalenceValidation evidence.",
+        ));
+    }
+
+    let targets = delta
+        .create_edges
+        .iter()
+        .filter(|edge| edge.from == refactor.id && edge.edge_type == "REFACTORS_CODE_OBJECT")
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.refactor.target_required",
+            "Refactor.Record must target at least one existing CodeObjectDeclaration.",
+        ));
+    }
+    for edge in targets {
+        let target = graph.nodes.get(&edge.to);
+        if target.is_none_or(|node| node.node_type != "CodeObjectDeclaration") {
+            findings.push(semantic_finding(
+                "semantic.refactor.target_code_object_required",
+                format!(
+                    "Refactor.Record target `{}` must be an existing CodeObjectDeclaration.",
+                    edge.to
+                ),
+            ));
+            continue;
+        }
+        if target.is_some_and(|node| node_attr(node, "visibility") == Some("public"))
+            && refactor.attributes.get("publicApiPreserved") != Some(&json!(true))
+            && !lifecycle_has_compatibility_or_approval(refactor)
+        {
+            findings.push(semantic_finding(
+                "semantic.refactor.public_api_preservation_required",
+                "Refactor.Record targeting public code objects requires publicApiPreserved=true, compatibilityEvidence, or approvalId.",
+            ));
+        }
+    }
+
+    findings
+}
+
+fn node_by_id<'a>(graph: &'a Graph, delta: &'a GraphDelta, node_id: &str) -> Option<&'a Node> {
+    graph.nodes.get(node_id).or_else(|| {
+        delta
+            .create_nodes
+            .iter()
+            .chain(delta.update_nodes.iter())
+            .find(|node| node.id == node_id)
+    })
 }
 
 fn validate_git_commit_semantic_preconditions(
@@ -12004,6 +12116,76 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn refactor_record_blocks_behavior_change_and_public_api_without_evidence() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration
+            .attributes
+            .insert("visibility".to_string(), json!("public"));
+        let impact = impact_analysis_delta(&declaration.id, "AUTH-001/public-api");
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Update".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "change": "Promote to public API",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    create_nodes: impact.create_nodes,
+                    create_edges: impact.create_edges,
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        let declaration = current_password_reset_declaration(tmp.path());
+        let refactor_id = "AUTH-001/public-refactor";
+        let blocked_delta = refactor_record_delta(refactor_id, &declaration.id, true, false);
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Refactor.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"refactor": refactor_id}),
+                dry_run: true,
+                delta: blocked_delta,
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 2,
+            } if operation == "Refactor.Record"
+        ));
+
+        let allowed_delta = refactor_record_delta(refactor_id, &declaration.id, false, true);
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Refactor.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"refactor": refactor_id}),
+                dry_run: true,
+                delta: allowed_delta,
+            },
+        )
+        .unwrap();
+        assert!(receipt.dry_run);
+    }
+
+    #[test]
     fn action_fail_requires_escalation_after_repeated_failure() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -13372,6 +13554,73 @@ acceptanceCriteria:
                 ]),
             }],
             create_edges: vec![edge(&impact_node_id, "IMPACTS", target_id)],
+            ..GraphDelta::default()
+        }
+    }
+
+    fn refactor_record_delta(
+        refactor_id: &str,
+        target_id: &str,
+        behavior_change: bool,
+        public_api_preserved: bool,
+    ) -> GraphDelta {
+        let refactor_node_id = node_id("refactor_spec", refactor_id);
+        let plan_id = node_id("refactor_plan", refactor_id);
+        let behavior_id = node_id("preserved_behavior", &format!("{refactor_id}/behavior"));
+        let validation_id = node_id("equivalence_validation", &format!("{refactor_id}/tests"));
+        let mut refactor_attributes = BTreeMap::from([
+            ("refactorId".to_string(), json!(refactor_id)),
+            ("behaviorChange".to_string(), json!(behavior_change)),
+        ]);
+        if public_api_preserved {
+            refactor_attributes.insert("publicApiPreserved".to_string(), json!(true));
+        }
+        GraphDelta {
+            create_nodes: vec![
+                Node {
+                    id: refactor_node_id.clone(),
+                    stable_key: format!("refactor-spec:{refactor_id}"),
+                    node_type: "RefactorSpec".to_string(),
+                    attributes: refactor_attributes,
+                },
+                Node {
+                    id: plan_id.clone(),
+                    stable_key: format!("refactor-plan:{refactor_id}"),
+                    node_type: "RefactorPlan".to_string(),
+                    attributes: BTreeMap::from([(
+                        "summary".to_string(),
+                        json!("Restructure without intended behavior change"),
+                    )]),
+                },
+                Node {
+                    id: behavior_id.clone(),
+                    stable_key: format!("preserved-behavior:{refactor_id}/behavior"),
+                    node_type: "PreservedBehavior".to_string(),
+                    attributes: BTreeMap::from([(
+                        "behavior".to_string(),
+                        json!("Existing behavior remains unchanged"),
+                    )]),
+                },
+                Node {
+                    id: validation_id.clone(),
+                    stable_key: format!("equivalence-validation:{refactor_id}/tests"),
+                    node_type: "EquivalenceValidation".to_string(),
+                    attributes: BTreeMap::from([
+                        ("status".to_string(), json!("Passed")),
+                        ("checks".to_string(), json!(["unit", "trace"])),
+                    ]),
+                },
+            ],
+            create_edges: vec![
+                edge(&refactor_node_id, "HAS_REFACTOR_PLAN", &plan_id),
+                edge(&refactor_node_id, "PRESERVES_BEHAVIOR", &behavior_id),
+                edge(
+                    &refactor_node_id,
+                    "HAS_EQUIVALENCE_VALIDATION",
+                    &validation_id,
+                ),
+                edge(&refactor_node_id, "REFACTORS_CODE_OBJECT", target_id),
+            ],
             ..GraphDelta::default()
         }
     }
