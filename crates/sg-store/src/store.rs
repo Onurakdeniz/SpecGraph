@@ -32,7 +32,7 @@ use sg_spec::{
 use sg_validation::{CORE_VALIDATOR_VERSION, VALIDATOR_BRANCH_METADATA, VALIDATOR_SNAPSHOT};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -128,6 +128,17 @@ pub enum StoreError {
     SemanticValidationFailed { operation: String, count: usize },
     #[error("query limit exceeded: {0}")]
     QueryLimitExceeded(String),
+    #[error("SpecGraph write lock is already held at {path}")]
+    WriteLockBusy { path: PathBuf },
+    #[error("legacy event migration conflict from {source_path} to existing {destination}")]
+    LegacyMigrationConflict {
+        source_path: PathBuf,
+        destination: PathBuf,
+    },
+    #[error("legacy event migration changed replay hash: before {before}, after {after}")]
+    LegacyMigrationHashMismatch { before: String, after: String },
+    #[error("invalid graph branch name `{0}`")]
+    InvalidGraphBranchName(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -214,6 +225,13 @@ pub struct AppendOperationOptions {
     pub input: Value,
     pub delta: GraphDelta,
     pub dry_run: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct GraphBranchCreateOptions {
+    pub branch: String,
+    pub parent_branch: String,
+    pub actor: String,
 }
 
 #[derive(Debug, Clone)]
@@ -802,6 +820,18 @@ impl SpecGraphStore {
         append_operation(self.root(), options)
     }
 
+    pub fn create_graph_branch(&self, options: GraphBranchCreateOptions) -> Result<BranchMetadata> {
+        create_graph_branch(self.root(), options)
+    }
+
+    pub fn list_graph_branches(&self) -> Result<Vec<BranchMetadata>> {
+        list_graph_branches(self.root())
+    }
+
+    pub fn show_graph_branch(&self, branch: &str) -> Result<Option<BranchMetadata>> {
+        show_graph_branch(self.root(), branch)
+    }
+
     pub fn import_spec_file(
         &self,
         path: &Path,
@@ -947,6 +977,7 @@ impl SpecGraphStore {
 }
 
 pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceipt> {
+    validate_graph_branch_name(&options.graph_branch)?;
     let store = SpecGraphStore::new(root);
     let sg_dir = store.specgraph_dir();
     if sg_dir.exists() {
@@ -5975,6 +6006,13 @@ pub fn record_policy_report(
 pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<OperationReceipt> {
     validate_spec_branch_name(&options.spec, &options.branch)?;
 
+    let store = SpecGraphStore::new(root);
+    store.ensure_exists()?;
+    let sg_dir = store.specgraph_dir();
+    let _lock = acquire_graph_write_lock(&sg_dir)?;
+    let timestamp = rfc3339_now();
+    migrate_legacy_events_to_main(root, &options.actor, &timestamp)?;
+
     let replay = replay_events(root, ReplayOptions::checking())?;
     let base_state_hash = replay.state_hash.clone();
     let base_event_sequence = replay.last_sequence;
@@ -6046,15 +6084,11 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
         head_event_id: replay.last_event_id.clone(),
         head_state_hash: replay.state_hash.clone(),
         created_by: options.actor.clone(),
-        created_at: OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .expect("RFC3339 formatting should succeed"),
-        last_updated_at: OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .expect("RFC3339 formatting should succeed"),
+        created_at: timestamp.clone(),
+        last_updated_at: timestamp.clone(),
     };
 
-    let receipt = append_operation(
+    let receipt = append_operation_locked(
         root,
         AppendOperationOptions {
             operation: "Spec.BindBranch".to_string(),
@@ -6067,9 +6101,99 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
             delta,
             dry_run: false,
         },
+        timestamp,
     )?;
     write_branch_metadata(root, &metadata)?;
     Ok(receipt)
+}
+
+pub fn create_graph_branch(
+    root: &Path,
+    options: GraphBranchCreateOptions,
+) -> Result<BranchMetadata> {
+    validate_graph_branch_name(&options.branch)?;
+    validate_graph_branch_name(&options.parent_branch)?;
+
+    let store = SpecGraphStore::new(root);
+    store.ensure_exists()?;
+    let sg_dir = store.specgraph_dir();
+    let _lock = acquire_graph_write_lock(&sg_dir)?;
+    let timestamp = rfc3339_now();
+    migrate_legacy_events_to_main(root, &options.actor, &timestamp)?;
+
+    let path = branch_metadata_path(root, &options.branch);
+    if path.exists() {
+        return Err(StoreError::AlreadyExists(path));
+    }
+    let parent_replay = replay_events(root, ReplayOptions::branch(options.parent_branch.clone()))?;
+    let base_snapshot_id = find_snapshot_id(
+        &sg_dir,
+        &options.parent_branch,
+        parent_replay.last_sequence,
+        &parent_replay.state_hash,
+    )?
+    .unwrap_or_else(|| format!("state:{}", parent_replay.state_hash));
+    let metadata = BranchMetadata {
+        schema_version: "specgraph.branch-metadata/v1".to_string(),
+        branch_id: format!("graph-branch:{}", options.branch),
+        branch: options.branch.clone(),
+        parent_branch: Some(options.parent_branch),
+        spec: String::new(),
+        graph_branch: options.branch,
+        base_snapshot_id,
+        base_state_hash: parent_replay.state_hash.clone(),
+        base_event_sequence: parent_replay.last_sequence,
+        base_event_id: parent_replay.last_event_id.clone(),
+        head_event_id: parent_replay.last_event_id,
+        head_state_hash: parent_replay.state_hash,
+        created_by: options.actor,
+        created_at: timestamp.clone(),
+        last_updated_at: timestamp,
+    };
+    write_branch_metadata(root, &metadata)?;
+    Ok(metadata)
+}
+
+pub fn list_graph_branches(root: &Path) -> Result<Vec<BranchMetadata>> {
+    let store = SpecGraphStore::new(root);
+    store.ensure_exists()?;
+    let branch_dir = store.specgraph_dir().join("branches");
+    if !branch_dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut branches = Vec::new();
+    for entry in fs::read_dir(&branch_dir).map_err(|source| StoreError::Io {
+        path: branch_dir.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StoreError::Io {
+            path: branch_dir.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let metadata: BranchMetadata =
+            serde_json::from_slice(&fs::read(&path).map_err(|source| StoreError::Io {
+                path: path.clone(),
+                source,
+            })?)
+            .map_err(|source| StoreError::Json {
+                path: path.clone(),
+                source,
+            })?;
+        if is_graph_branch_metadata(&metadata) {
+            branches.push(metadata);
+        }
+    }
+    branches.sort_by(|left, right| left.branch.cmp(&right.branch));
+    Ok(branches)
+}
+
+pub fn show_graph_branch(root: &Path, branch: &str) -> Result<Option<BranchMetadata>> {
+    validate_graph_branch_name(branch)?;
+    Ok(read_branch_metadata(root, branch)?.filter(is_graph_branch_metadata))
 }
 
 pub fn validate_specs(root: &Path) -> Result<SpecValidationReport> {
@@ -6086,10 +6210,22 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
     let store = SpecGraphStore::new(root);
     store.ensure_exists()?;
     let sg_dir = store.specgraph_dir();
+    let _lock = acquire_graph_write_lock(&sg_dir)?;
+    let timestamp = rfc3339_now();
+    migrate_legacy_events_to_main(root, &options.actor, &timestamp)?;
+    append_operation_locked(root, options, timestamp)
+}
+
+fn append_operation_locked(
+    root: &Path,
+    options: AppendOperationOptions,
+    timestamp: String,
+) -> Result<OperationReceipt> {
+    let store = SpecGraphStore::new(root);
+    store.ensure_exists()?;
+    let sg_dir = store.specgraph_dir();
     let graph_branch = options.graph_branch.clone();
-    let timestamp = OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .expect("RFC3339 formatting should succeed");
+    validate_graph_branch_name(&graph_branch)?;
     ensure_graph_branch_metadata(root, &graph_branch, &options.actor, &timestamp)?;
     let replay = replay_events(
         root,
@@ -6499,7 +6635,6 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
         return Err(StoreError::NotFound(sg_dir));
     }
 
-    let full_replay = replay_events(root, ReplayOptions::checking())?;
     let snapshot_dir = sg_dir.join("snapshots");
     if !snapshot_dir.exists() {
         return Ok(SnapshotValidationReport {
@@ -6537,6 +6672,12 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
                 source,
             })?;
         snapshots_checked += 1;
+        let graph_branch = if snapshot.graph_branch.trim().is_empty() {
+            "main".to_string()
+        } else {
+            snapshot.graph_branch.clone()
+        };
+        let full_replay = replay_events(root, ReplayOptions::branch(graph_branch.clone()))?;
 
         if snapshot.event_sequence > full_replay.last_sequence {
             findings.push(
@@ -6560,7 +6701,7 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
 
         let replay_at_sequence = replay_events_until(
             root,
-            ReplayOptions::checking(),
+            ReplayOptions::branch(graph_branch),
             Some(snapshot.event_sequence),
         )?;
         if replay_at_sequence.state_hash != snapshot.state_hash {
@@ -6822,6 +6963,51 @@ fn read_snapshot_by_id(root: &Path, snapshot_id: &str) -> Result<Graph> {
             .map(|edge| (edge.id.clone(), edge))
             .collect(),
     })
+}
+
+fn find_snapshot_id(
+    sg_dir: &Path,
+    graph_branch: &str,
+    event_sequence: u64,
+    snapshot_state_hash: &str,
+) -> Result<Option<String>> {
+    let snapshot_dir = sg_dir.join("snapshots");
+    if !snapshot_dir.exists() {
+        return Ok(None);
+    }
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&snapshot_dir).map_err(|source| StoreError::Io {
+        path: snapshot_dir.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StoreError::Io {
+            path: snapshot_dir.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    for file in files {
+        let snapshot: Snapshot =
+            serde_json::from_slice(&fs::read(&file).map_err(|source| StoreError::Io {
+                path: file.clone(),
+                source,
+            })?)
+            .map_err(|source| StoreError::Json {
+                path: file.clone(),
+                source,
+            })?;
+        if snapshot.graph_branch == graph_branch
+            && snapshot.event_sequence == event_sequence
+            && snapshot.state_hash == snapshot_state_hash
+        {
+            return Ok(Some(snapshot.snapshot_id));
+        }
+    }
+    Ok(None)
 }
 
 fn snapshot_finding(code: &str, message: String) -> Finding {
@@ -10188,11 +10374,64 @@ fn create_layout(sg_dir: &Path) -> Result<()> {
         sg_dir.join("snapshots"),
         sg_dir.join("branches"),
         sg_dir.join("indexes"),
+        sg_dir.join("locks"),
         sg_dir.join("validation").join("runs"),
     ] {
         fs::create_dir_all(&dir).map_err(|source| StoreError::Io { path: dir, source })?;
     }
     Ok(())
+}
+
+struct GraphWriteLock {
+    path: PathBuf,
+}
+
+impl Drop for GraphWriteLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn acquire_graph_write_lock(sg_dir: &Path) -> Result<GraphWriteLock> {
+    let lock_dir = sg_dir.join("locks");
+    fs::create_dir_all(&lock_dir).map_err(|source| StoreError::Io {
+        path: lock_dir.clone(),
+        source,
+    })?;
+    let path = lock_dir.join("graph.lock");
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(file) => file,
+        Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(StoreError::WriteLockBusy { path });
+        }
+        Err(source) => {
+            return Err(StoreError::Io {
+                path: path.clone(),
+                source,
+            });
+        }
+    };
+    writeln!(
+        file,
+        "pid={} acquiredAt={}",
+        std::process::id(),
+        rfc3339_now()
+    )
+    .map_err(|source| StoreError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    file.sync_all().map_err(|source| StoreError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(GraphWriteLock { path })
+}
+
+fn rfc3339_now() -> String {
+    OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("RFC3339 formatting should succeed")
 }
 
 fn append_event(path: &Path, event: &Event) -> Result<()> {
@@ -10262,6 +10501,104 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 fn write_branch_metadata(root: &Path, metadata: &BranchMetadata) -> Result<()> {
     let path = branch_metadata_path(root, &metadata.branch);
     write_json(&path, metadata)
+}
+
+fn migrate_legacy_events_to_main(root: &Path, actor: &str, timestamp: &str) -> Result<bool> {
+    let sg_dir = root.join(".specgraph");
+    let event_dir = sg_dir.join("events");
+    if !event_dir.exists() {
+        return Ok(false);
+    }
+    let mut legacy_files = Vec::new();
+    for entry in fs::read_dir(&event_dir).map_err(|source| StoreError::Io {
+        path: event_dir.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StoreError::Io {
+            path: event_dir.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            legacy_files.push(path);
+        }
+    }
+    legacy_files.sort();
+    if legacy_files.is_empty() {
+        return Ok(false);
+    }
+
+    let before = replay_events(root, ReplayOptions::checking())?;
+    let main_dir = branch_event_dir(&sg_dir, "main");
+    fs::create_dir_all(&main_dir).map_err(|source| StoreError::Io {
+        path: main_dir.clone(),
+        source,
+    })?;
+    for legacy_file in legacy_files {
+        let Some(file_name) = legacy_file.file_name() else {
+            continue;
+        };
+        let destination = main_dir.join(file_name);
+        if destination.exists() {
+            let legacy_bytes = fs::read(&legacy_file).map_err(|source| StoreError::Io {
+                path: legacy_file.clone(),
+                source,
+            })?;
+            let destination_bytes = fs::read(&destination).map_err(|source| StoreError::Io {
+                path: destination.clone(),
+                source,
+            })?;
+            if legacy_bytes != destination_bytes {
+                return Err(StoreError::LegacyMigrationConflict {
+                    source_path: legacy_file,
+                    destination,
+                });
+            }
+            fs::remove_file(&legacy_file).map_err(|source| StoreError::Io {
+                path: legacy_file,
+                source,
+            })?;
+            continue;
+        }
+        fs::rename(&legacy_file, &destination).map_err(|source| StoreError::Io {
+            path: legacy_file,
+            source,
+        })?;
+    }
+
+    let after = replay_events(root, ReplayOptions::checking())?;
+    if before.state_hash != after.state_hash {
+        return Err(StoreError::LegacyMigrationHashMismatch {
+            before: before.state_hash,
+            after: after.state_hash,
+        });
+    }
+
+    let mut metadata = read_branch_metadata(root, "main")?.unwrap_or_else(|| BranchMetadata {
+        schema_version: "specgraph.branch-metadata/v1".to_string(),
+        branch_id: "graph-branch:main".to_string(),
+        branch: "main".to_string(),
+        parent_branch: None,
+        spec: String::new(),
+        graph_branch: "main".to_string(),
+        base_snapshot_id: String::new(),
+        base_state_hash: state_hash(&Graph::default(), CORE_ONTOLOGY_VERSION),
+        base_event_sequence: 0,
+        base_event_id: None,
+        head_event_id: None,
+        head_state_hash: state_hash(&Graph::default(), CORE_ONTOLOGY_VERSION),
+        created_by: actor.to_string(),
+        created_at: timestamp.to_string(),
+        last_updated_at: timestamp.to_string(),
+    });
+    metadata.branch_id = "graph-branch:main".to_string();
+    metadata.branch = "main".to_string();
+    metadata.graph_branch = "main".to_string();
+    metadata.head_event_id = after.last_event_id;
+    metadata.head_state_hash = after.state_hash;
+    metadata.last_updated_at = timestamp.to_string();
+    write_branch_metadata(root, &metadata)?;
+    Ok(true)
 }
 
 fn ensure_graph_branch_metadata(
@@ -10360,6 +10697,26 @@ fn branch_event_dir(sg_dir: &Path, graph_branch: &str) -> PathBuf {
         .split('/')
         .filter(|segment| !segment.is_empty() && *segment != "." && *segment != "..")
         .fold(sg_dir.join("events"), |path, segment| path.join(segment))
+}
+
+fn is_graph_branch_metadata(metadata: &BranchMetadata) -> bool {
+    metadata.branch_id.starts_with("graph-branch:") || metadata.spec.is_empty()
+}
+
+fn validate_graph_branch_name(graph_branch: &str) -> Result<()> {
+    if graph_branch.trim().is_empty()
+        || graph_branch.starts_with('/')
+        || graph_branch.contains('\\')
+        || graph_branch
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+        || !graph_branch
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/'))
+    {
+        return Err(StoreError::InvalidGraphBranchName(graph_branch.to_string()));
+    }
+    Ok(())
 }
 
 fn branch_file_stem(branch: &str) -> String {
@@ -11273,6 +11630,151 @@ mod tests {
         assert_eq!(metadata.base_event_sequence, 1);
         assert!(metadata.head_event_id.is_some());
         assert!(!contains_tmp_file(&tmp.path().join(".specgraph/events")).unwrap());
+    }
+
+    #[test]
+    fn graph_branch_create_list_show_and_append_are_isolated() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let metadata = create_graph_branch(
+            tmp.path(),
+            GraphBranchCreateOptions {
+                branch: "feature/test".to_string(),
+                parent_branch: "main".to_string(),
+                actor: "test".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(metadata.branch, "feature/test");
+        assert_eq!(metadata.parent_branch.as_deref(), Some("main"));
+        assert_eq!(metadata.base_event_sequence, 1);
+        assert!(metadata.base_snapshot_id.starts_with("snap_"));
+        assert_eq!(metadata.head_event_id, metadata.base_event_id);
+
+        let branches = list_graph_branches(tmp.path()).unwrap();
+        assert_eq!(
+            branches
+                .iter()
+                .map(|branch| branch.branch.as_str())
+                .collect::<Vec<_>>(),
+            vec!["feature/test", "main"]
+        );
+        let shown = show_graph_branch(tmp.path(), "feature/test")
+            .unwrap()
+            .unwrap();
+        assert_eq!(shown.base_state_hash, metadata.base_state_hash);
+
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:branch-user".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "feature/test".to_string(),
+            },
+        )
+        .unwrap();
+
+        let main = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        let branch = replay_events(tmp.path(), ReplayOptions::branch("feature/test")).unwrap();
+        assert_eq!(main.events_replayed, 1);
+        assert_eq!(branch.events_replayed, 2);
+        let updated = show_graph_branch(tmp.path(), "feature/test")
+            .unwrap()
+            .unwrap();
+        assert_ne!(updated.head_state_hash, metadata.head_state_hash);
+        assert!(!contains_tmp_file(&tmp.path().join(".specgraph")).unwrap());
+    }
+
+    #[test]
+    fn first_branch_aware_write_migrates_legacy_root_events_to_main() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let main_path = tmp.path().join(".specgraph/events/main/00000001.jsonl");
+        let legacy_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        fs::rename(&main_path, &legacy_path).unwrap();
+        let before = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:migrated".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!legacy_path.exists());
+        assert!(main_path.exists());
+        let after = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        assert_eq!(before.events_replayed, 1);
+        assert_eq!(after.events_replayed, 2);
+        assert!(after
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.stable_key == "actor:local:migrated"));
+        let metadata = read_branch_metadata(tmp.path(), "main").unwrap().unwrap();
+        assert_eq!(metadata.head_event_id, after.last_event_id);
+        assert_eq!(metadata.head_state_hash, after.state_hash);
+    }
+
+    #[test]
+    fn write_lock_contention_blocks_mutations_with_clear_error() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let lock_path = tmp.path().join(".specgraph/locks/graph.lock");
+        fs::write(&lock_path, "held").unwrap();
+
+        let error = upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:blocked".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, StoreError::WriteLockBusy { path } if path == lock_path));
+        assert!(
+            !fs::read_to_string(tmp.path().join(".specgraph/events/main/00000001.jsonl"))
+                .unwrap()
+                .contains("local:blocked")
+        );
     }
 
     #[test]

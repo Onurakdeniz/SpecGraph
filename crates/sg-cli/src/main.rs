@@ -47,9 +47,9 @@ use sg_store::{
     post_release_gate_findings, release_governance_gate_findings, review_gate_findings,
     validation_recipe_gate_findings, ActionLifecycleOptions, AppendOperationOptions,
     BindBranchOptions, CreateWaiverOptions, GenerateActionGraphOptions, GrantRoleOptions,
-    InitOptions, InterfaceVisibility, LinkModuleCapabilityOptions, ModuleDefinition,
-    ModuleInterface, ModuleLifecycleOptions, ModuleLifecycleState, ProjectProfileInput,
-    RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions,
+    GraphBranchCreateOptions, InitOptions, InterfaceVisibility, LinkModuleCapabilityOptions,
+    ModuleDefinition, ModuleInterface, ModuleLifecycleOptions, ModuleLifecycleState,
+    ProjectProfileInput, RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions,
     ReleaseWorkReservationOptions, ReplayOptions, ReplayReport, SpecGraphStore,
     TransitionSpecOptions, UpsertActorOptions, UpsertModuleGraphOptions,
     UpsertProjectProfileOptions, WorkflowCodePlanOptions, WorkflowExpectedFileHash,
@@ -1417,7 +1417,9 @@ struct GraphArgs {
 #[derive(Debug, Subcommand)]
 enum GraphCommand {
     Replay(ReplayArgs),
-    Status,
+    Status(GraphStatusArgs),
+    /// Create, list, or inspect isolated graph branches.
+    Branch(GraphBranchArgs),
     /// Rebuild derived snapshots and indexes from canonical JSONL events.
     Rebuild,
     /// Query nodes in current, branch, or snapshot context.
@@ -1478,6 +1480,39 @@ struct ReplayArgs {
     #[arg(long)]
     check: bool,
     #[arg(long, default_value = "main")]
+    branch: String,
+}
+
+#[derive(Debug, Args)]
+struct GraphStatusArgs {
+    #[arg(long, default_value = "main")]
+    branch: String,
+}
+
+#[derive(Debug, Args)]
+struct GraphBranchArgs {
+    #[command(subcommand)]
+    command: GraphBranchCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum GraphBranchCommand {
+    Create(GraphBranchCreateArgs),
+    List,
+    Show(GraphBranchShowArgs),
+}
+
+#[derive(Debug, Args)]
+struct GraphBranchCreateArgs {
+    branch: String,
+    #[arg(long = "from", default_value = "main")]
+    parent_branch: String,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+}
+
+#[derive(Debug, Args)]
+struct GraphBranchShowArgs {
     branch: String,
 }
 
@@ -4627,18 +4662,77 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
                 println!("check: ok");
             }
         }
-        GraphCommand::Status => {
-            let report = store.replay(ReplayOptions::checking())?;
+        GraphCommand::Status(args) => {
+            let report = store.replay(ReplayOptions::branch(args.branch.clone()))?;
             let mut counts: BTreeMap<String, usize> = BTreeMap::new();
             for node in report.graph.nodes.values() {
                 *counts.entry(node.node_type.clone()).or_default() += 1;
             }
+            println!("branch: {}", args.branch);
             println!("stateHash: {}", report.state_hash);
             println!("events: {}", report.events_replayed);
             for (node_type, count) in counts {
                 println!("{node_type}: {count}");
             }
         }
+        GraphCommand::Branch(args) => match args.command {
+            GraphBranchCommand::Create(args) => {
+                let metadata = store.create_graph_branch(GraphBranchCreateOptions {
+                    branch: args.branch,
+                    parent_branch: args.parent_branch,
+                    actor: args.actor,
+                })?;
+                println!("branch: {}", metadata.branch);
+                println!(
+                    "parentBranch: {}",
+                    metadata.parent_branch.as_deref().unwrap_or("")
+                );
+                println!("baseEventSequence: {}", metadata.base_event_sequence);
+                println!("baseStateHash: {}", metadata.base_state_hash);
+                println!(
+                    "headEventId: {}",
+                    metadata.head_event_id.unwrap_or_default()
+                );
+                println!("headStateHash: {}", metadata.head_state_hash);
+            }
+            GraphBranchCommand::List => {
+                for metadata in store.list_graph_branches()? {
+                    println!(
+                        "{} parent={} baseSequence={} headStateHash={}",
+                        metadata.branch,
+                        metadata.parent_branch.as_deref().unwrap_or(""),
+                        metadata.base_event_sequence,
+                        metadata.head_state_hash
+                    );
+                }
+            }
+            GraphBranchCommand::Show(args) => {
+                let Some(metadata) = store.show_graph_branch(&args.branch)? else {
+                    bail!("graph branch not found: {}", args.branch);
+                };
+                println!("branch: {}", metadata.branch);
+                println!("branchId: {}", metadata.branch_id);
+                println!(
+                    "parentBranch: {}",
+                    metadata.parent_branch.as_deref().unwrap_or("")
+                );
+                println!("baseSnapshotId: {}", metadata.base_snapshot_id);
+                println!("baseEventSequence: {}", metadata.base_event_sequence);
+                println!(
+                    "baseEventId: {}",
+                    metadata.base_event_id.unwrap_or_default()
+                );
+                println!("baseStateHash: {}", metadata.base_state_hash);
+                println!(
+                    "headEventId: {}",
+                    metadata.head_event_id.unwrap_or_default()
+                );
+                println!("headStateHash: {}", metadata.head_state_hash);
+                println!("createdBy: {}", metadata.created_by);
+                println!("createdAt: {}", metadata.created_at);
+                println!("lastUpdatedAt: {}", metadata.last_updated_at);
+            }
+        },
         GraphCommand::Rebuild => {
             let report = store.rebuild_projections()?;
             println!("snapshotsRebuilt: {}", report.snapshots_rebuilt);

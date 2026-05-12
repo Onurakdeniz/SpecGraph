@@ -139,8 +139,9 @@ Current completed slices:
 - **Phase 0.6A — Validation recipes and test intent** added validation recipe/command/build/typecheck/lint/format evidence facts, action/commit-plan recipe requirements, adapter-execution guardrails, recipe gate findings for action/PR/release validation, test intent/assertion/scenario facts, existing/unknown email positive/negative scenario completeness checks, and tests.
 - **Phase 0.6B — Review, rollout, rollback, observability, and post-release gates** added review/requested-change/resolution/approval facts, unresolved review blockers for action/PR/release gates, rollout/feature-flag/rollback evidence, post-release and release-health checks with follow-up requirements, metric/log/trace/audit/alert/SLO facts, risky/security release gate findings, and tests.
 - **Phase 1A — Branch-aware replay layout and atomic writes** added branch-scoped event files under `.specgraph/events/<graph-branch>/00000001.jsonl`, graph-branch replay options, parent/main inheritance for branch replay, branch-aware query replay, branch metadata head fields, legacy root event replay compatibility, and atomic temp-file/rename writes for events, receipts, snapshots, and metadata.
+- **Phase 1B — Branch CLI, write lock, and legacy migration hardening** added `.specgraph/locks/graph.lock` mutation locking, `sg graph branch create/list/show`, branch-aware `sg graph status --branch`, first-write legacy root-event migration into `main` with before/after hash verification, branch-aware snapshot validation, and tests for branch creation, isolated branch append, migration, lock contention, temp cleanup, snapshot query, and tampered branch metadata.
 
-Next focus: **Phase 1B — Repository write lock, branch CLI, and legacy migration hardening**. Start from the latest `development`, add repository-level write locking, graph branch create/list/show commands, explicit legacy migration, and the remaining Phase 1 branch CLI/gate tests.
+Next focus: **Phase 2 — Query permissions and authorization enforcement**. Start from the latest `development`, define graph read/admin permissions, enforce `QueryContext.require_permission`, add sensitivity handling, and propagate authz through CLI/server/SDK query paths.
 
 ---
 
@@ -553,20 +554,20 @@ Make graph branches real, isolated, replayable, mergeable, and safe for producti
 
 - [x] **Add atomic append transaction.** Replace direct event/receipt/snapshot writes with a transaction helper that writes temp files, fsyncs file and directory where practical, renames atomically, updates branch head metadata, and leaves no accepted partial mutation after interruption.
 
-- [ ] **Add repository-level write lock.** Create `.specgraph/locks/graph.lock` and use an exclusive file lock during append, branch creation, merge acceptance, release record, and migration. Return a clear error if the lock cannot be acquired.
+- [x] **Add repository-level write lock.** Create `.specgraph/locks/graph.lock` and use an exclusive file lock during append, branch creation, merge acceptance, release record, and migration. Return a clear error if the lock cannot be acquired.
 
-- [ ] **Add branch CLI commands.** Add `sg graph branch create/list/show` and update existing `sg graph replay/query/status` to accept `--branch <name>`. Branch create should record graph branch metadata through Operation Runtime or a clearly audited branch-management path.
+- [x] **Add branch CLI commands.** Add `sg graph branch create/list/show` and update existing `sg graph replay/query/status` to accept `--branch <name>`. Branch create should record graph branch metadata through Operation Runtime or a clearly audited branch-management path.
 
-- [ ] **Add migration from legacy layout.** On first branch-aware write, detect legacy `.specgraph/events/*.jsonl`, move or logically assign it to `main`, write branch metadata, and verify replay hash before/after migration.
+- [x] **Add migration from legacy layout.** On first branch-aware write, detect legacy `.specgraph/events/*.jsonl`, move or logically assign it to `main`, write branch metadata, and verify replay hash before/after migration.
 
-- [ ] **Add tests.** Cover branch creation, independent branch append, branch replay hash isolation, legacy migration, interrupted/temp-file cleanup, lock contention, snapshot query, and branch metadata tamper detection.
+- [x] **Add tests.** Cover branch creation, independent branch append, branch replay hash isolation, legacy migration, interrupted/temp-file cleanup, lock contention, snapshot query, and branch metadata tamper detection.
 
 ## Phase Gate
 
-- [ ] `cargo test --workspace --all-targets` passes.
-- [ ] `sg graph branch create feature/test` creates isolated branch metadata.
-- [ ] `sg graph replay --branch main --check` and `sg graph replay --branch feature/test --check` produce deterministic but branch-specific results.
-- [ ] A simulated invalid/tampered branch metadata file fails validation.
+- [x] `cargo test --workspace --all-targets` passes.
+- [x] `sg graph branch create feature/test` creates isolated branch metadata.
+- [x] `sg graph replay --branch main --check` and `sg graph replay --branch feature/test --check` produce deterministic but branch-specific results.
+- [x] A simulated invalid/tampered branch metadata file fails validation.
 
 ---
 
