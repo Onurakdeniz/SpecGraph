@@ -1477,6 +1477,8 @@ enum GraphIntegrateModeArg {
 struct ReplayArgs {
     #[arg(long)]
     check: bool,
+    #[arg(long, default_value = "main")]
+    branch: String,
 }
 
 #[derive(Debug, Args)]
@@ -2002,7 +2004,7 @@ fn handle_identity(store: &SpecGraphStore, args: IdentityArgs) -> anyhow::Result
 fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()> {
     match args.command {
         PolicyCommand::Check(args) => {
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let actor = args.actor;
             let input = PolicyCheckInput {
                 operation: args.operation,
@@ -2414,7 +2416,7 @@ fn parse_expected_file_hashes(values: &[String]) -> anyhow::Result<Vec<WorkflowE
 fn handle_impact(store: &SpecGraphStore, args: ImpactArgs) -> anyhow::Result<()> {
     match args.command {
         ImpactCommand::Analyze(args) => {
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let analysis = analyze_impact(&replay.graph, args.nodes, args.depth);
             println!("roots: {}", analysis.roots.join(","));
             println!("impactedNodes: {}", analysis.impacted_nodes.len());
@@ -2588,7 +2590,7 @@ fn read_api_operation_request(root: &Path, path: &Path) -> anyhow::Result<ApiOpe
 fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Result<()> {
     match args.command {
         PrCommand::Sync(args) => {
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let project_node_id = find_project_node_id(&replay.graph)?;
             let pr = PullRequestFact {
                 provider: args.provider.clone(),
@@ -2628,7 +2630,7 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
             println!("stateHash: {}", receipt.post_state_hash);
         }
         PrCommand::Validate(args) => {
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let mut checks = vec![
                 "replay".to_string(),
                 "spec".to_string(),
@@ -2823,7 +2825,7 @@ fn handle_proposal(store: &SpecGraphStore, root: &Path, args: ProposalArgs) -> a
                 );
             }
             if args.record {
-                let replay = store.replay(ReplayOptions { check_hashes: true })?;
+                let replay = store.replay(ReplayOptions::checking())?;
                 let delta = patch_sandbox_delta(&replay.graph, &report)?;
                 let receipt = store.append_operation(AppendOperationOptions {
                     operation: "Proposal.Sandbox".to_string(),
@@ -2951,7 +2953,7 @@ fn handle_git(store: &SpecGraphStore, root: &Path, args: GitArgs) -> anyhow::Res
             } else {
                 args.changed_files
             };
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let input = CommitValidationInput {
                 commit: "WORKTREE".to_string(),
                 message,
@@ -3011,7 +3013,7 @@ fn handle_code(store: &SpecGraphStore, root: &Path, args: CodeArgs) -> anyhow::R
                 mark_code_index_delta_as_baseline(&mut delta, &args.baseline_relationship);
             }
 
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let mut projected_graph = replay.graph.clone();
             projected_graph.apply_delta(&delta);
             let reconcile_delta = if args.no_reconcile {
@@ -3071,7 +3073,7 @@ fn handle_code(store: &SpecGraphStore, root: &Path, args: CodeArgs) -> anyhow::R
             }
         }
         CodeCommand::ResolveObject(args) => {
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let source_fallbacks = args
                 .source_files
                 .iter()
@@ -3207,7 +3209,7 @@ fn handle_trace(store: &SpecGraphStore, root: &Path, args: TraceArgs) -> anyhow:
     match args.command {
         TraceCommand::Import(args) => {
             let manifest = read_links_manifest(root, &args.links_file)?;
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let findings = validate_trace_links(&replay.graph, &manifest);
             print_findings(&findings);
             fail_on_errors(&findings, "trace import")?;
@@ -3226,7 +3228,7 @@ fn handle_trace(store: &SpecGraphStore, root: &Path, args: TraceArgs) -> anyhow:
         }
         TraceCommand::Validate(args) => {
             let manifest = read_links_manifest(root, &args.links_file)?;
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let findings = validate_trace_links(&replay.graph, &manifest);
             print_findings(&findings);
             fail_on_errors(&findings, "trace validation")?;
@@ -3296,7 +3298,7 @@ fn parse_test_case_result(input: &str) -> anyhow::Result<TestCaseResult> {
 fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Result<()> {
     match args.command {
         CiCommand::Validate(args) => {
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let mut checks = vec!["replay".to_string(), "spec".to_string()];
             println!(
                 "replay: ok events={} stateHash={}",
@@ -3370,7 +3372,7 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
 fn handle_security(store: &SpecGraphStore, root: &Path, args: SecurityArgs) -> anyhow::Result<()> {
     match args.command {
         SecurityCommand::Audit(args) => {
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             println!(
                 "replay: ok events={} stateHash={}",
                 replay.events_replayed, replay.state_hash
@@ -3734,7 +3736,7 @@ fn accept_proposal(
     actor: String,
     graph_branch: String,
 ) -> anyhow::Result<OperationReceipt> {
-    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let replay = store.replay(ReplayOptions::checking())?;
     let proposal = find_proposal_node(&replay.graph, id)?;
     let current = proposal
         .attributes
@@ -4019,7 +4021,7 @@ fn handle_release(
             }
         }
         ReleaseCommand::Record(args) => {
-            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let replay = store.replay(ReplayOptions::checking())?;
             let project_node_id = find_project_node_id(&replay.graph)?;
             let release = GitReleaseFact {
                 version: args.version.clone(),
@@ -4180,7 +4182,7 @@ fn release_evidence(
         bail!("release evidence requires a passing release check; pass --allow-dirty only for local dry runs");
     }
     let commit = git_output(root, &["rev-parse", "HEAD"]).unwrap_or_else(|_| "unknown".to_string());
-    let graph = store.replay(ReplayOptions { check_hashes: true }).ok();
+    let graph = store.replay(ReplayOptions::checking()).ok();
     let artifacts = release_artifact_paths()
         .into_iter()
         .filter_map(|path| {
@@ -4412,7 +4414,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
     })?;
     println!("proof:code-index ok");
 
-    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let replay = store.replay(ReplayOptions::checking())?;
     let missing_trace = validate_trace_links(&replay.graph, &LinksManifest::default());
     if missing_trace.is_empty() {
         bail!("proof expected missing trace validation to fail");
@@ -4437,7 +4439,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
     })?;
     println!("proof:trace ok");
 
-    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let replay = store.replay(ReplayOptions::checking())?;
     let commit_input = CommitValidationInput {
         commit: "proof".to_string(),
         message: "feat: proof\n\nSpec: AUTH-001\nActionGroup: implementation\nCommitPlan: implementation\n".to_string(),
@@ -4554,7 +4556,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         "policy".to_string(),
         "proposal".to_string(),
     ];
-    let proof_replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let proof_replay = store.replay(ReplayOptions::checking())?;
     store.append_operation(AppendOperationOptions {
         operation: "Validation.Record".to_string(),
         actor: "proof".to_string(),
@@ -4585,7 +4587,9 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
         GraphCommand::Replay(args) => {
             let report = store.replay(ReplayOptions {
                 check_hashes: args.check,
+                graph_branch: Some(args.branch.clone()),
             })?;
+            println!("branch: {}", args.branch);
             println!("events: {}", report.events_replayed);
             println!("lastSequence: {}", report.last_sequence);
             println!("nodes: {}", report.graph.nodes.len());
@@ -4624,7 +4628,7 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
             }
         }
         GraphCommand::Status => {
-            let report = store.replay(ReplayOptions { check_hashes: true })?;
+            let report = store.replay(ReplayOptions::checking())?;
             let mut counts: BTreeMap<String, usize> = BTreeMap::new();
             for node in report.graph.nodes.values() {
                 *counts.entry(node.node_type.clone()).or_default() += 1;
@@ -4687,7 +4691,7 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
             }
         }
         GraphCommand::Diff(args) => {
-            let report = store.replay(ReplayOptions { check_hashes: true })?;
+            let report = store.replay(ReplayOptions::checking())?;
             let snapshot_path = resolve_path(root, args.snapshot);
             let snapshot_graph = read_snapshot_graph(&snapshot_path)?;
             let diff = diff_graphs(&snapshot_graph, &report.graph);
@@ -4697,7 +4701,7 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
             println!("removedEdges: {}", diff.removed_edges.len());
         }
         GraphCommand::Conflicts(args) => {
-            let report = store.replay(ReplayOptions { check_hashes: true })?;
+            let report = store.replay(ReplayOptions::checking())?;
             let base_path = resolve_path(root, args.base);
             let theirs_path = resolve_path(root, args.theirs);
             let base = read_snapshot_graph(&base_path)?;
@@ -4715,7 +4719,7 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
             }
         }
         GraphCommand::Integrate(args) => {
-            let report = store.replay(ReplayOptions { check_hashes: true })?;
+            let report = store.replay(ReplayOptions::checking())?;
             let base = read_snapshot_graph(&resolve_path(root, args.base))?;
             let source = read_snapshot_graph(&resolve_path(root, args.source))?;
             let integration = match args.mode {
@@ -4862,7 +4866,7 @@ fn validate_git_range(
         return Ok(());
     }
 
-    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let replay = store.replay(ReplayOptions::checking())?;
     let mut all_findings = Vec::new();
     for commit in commits {
         let message = git_commit_message(root, &commit)?;
@@ -5413,7 +5417,7 @@ fn transition_proposal(
             "use `sg proposal accept` for Accepted/Trusted proposal transitions so exact diff and validation evidence are recorded"
         );
     }
-    let replay = store.replay(ReplayOptions { check_hashes: true })?;
+    let replay = store.replay(ReplayOptions::checking())?;
     let proposal = find_proposal_node(&replay.graph, id)?;
     let current = proposal
         .attributes

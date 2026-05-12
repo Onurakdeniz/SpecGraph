@@ -90,7 +90,7 @@ impl SpecGraphApi {
     pub fn status(&self) -> ApiResult<ApiGraphStatusResponse> {
         let report = self
             .store
-            .replay(ReplayOptions { check_hashes: true })
+            .replay(ReplayOptions::checking())
             .map_err(ApiError::from_store_error)?;
         let mut node_types = BTreeMap::new();
         for node in report.graph.nodes.values() {

@@ -32,7 +32,7 @@ use sg_spec::{
 use sg_validation::{CORE_VALIDATOR_VERSION, VALIDATOR_BRANCH_METADATA, VALIDATOR_SNAPSHOT};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -175,9 +175,26 @@ pub struct ModuleLifecycleOptions {
     pub graph_branch: String,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ReplayOptions {
     pub check_hashes: bool,
+    pub graph_branch: Option<String>,
+}
+
+impl ReplayOptions {
+    pub fn checking() -> Self {
+        Self {
+            check_hashes: true,
+            graph_branch: None,
+        }
+    }
+
+    pub fn branch(graph_branch: impl Into<String>) -> Self {
+        Self {
+            check_hashes: true,
+            graph_branch: Some(graph_branch.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -668,14 +685,26 @@ pub struct SnapshotValidationReport {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BranchMetadata {
     pub schema_version: String,
+    #[serde(default)]
+    pub branch_id: String,
     pub branch: String,
+    #[serde(default)]
+    pub parent_branch: Option<String>,
     pub spec: String,
     pub graph_branch: String,
     pub base_snapshot_id: String,
     pub base_state_hash: String,
     pub base_event_sequence: u64,
     pub base_event_id: Option<String>,
+    #[serde(default)]
+    pub head_event_id: Option<String>,
+    #[serde(default)]
+    pub head_state_hash: String,
     pub created_by: String,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub last_updated_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -945,7 +974,8 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
     write_json(
         &sg_dir.join("graph.lock.json"),
         &json!({
-            "canonicalHistory": "events/*.jsonl",
+            "canonicalHistory": "events/<graph-branch>/00000001.jsonl",
+            "legacyHistory": "events/*.jsonl",
             "hashAlgorithm": "sha256",
             "canonicalJson": true
         }),
@@ -1031,7 +1061,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         operation_id: operation_id.clone(),
         operation: request.operation.clone(),
         actor: request.actor.clone(),
-        timestamp,
+        timestamp: timestamp.clone(),
         ontology_version: request.ontology_version.clone(),
         graph_branch: request.graph_branch.clone(),
         pre_state_hash: pre_state_hash.clone(),
@@ -1040,7 +1070,10 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         signatures: vec![],
     };
 
-    append_event(&sg_dir.join("events").join("00000001.jsonl"), &event)?;
+    append_event(
+        &branch_event_dir(&sg_dir, &options.graph_branch).join("00000001.jsonl"),
+        &event,
+    )?;
 
     let receipt = OperationReceipt {
         schema_version: OPERATION_RECEIPT_SCHEMA_VERSION.to_string(),
@@ -1049,7 +1082,7 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
         actor: request.actor,
         accepted: true,
         dry_run: false,
-        pre_state_hash,
+        pre_state_hash: pre_state_hash.clone(),
         post_state_hash: post_state_hash.clone(),
         event_ids: vec![event_id],
         created_nodes: delta
@@ -1085,6 +1118,26 @@ pub fn init_project(root: &Path, options: InitOptions) -> Result<OperationReceip
     )?;
 
     write_snapshot(&sg_dir, &graph, 1, &post_state_hash, &options.graph_branch)?;
+    write_branch_metadata(
+        root,
+        &BranchMetadata {
+            schema_version: "specgraph.branch-metadata/v1".to_string(),
+            branch_id: format!("graph-branch:{}", options.graph_branch),
+            branch: options.graph_branch.clone(),
+            parent_branch: None,
+            spec: String::new(),
+            graph_branch: options.graph_branch.clone(),
+            base_snapshot_id: String::new(),
+            base_state_hash: pre_state_hash,
+            base_event_sequence: 0,
+            base_event_id: None,
+            head_event_id: receipt.event_ids.first().cloned(),
+            head_state_hash: post_state_hash,
+            created_by: options.actor,
+            created_at: timestamp.clone(),
+            last_updated_at: timestamp,
+        },
+    )?;
 
     Ok(receipt)
 }
@@ -1093,7 +1146,7 @@ pub fn upsert_project_profile(
     root: &Path,
     options: UpsertProjectProfileOptions,
 ) -> Result<OperationReceipt> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let project = find_project_node(&replay.graph).ok_or(StoreError::ProjectNotFound)?;
     let fallback_project_name = project
         .attributes
@@ -1125,7 +1178,7 @@ pub fn upsert_project_profile(
 }
 
 pub fn project_baseline(root: &Path) -> Result<ProjectBaselineReport> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     Ok(validate_project_baseline(&replay.graph))
 }
 
@@ -1133,7 +1186,7 @@ pub fn upsert_modules(root: &Path, options: UpsertModuleGraphOptions) -> Result<
     if options.modules.is_empty() {
         return Err(StoreError::EmptyModuleGraph);
     }
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let project = find_project_node(&replay.graph).ok_or(StoreError::ProjectNotFound)?;
     let projection = ModuleGraphProjection {
         project_node_id: project.id.clone(),
@@ -1166,7 +1219,7 @@ pub fn link_module_capability(
     if options.capability.trim().is_empty() {
         return Err(StoreError::EmptyModuleGraph);
     }
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let mut module = module_definition_from_graph(&replay.graph, &options.module)
         .ok_or_else(|| StoreError::ModuleNotFound(options.module.clone()))?;
     if !module
@@ -1201,7 +1254,7 @@ pub fn transition_module_lifecycle(
         });
     }
 
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let delta = module_lifecycle_delta(&replay.graph, &options.module, options.state, reason)
         .ok_or_else(|| StoreError::ModuleNotFound(options.module.clone()))?;
 
@@ -1223,12 +1276,12 @@ pub fn transition_module_lifecycle(
 }
 
 pub fn module_baseline(root: &Path) -> Result<ModuleBaselineReport> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     Ok(validate_module_baseline(&replay.graph))
 }
 
 pub fn list_modules(root: &Path) -> Result<Vec<ModuleSummary>> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let project = find_project_node(&replay.graph).ok_or(StoreError::ProjectNotFound)?;
     let mut modules = linked_modules(&replay.graph, &project.id);
     modules.sort_by(|left, right| left.name.cmp(&right.name));
@@ -1236,7 +1289,7 @@ pub fn list_modules(root: &Path) -> Result<Vec<ModuleSummary>> {
 }
 
 pub fn plan_workflow(root: &Path, options: WorkflowPlanOptions) -> Result<WorkflowPlan> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let observations = detect_workflow_observations(root, &options);
     let project_report = validate_project_baseline(&replay.graph);
     let module_report = validate_module_baseline(&replay.graph);
@@ -1309,7 +1362,7 @@ pub fn record_intent_decision(
     root: &Path,
     options: RecordIntentDecisionOptions,
 ) -> Result<OperationReceipt> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let target_id = if let Some(spec) = options.spec.as_deref() {
         find_spec_node(&replay.graph, spec)
             .ok_or_else(|| StoreError::SpecNotFound(spec.to_string()))?
@@ -1461,7 +1514,7 @@ pub fn plan_code_workflow(
     root: &Path,
     options: WorkflowCodePlanOptions,
 ) -> Result<WorkflowCodePlan> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let change_type = classify_code_change_type(&options);
     let action_binding = workflow_action_binding(&replay.graph, &options);
     let requested_files = requested_workflow_files(&options);
@@ -1955,7 +2008,7 @@ pub fn list_work_reservations(
     root: &Path,
     include_released: bool,
 ) -> Result<Vec<WorkReservationStatus>> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let mut reservations = replay
         .graph
         .nodes
@@ -1972,7 +2025,7 @@ pub fn show_work_reservation(
     root: &Path,
     reservation_id: &str,
 ) -> Result<Option<WorkReservationStatus>> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     Ok(find_work_reservation_node(&replay.graph, reservation_id)
         .and_then(work_reservation_status_from_node))
 }
@@ -1981,7 +2034,7 @@ pub fn release_work_reservation(
     root: &Path,
     options: ReleaseWorkReservationOptions,
 ) -> Result<OperationReceipt> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let Some(previous) = find_work_reservation_node(&replay.graph, &options.reservation_id) else {
         return Err(StoreError::OperationValidationFailed(1));
     };
@@ -4707,7 +4760,7 @@ pub fn install_ontology_pack(
         "ontology_version",
         &format!("{}@{}", pack.name, pack.version),
     );
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let existing_pack_node = replay.graph.nodes.values().find(|node| {
         node.node_type == "OntologyPack"
             && node.attributes.get("name").and_then(Value::as_str) == Some(pack.name.as_str())
@@ -4876,7 +4929,7 @@ pub fn transition_spec_state(
     root: &Path,
     options: TransitionSpecOptions,
 ) -> Result<OperationReceipt> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let spec_node = find_spec_node(&replay.graph, &options.spec)
         .ok_or_else(|| StoreError::SpecNotFound(options.spec.clone()))?;
     let blockers = spec_state_blockers(&replay.graph, &spec_node.id, &options.state);
@@ -4906,7 +4959,7 @@ pub fn transition_spec_state(
 }
 
 pub fn spec_status(root: &Path, spec: &str) -> Result<SpecStatusSummary> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let spec_node = find_spec_node(&replay.graph, spec)
         .ok_or_else(|| StoreError::SpecNotFound(spec.to_string()))?;
     let state = spec_node
@@ -5092,7 +5145,7 @@ pub fn generate_action_graph(
     root: &Path,
     options: GenerateActionGraphOptions,
 ) -> Result<OperationReceipt> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let spec_node = find_spec_node(&replay.graph, &options.spec)
         .ok_or_else(|| StoreError::SpecNotFound(options.spec.clone()))?;
     let delta = action_graph_delta(&replay.graph, &options.spec, &spec_node.id);
@@ -5116,7 +5169,7 @@ pub fn transition_action(
     operation: &str,
     target_state: &str,
 ) -> Result<OperationReceipt> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let action = replay
         .graph
         .nodes
@@ -5541,7 +5594,7 @@ fn post_release_failure_has_follow_up(graph: &Graph, check_id: &str) -> bool {
 }
 
 pub fn list_action_graph(root: &Path, spec: &str) -> Result<ActionGraphSummary> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let spec_node = find_spec_node(&replay.graph, spec)
         .ok_or_else(|| StoreError::SpecNotFound(spec.to_string()))?;
     let action_graph_edge = replay
@@ -5594,7 +5647,7 @@ pub fn list_action_graph(root: &Path, spec: &str) -> Result<ActionGraphSummary> 
 }
 
 pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<OperationReceipt> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let findings = validate_commit_binding(&replay.graph, &options.input);
     let error_count = findings
         .iter()
@@ -5677,7 +5730,7 @@ pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<Op
 }
 
 pub fn upsert_actor(root: &Path, options: UpsertActorOptions) -> Result<OperationReceipt> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let actor_node = actor_node(&options);
     let actor_exists = replay.graph.nodes.contains_key(&actor_node.id);
     let delta = if actor_exists {
@@ -5711,7 +5764,7 @@ pub fn upsert_actor(root: &Path, options: UpsertActorOptions) -> Result<Operatio
 }
 
 pub fn grant_role(root: &Path, options: GrantRoleOptions) -> Result<OperationReceipt> {
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let actor_id = node_id("actor", &options.actor_id);
     if !replay.graph.nodes.contains_key(&actor_id) {
         return Err(StoreError::ActorNotFound(options.actor_id));
@@ -5774,7 +5827,7 @@ pub fn record_approval(root: &Path, options: RecordApprovalOptions) -> Result<Op
     if options.approval_id.trim().is_empty() || options.approval.trim().is_empty() {
         return Err(StoreError::EmptyEvidenceId);
     }
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let approver_id = find_actor_node_id(&replay.graph, &options.approved_by)
         .ok_or_else(|| StoreError::ActorNotFound(options.approved_by.clone()))?;
     ensure_approval_authority(
@@ -5823,7 +5876,7 @@ pub fn create_waiver(root: &Path, options: CreateWaiverOptions) -> Result<Operat
         return Err(StoreError::EmptyEvidenceId);
     }
     validate_waiver_create_request(&options)?;
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let approver_id = find_actor_node_id(&replay.graph, &options.approved_by)
         .ok_or_else(|| StoreError::ActorNotFound(options.approved_by.clone()))?;
     ensure_approval_authority(
@@ -5874,7 +5927,7 @@ pub fn record_policy_report(
     if options.policy_run_id.trim().is_empty() {
         return Err(StoreError::EmptyEvidenceId);
     }
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let project_node_id = replay
         .graph
         .nodes
@@ -5922,7 +5975,7 @@ pub fn record_policy_report(
 pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<OperationReceipt> {
     validate_spec_branch_name(&options.spec, &options.branch)?;
 
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let base_state_hash = replay.state_hash.clone();
     let base_event_sequence = replay.last_sequence;
     let base_event_id = replay.last_event_id.clone();
@@ -5981,14 +6034,24 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
 
     let metadata = BranchMetadata {
         schema_version: "specgraph.branch-metadata/v1".to_string(),
+        branch_id: branch_id.clone(),
         branch: options.branch.clone(),
+        parent_branch: Some(options.graph_branch.clone()),
         spec: options.spec.clone(),
         graph_branch: options.graph_branch.clone(),
         base_snapshot_id: snapshot_id,
         base_state_hash,
         base_event_sequence,
         base_event_id,
+        head_event_id: replay.last_event_id.clone(),
+        head_state_hash: replay.state_hash.clone(),
         created_by: options.actor.clone(),
+        created_at: OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("RFC3339 formatting should succeed"),
+        last_updated_at: OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("RFC3339 formatting should succeed"),
     };
 
     let receipt = append_operation(
@@ -6010,7 +6073,7 @@ pub fn bind_spec_branch(root: &Path, options: BindBranchOptions) -> Result<Opera
 }
 
 pub fn validate_specs(root: &Path) -> Result<SpecValidationReport> {
-    let report = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let report = replay_events(root, ReplayOptions::checking())?;
     let mut findings = active_ontology(root)?.validate_graph(&report.graph);
     findings.extend(code_graph_declared_missing_findings(&report.graph));
     Ok(SpecValidationReport {
@@ -6023,15 +6086,23 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
     let store = SpecGraphStore::new(root);
     store.ensure_exists()?;
     let sg_dir = store.specgraph_dir();
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let graph_branch = options.graph_branch.clone();
+    let timestamp = OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("RFC3339 formatting should succeed");
+    ensure_graph_branch_metadata(root, &graph_branch, &options.actor, &timestamp)?;
+    let replay = replay_events(
+        root,
+        ReplayOptions {
+            check_hashes: true,
+            graph_branch: Some(graph_branch.clone()),
+        },
+    )?;
     let pre_state_hash = replay.state_hash;
     let mut graph = replay.graph;
 
     let operation_id = format!("op_{}", Uuid::new_v4().simple());
     let event_id = format!("evt_{}", Uuid::new_v4().simple());
-    let timestamp = OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .expect("RFC3339 formatting should succeed");
 
     let request = OperationRequest {
         schema_version: OPERATION_REQUEST_SCHEMA_VERSION.to_string(),
@@ -6040,7 +6111,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         actor: options.actor,
         timestamp: timestamp.clone(),
         ontology_version: CORE_ONTOLOGY_VERSION.to_string(),
-        graph_branch: options.graph_branch,
+        graph_branch: graph_branch.clone(),
         dry_run: options.dry_run,
         input: options.input,
     };
@@ -6189,7 +6260,7 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         operation_id: operation_id.clone(),
         operation: request.operation.clone(),
         actor: request.actor.clone(),
-        timestamp,
+        timestamp: timestamp.clone(),
         ontology_version: request.ontology_version.clone(),
         graph_branch: request.graph_branch.clone(),
         pre_state_hash: pre_state_hash.clone(),
@@ -6198,7 +6269,10 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         signatures: vec![],
     };
 
-    append_event(&sg_dir.join("events").join("00000001.jsonl"), &event)?;
+    append_event(
+        &branch_event_dir(&sg_dir, &graph_branch).join("00000001.jsonl"),
+        &event,
+    )?;
     receipt.event_ids.push(event_id);
 
     write_json(
@@ -6214,6 +6288,14 @@ pub fn append_operation(root: &Path, options: AppendOperationOptions) -> Result<
         replay.last_sequence + 1,
         &post_state_hash,
         &request.graph_branch,
+    )?;
+    update_graph_branch_metadata_head(
+        root,
+        &graph_branch,
+        replay.last_sequence + 1,
+        receipt.event_ids.first().cloned(),
+        post_state_hash,
+        timestamp,
     )?;
 
     Ok(receipt)
@@ -6232,28 +6314,12 @@ fn replay_events_until(
     if !sg_dir.exists() {
         return Err(StoreError::NotFound(sg_dir));
     }
-
-    let event_dir = sg_dir.join("events");
-    let mut files = Vec::new();
-    for entry in fs::read_dir(&event_dir).map_err(|source| StoreError::Io {
-        path: event_dir.clone(),
-        source,
-    })? {
-        let entry = entry.map_err(|source| StoreError::Io {
-            path: event_dir.clone(),
-            source,
-        })?;
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
-            files.push(path);
-        }
-    }
-    files.sort();
-
-    let mut graph = Graph::default();
-    let mut expected_sequence = 1;
-    let mut events_replayed = 0;
-    let mut previous_event_id: Option<String> = None;
+    let graph_branch = options
+        .graph_branch
+        .clone()
+        .unwrap_or_else(|| "main".to_string());
+    let (mut graph, mut expected_sequence, mut events_replayed, mut previous_event_id, files) =
+        replay_start_and_files(root, &sg_dir, &options, &graph_branch, max_sequence)?;
 
     'files: for file in files {
         let reader = BufReader::new(File::open(&file).map_err(|source| StoreError::Io {
@@ -6345,13 +6411,95 @@ fn replay_events_until(
     })
 }
 
+type ReplayStart = (Graph, u64, usize, Option<String>, Vec<PathBuf>);
+
+fn replay_start_and_files(
+    root: &Path,
+    sg_dir: &Path,
+    options: &ReplayOptions,
+    graph_branch: &str,
+    max_sequence: Option<u64>,
+) -> Result<ReplayStart> {
+    if graph_branch == "main" {
+        return Ok((
+            Graph::default(),
+            1,
+            0,
+            None,
+            event_files_for_branch(sg_dir, "main", true)?,
+        ));
+    }
+
+    let metadata = read_branch_metadata(root, graph_branch)?
+        .ok_or_else(|| StoreError::NotFound(branch_metadata_path(root, graph_branch)))?;
+    let parent_branch = metadata
+        .parent_branch
+        .clone()
+        .unwrap_or_else(|| metadata.graph_branch.clone());
+    let parent_replay = replay_events_until(
+        root,
+        ReplayOptions {
+            check_hashes: options.check_hashes,
+            graph_branch: Some(parent_branch),
+        },
+        Some(metadata.base_event_sequence),
+    )?;
+    if max_sequence.is_some_and(|max| max <= parent_replay.last_sequence) {
+        return Ok((
+            parent_replay.graph,
+            parent_replay.last_sequence + 1,
+            parent_replay.events_replayed,
+            parent_replay.last_event_id,
+            Vec::new(),
+        ));
+    }
+    Ok((
+        parent_replay.graph,
+        parent_replay.last_sequence + 1,
+        parent_replay.events_replayed,
+        parent_replay.last_event_id,
+        event_files_for_branch(sg_dir, graph_branch, false)?,
+    ))
+}
+
+fn event_files_for_branch(
+    sg_dir: &Path,
+    graph_branch: &str,
+    include_legacy_main: bool,
+) -> Result<Vec<PathBuf>> {
+    let event_dir = sg_dir.join("events");
+    let mut files = Vec::new();
+    let legacy_file = event_dir.join("00000001.jsonl");
+    if include_legacy_main && legacy_file.exists() {
+        files.push(legacy_file);
+    }
+    let branch_dir = branch_event_dir(sg_dir, graph_branch);
+    if branch_dir.exists() {
+        for entry in fs::read_dir(&branch_dir).map_err(|source| StoreError::Io {
+            path: branch_dir.clone(),
+            source,
+        })? {
+            let entry = entry.map_err(|source| StoreError::Io {
+                path: branch_dir.clone(),
+                source,
+            })?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
 pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
     let sg_dir = root.join(".specgraph");
     if !sg_dir.exists() {
         return Err(StoreError::NotFound(sg_dir));
     }
 
-    let full_replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let full_replay = replay_events(root, ReplayOptions::checking())?;
     let snapshot_dir = sg_dir.join("snapshots");
     if !snapshot_dir.exists() {
         return Ok(SnapshotValidationReport {
@@ -6412,7 +6560,7 @@ pub fn validate_snapshots(root: &Path) -> Result<SnapshotValidationReport> {
 
         let replay_at_sequence = replay_events_until(
             root,
-            ReplayOptions { check_hashes: true },
+            ReplayOptions::checking(),
             Some(snapshot.event_sequence),
         )?;
         if replay_at_sequence.state_hash != snapshot.state_hash {
@@ -6490,7 +6638,7 @@ pub fn validate_branch_metadata(root: &Path) -> Result<BranchMetadataValidationR
         });
     }
 
-    let full_replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let full_replay = replay_events(root, ReplayOptions::checking())?;
     let mut files = Vec::new();
     for entry in fs::read_dir(&branch_dir).map_err(|source| StoreError::Io {
         path: branch_dir.clone(),
@@ -6547,7 +6695,7 @@ pub fn validate_branch_metadata(root: &Path) -> Result<BranchMetadataValidationR
 
         let replay_at_base = replay_events_until(
             root,
-            ReplayOptions { check_hashes: true },
+            ReplayOptions::checking(),
             Some(metadata.base_event_sequence),
         )?;
         if replay_at_base.state_hash != metadata.base_state_hash {
@@ -6588,7 +6736,7 @@ pub fn rebuild_projections(root: &Path) -> Result<RebuildReport> {
         return Err(StoreError::NotFound(sg_dir));
     }
 
-    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let replay = replay_events(root, ReplayOptions::checking())?;
     let snapshot_dir = sg_dir.join("snapshots");
     let index_dir = sg_dir.join("indexes");
 
@@ -6629,8 +6777,8 @@ pub fn rebuild_projections(root: &Path) -> Result<RebuildReport> {
 
 pub fn query_graph(root: &Path, context: QueryContext) -> Result<QueryGraphReport> {
     let graph = match &context.target {
-        QueryTarget::Current { graph_branch: _ } | QueryTarget::Branch { graph_branch: _ } => {
-            replay_events(root, ReplayOptions { check_hashes: true })?.graph
+        QueryTarget::Current { graph_branch } | QueryTarget::Branch { graph_branch } => {
+            replay_events(root, ReplayOptions::branch(graph_branch.clone()))?.graph
         }
         QueryTarget::Snapshot { snapshot_id } => read_snapshot_by_id(root, snapshot_id)?,
     };
@@ -10036,6 +10184,7 @@ fn create_layout(sg_dir: &Path) -> Result<()> {
         sg_dir.join("operations").join("receipts"),
         sg_dir.join("ontology").join("packs"),
         sg_dir.join("events"),
+        sg_dir.join("events").join("main"),
         sg_dir.join("snapshots"),
         sg_dir.join("branches"),
         sg_dir.join("indexes"),
@@ -10047,30 +10196,170 @@ fn create_layout(sg_dir: &Path) -> Result<()> {
 }
 
 fn append_event(path: &Path, event: &Event) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|source| StoreError::Io {
-            path: path.to_path_buf(),
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| StoreError::Io {
+            path: parent.to_path_buf(),
             source,
         })?;
+    }
     let line = serde_json::to_string(event).map_err(|source| StoreError::Json {
         path: path.to_path_buf(),
         source,
     })?;
-    writeln!(file, "{line}").map_err(|source| StoreError::Io {
+    let mut bytes = if path.exists() {
+        fs::read(path).map_err(|source| StoreError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?
+    } else {
+        Vec::new()
+    };
+    bytes.extend_from_slice(line.as_bytes());
+    bytes.push(b'\n');
+    write_bytes_atomic(path, &bytes)
+}
+
+fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| StoreError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    let tmp = path.with_extension(format!(
+        "{}.tmp-{}",
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("tmp"),
+        Uuid::new_v4().simple()
+    ));
+    {
+        let mut file = File::create(&tmp).map_err(|source| StoreError::Io {
+            path: tmp.clone(),
+            source,
+        })?;
+        file.write_all(bytes).map_err(|source| StoreError::Io {
+            path: tmp.clone(),
+            source,
+        })?;
+        file.sync_all().map_err(|source| StoreError::Io {
+            path: tmp.clone(),
+            source,
+        })?;
+    }
+    fs::rename(&tmp, path).map_err(|source| StoreError::Io {
         path: path.to_path_buf(),
         source,
-    })
+    })?;
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
+    Ok(())
 }
 
 fn write_branch_metadata(root: &Path, metadata: &BranchMetadata) -> Result<()> {
-    let path = root
-        .join(".specgraph")
-        .join("branches")
-        .join(format!("{}.json", branch_file_stem(&metadata.branch)));
+    let path = branch_metadata_path(root, &metadata.branch);
     write_json(&path, metadata)
+}
+
+fn ensure_graph_branch_metadata(
+    root: &Path,
+    graph_branch: &str,
+    actor: &str,
+    timestamp: &str,
+) -> Result<()> {
+    if read_branch_metadata(root, graph_branch)?.is_some() {
+        return Ok(());
+    }
+
+    let (parent_branch, base) = if graph_branch == "main" {
+        (
+            None,
+            ReplayReport {
+                graph: Graph::default(),
+                state_hash: state_hash(&Graph::default(), CORE_ONTOLOGY_VERSION),
+                events_replayed: 0,
+                last_sequence: 0,
+                last_event_id: None,
+            },
+        )
+    } else {
+        let parent = "main".to_string();
+        let replay = replay_events(
+            root,
+            ReplayOptions {
+                check_hashes: true,
+                graph_branch: Some(parent.clone()),
+            },
+        )?;
+        (Some(parent), replay)
+    };
+
+    let metadata = BranchMetadata {
+        schema_version: "specgraph.branch-metadata/v1".to_string(),
+        branch_id: format!("graph-branch:{graph_branch}"),
+        branch: graph_branch.to_string(),
+        parent_branch,
+        spec: String::new(),
+        graph_branch: graph_branch.to_string(),
+        base_snapshot_id: String::new(),
+        base_state_hash: base.state_hash.clone(),
+        base_event_sequence: base.last_sequence,
+        base_event_id: base.last_event_id.clone(),
+        head_event_id: base.last_event_id,
+        head_state_hash: base.state_hash,
+        created_by: actor.to_string(),
+        created_at: timestamp.to_string(),
+        last_updated_at: timestamp.to_string(),
+    };
+    write_branch_metadata(root, &metadata)
+}
+
+fn update_graph_branch_metadata_head(
+    root: &Path,
+    graph_branch: &str,
+    _head_sequence: u64,
+    head_event_id: Option<String>,
+    head_state_hash: String,
+    timestamp: String,
+) -> Result<()> {
+    let mut metadata = read_branch_metadata(root, graph_branch)?
+        .ok_or_else(|| StoreError::NotFound(branch_metadata_path(root, graph_branch)))?;
+    metadata.head_event_id = head_event_id;
+    metadata.head_state_hash = head_state_hash;
+    metadata.last_updated_at = timestamp;
+    write_branch_metadata(root, &metadata)
+}
+
+fn read_branch_metadata(root: &Path, graph_branch: &str) -> Result<Option<BranchMetadata>> {
+    let path = branch_metadata_path(root, graph_branch);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let metadata = serde_json::from_slice(&fs::read(&path).map_err(|source| StoreError::Io {
+        path: path.clone(),
+        source,
+    })?)
+    .map_err(|source| StoreError::Json {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(Some(metadata))
+}
+
+fn branch_metadata_path(root: &Path, graph_branch: &str) -> PathBuf {
+    root.join(".specgraph")
+        .join("branches")
+        .join(format!("{}.json", branch_file_stem(graph_branch)))
+}
+
+fn branch_event_dir(sg_dir: &Path, graph_branch: &str) -> PathBuf {
+    graph_branch
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != "." && *segment != "..")
+        .fold(sg_dir.join("events"), |path, segment| path.join(segment))
 }
 
 fn branch_file_stem(branch: &str) -> String {
@@ -10129,10 +10418,7 @@ fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
         path: path.to_path_buf(),
         source,
     })?;
-    fs::write(path, bytes).map_err(|source| StoreError::Io {
-        path: path.to_path_buf(),
-        source,
-    })
+    write_bytes_atomic(path, &bytes)
 }
 
 fn write_yaml<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
@@ -10904,14 +11190,110 @@ mod tests {
         .unwrap();
 
         assert!(tmp.path().join(".specgraph/config.yaml").exists());
-        assert!(tmp.path().join(".specgraph/events/00000001.jsonl").exists());
+        assert!(tmp
+            .path()
+            .join(".specgraph/events/main/00000001.jsonl")
+            .exists());
+        assert!(tmp.path().join(".specgraph/branches/main.json").exists());
 
-        let first = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
-        let second = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let first = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        let second = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
 
         assert_eq!(first.events_replayed, 1);
         assert_eq!(first.state_hash, second.state_hash);
         assert_eq!(first.graph.nodes.len(), 1);
+    }
+
+    #[test]
+    fn branch_replay_inherits_main_and_isolates_branch_events() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:branch-user".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "feature/test".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(tmp
+            .path()
+            .join(".specgraph/events/feature/test/00000001.jsonl")
+            .exists());
+        let main = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        let branch = replay_events(tmp.path(), ReplayOptions::branch("feature/test")).unwrap();
+        assert_eq!(main.events_replayed, 1);
+        assert_eq!(branch.events_replayed, 2);
+        assert!(!main
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.stable_key == "actor:local:branch-user"));
+        assert!(branch
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.stable_key == "actor:local:branch-user"));
+
+        let current_query = query_graph(tmp.path(), QueryContext::default()).unwrap();
+        let branch_query = query_graph(
+            tmp.path(),
+            QueryContext {
+                target: QueryTarget::Branch {
+                    graph_branch: "feature/test".to_string(),
+                },
+                ..QueryContext::default()
+            },
+        )
+        .unwrap();
+        assert_ne!(current_query.state_hash, branch_query.state_hash);
+        assert!(branch_query
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.stable_key == "actor:local:branch-user"));
+
+        let metadata = read_branch_metadata(tmp.path(), "feature/test")
+            .unwrap()
+            .unwrap();
+        assert_eq!(metadata.parent_branch.as_deref(), Some("main"));
+        assert_eq!(metadata.base_event_sequence, 1);
+        assert!(metadata.head_event_id.is_some());
+        assert!(!contains_tmp_file(&tmp.path().join(".specgraph/events")).unwrap());
+    }
+
+    #[test]
+    fn replay_preserves_legacy_root_event_layout() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let new_path = tmp.path().join(".specgraph/events/main/00000001.jsonl");
+        let legacy_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        fs::rename(&new_path, &legacy_path).unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        assert_eq!(replay.events_replayed, 1);
+        assert_eq!(replay.graph.nodes.len(), 1);
     }
 
     #[test]
@@ -10921,7 +11303,7 @@ mod tests {
         fs::create_dir_all(&events).unwrap();
         fs::write(events.join("00000001.jsonl"), "{\"notAnEvent\":true}\n").unwrap();
 
-        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        let error = replay_events(tmp.path(), ReplayOptions::checking()).unwrap_err();
         assert!(matches!(error, StoreError::Json { .. }));
     }
 
@@ -10938,13 +11320,13 @@ mod tests {
         )
         .unwrap();
 
-        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let event_path = tmp.path().join(".specgraph/events/main/00000001.jsonl");
         let line = fs::read_to_string(&event_path).unwrap();
         let mut event: Value = serde_json::from_str(line.trim()).unwrap();
         event["unexpectedField"] = json!(true);
         fs::write(&event_path, format!("{event}\n")).unwrap();
 
-        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        let error = replay_events(tmp.path(), ReplayOptions::checking()).unwrap_err();
         assert!(matches!(error, StoreError::Json { .. }));
     }
 
@@ -10961,13 +11343,13 @@ mod tests {
         )
         .unwrap();
 
-        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let event_path = tmp.path().join(".specgraph/events/main/00000001.jsonl");
         let line = fs::read_to_string(&event_path).unwrap();
         let mut event: Value = serde_json::from_str(line.trim()).unwrap();
         event["delta"]["createNodes"][0]["unexpectedNodeField"] = json!(true);
         fs::write(&event_path, format!("{event}\n")).unwrap();
 
-        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        let error = replay_events(tmp.path(), ReplayOptions::checking()).unwrap_err();
         assert!(matches!(error, StoreError::Json { .. }));
     }
 
@@ -10984,12 +11366,12 @@ mod tests {
         )
         .unwrap();
 
-        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let event_path = tmp.path().join(".specgraph/events/main/00000001.jsonl");
         let mut line = fs::read_to_string(&event_path).unwrap();
         line = line.replace("sha256:", "sha256:broken");
         fs::write(event_path, line).unwrap();
 
-        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        let error = replay_events(tmp.path(), ReplayOptions::checking()).unwrap_err();
         assert!(matches!(
             error,
             StoreError::PreStateHashMismatch { .. } | StoreError::PostStateHashMismatch { .. }
@@ -11021,7 +11403,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let event_path = tmp.path().join(".specgraph/events/main/00000001.jsonl");
         let lines: Vec<String> = fs::read_to_string(&event_path)
             .unwrap()
             .lines()
@@ -11043,7 +11425,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        let error = replay_events(tmp.path(), ReplayOptions::checking()).unwrap_err();
         assert!(matches!(error, StoreError::EventChainMismatch { .. }));
     }
 
@@ -11072,7 +11454,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_path = tmp.path().join(".specgraph/events/00000001.jsonl");
+        let event_path = tmp.path().join(".specgraph/events/main/00000001.jsonl");
         let lines: Vec<String> = fs::read_to_string(&event_path)
             .unwrap()
             .lines()
@@ -11090,7 +11472,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap_err();
+        let error = replay_events(tmp.path(), ReplayOptions::checking()).unwrap_err();
         assert!(matches!(
             error,
             StoreError::SequenceMismatch {
@@ -11291,7 +11673,7 @@ mod tests {
         assert!(after.complete);
         assert!(after.missing.is_empty());
         assert!(after.findings.is_empty());
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(replay.events_replayed, 2);
         assert!(replay
             .graph
@@ -11354,7 +11736,7 @@ mod tests {
                 count: 1,
             } if operation == "Spec.Create"
         ));
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(replay.events_replayed, 1);
         assert!(!replay
             .graph
@@ -11407,7 +11789,7 @@ acceptanceCriteria:
                 count: 1,
             } if operation == "Spec.Import"
         ));
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(replay.events_replayed, 1);
         assert!(!replay
             .graph
@@ -11469,7 +11851,7 @@ acceptanceCriteria:
         let report = module_baseline(tmp.path()).unwrap();
         assert!(!report.complete);
         assert!(report.missing.contains(&"HAS_MODULE".to_string()));
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(replay.events_replayed, 2);
         assert!(!replay
             .graph
@@ -11655,7 +12037,7 @@ acceptanceCriteria:
     fn append_operation_rejects_invalid_branch_binding_inside_runtime() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let spec_node = find_spec_node(&replay.graph, "AUTH-001").unwrap();
         let branch = "feature/password-reset";
         let branch_id = node_id("git_branch", branch);
@@ -11716,7 +12098,7 @@ acceptanceCriteria:
     fn append_operation_rejects_action_graph_without_branch_binding_inside_runtime() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let spec_node = find_spec_node(&replay.graph, "AUTH-001").unwrap();
 
         let error = append_operation(
@@ -11802,7 +12184,7 @@ acceptanceCriteria:
             },
         )
         .unwrap();
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let project = find_project_node(&replay.graph).unwrap();
         let run_id = "validation-stale";
         let run_node_id = node_id("validation_run", run_id);
@@ -11913,7 +12295,7 @@ acceptanceCriteria:
             },
         )
         .unwrap();
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let project = find_project_node(&replay.graph).unwrap();
         let run_id = "proposal-validation";
         let run_node_id = node_id("validation_run", run_id);
@@ -12024,7 +12406,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let before = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let before = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let plan = plan_workflow(
             tmp.path(),
             WorkflowPlanOptions {
@@ -12045,7 +12427,7 @@ acceptanceCriteria:
             },
         )
         .unwrap();
-        let after = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let after = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
 
         assert!(matches!(plan.status, WorkflowPlanStatus::QuestionsRequired));
         assert_eq!(before.last_sequence, after.last_sequence);
@@ -12423,7 +12805,7 @@ acceptanceCriteria:
         .unwrap();
 
         assert_eq!(receipt.operation, "Intent.RecordDecision");
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert!(replay
             .graph
             .nodes
@@ -12505,7 +12887,7 @@ acceptanceCriteria:
         .unwrap();
 
         assert_eq!(receipt.operation, "Intent.RecordDecision");
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert!(replay
             .graph
             .edges
@@ -12675,7 +13057,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(replay.events_replayed, 4);
         assert!(replay
             .graph
@@ -12785,7 +13167,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let action_id = node_id("action_node", "AUTH-001/implementation");
         let blockers = action_lifecycle_blockers(&replay.graph, &action_id, "Completed");
         assert!(blockers
@@ -13273,7 +13655,7 @@ acceptanceCriteria:
             .iter()
             .any(|edge_id| edge_id.contains("has_requirement")));
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(replay.events_replayed, 3);
         assert!(!replay
             .graph
@@ -13295,7 +13677,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let before = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let before = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let error = append_operation(
             tmp.path(),
             AppendOperationOptions {
@@ -13318,7 +13700,7 @@ acceptanceCriteria:
         .unwrap_err();
 
         assert!(matches!(error, StoreError::PolicyValidationFailed(_)));
-        let after = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let after = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(after.events_replayed, before.events_replayed);
     }
 
@@ -13454,7 +13836,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let mut updated = replay
             .graph
             .nodes
@@ -13483,7 +13865,7 @@ acceptanceCriteria:
         .unwrap_err();
 
         assert!(matches!(error, StoreError::OntologyValidationFailed(1)));
-        let after = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let after = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(after.events_replayed, replay.events_replayed);
     }
 
@@ -13540,7 +13922,7 @@ acceptanceCriteria:
             .iter()
             .any(|node_id| node_id == "node_actor_local_developer"));
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let actor = replay
             .graph
             .nodes
@@ -13604,7 +13986,7 @@ acceptanceCriteria:
         let validation = validate_specs(tmp.path()).unwrap();
         assert!(validation.findings.is_empty());
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert!(replay
             .graph
             .nodes
@@ -13714,7 +14096,7 @@ acceptanceCriteria:
             .iter()
             .any(|edge_id| edge_id.contains("has_approval")));
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let report = sg_policy::evaluate_policies(
             &replay.graph,
             &sg_policy::PolicyCheckInput {
@@ -13773,7 +14155,7 @@ acceptanceCriteria:
         .unwrap_err();
 
         assert!(matches!(error, StoreError::ApprovalAuthorityFailed(_)));
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert!(!replay
             .graph
             .nodes
@@ -13836,7 +14218,7 @@ acceptanceCriteria:
             .iter()
             .any(|edge_id| edge_id.contains("has_waiver")));
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let report = sg_policy::evaluate_policies(
             &replay.graph,
             &sg_policy::PolicyCheckInput {
@@ -13990,7 +14372,7 @@ acceptanceCriteria:
         .unwrap_err();
 
         assert!(matches!(error, StoreError::PolicyValidationFailed(1)));
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert!(!replay
             .graph
             .nodes
@@ -14012,7 +14394,7 @@ acceptanceCriteria:
         .unwrap();
 
         let report = sg_policy::evaluate_policies(
-            &replay_events(tmp.path(), ReplayOptions { check_hashes: true })
+            &replay_events(tmp.path(), ReplayOptions::checking())
                 .unwrap()
                 .graph,
             &sg_policy::PolicyCheckInput {
@@ -14049,7 +14431,7 @@ acceptanceCriteria:
             .all(|node_id| node_id.contains("policy_decision")));
         assert_eq!(receipt.created_nodes.len(), receipt.created_edges.len());
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let decisions = replay
             .graph
             .nodes
@@ -14124,7 +14506,7 @@ edgeTypes:
         assert!(lock.contains("signatures"));
         assert!(lock.contains("source"));
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(replay.events_replayed, 2);
         assert!(replay
             .graph
@@ -14202,7 +14584,7 @@ migrations:
         install_ontology_pack(tmp.path(), &v2_path, "test".to_string(), "main".to_string())
             .unwrap();
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(replay.events_replayed, 3);
         assert!(replay.graph.nodes.values().any(|node| {
             node.node_type == "OntologyPack"
@@ -14266,7 +14648,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert_eq!(replay.events_replayed, 5);
         assert!(replay
             .graph
@@ -14305,7 +14687,7 @@ acceptanceCriteria:
         assert_eq!(metadata.branch, "spec/AUTH-001-password-reset");
         assert_eq!(metadata.base_event_sequence, 4);
         let branch_report = validate_branch_metadata(tmp.path()).unwrap();
-        assert_eq!(branch_report.branches_checked, 1);
+        assert_eq!(branch_report.branches_checked, 2);
         assert!(branch_report.findings.is_empty());
 
         let validation = validate_specs(tmp.path()).unwrap();
@@ -14567,7 +14949,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let implementation_plan = replay
             .graph
             .nodes
@@ -14716,7 +15098,7 @@ acceptanceCriteria:
             .created_nodes
             .iter()
             .any(|node| node.starts_with("node_code_object_")));
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert!(!replay
             .graph
             .nodes
@@ -15301,7 +15683,7 @@ acceptanceCriteria:
         let tmp = tempdir().unwrap();
         add_declared_password_reset_object(tmp.path());
         add_release_for_spec(tmp.path(), "AUTH-001");
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let mut declaration = current_password_reset_declaration(tmp.path());
         let blockers = code_object_delete_blocking_references(&replay.graph, &declaration);
         assert!(blockers.contains(&"spec".to_string()));
@@ -15590,7 +15972,7 @@ acceptanceCriteria:
         .unwrap();
 
         assert_eq!(receipt.operation, "HumanDecision.Record");
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert!(replay
             .graph
             .nodes
@@ -15817,7 +16199,7 @@ acceptanceCriteria:
         .unwrap();
         assert_eq!(receipt.operation, "WorkReservation.Create");
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let mut reservation = replay.graph.nodes[&reservation_node_id].clone();
         reservation
             .attributes
@@ -15842,7 +16224,7 @@ acceptanceCriteria:
         .unwrap();
         assert_eq!(extended.operation, "WorkReservation.Extend");
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let mut reservation = replay.graph.nodes[&reservation_node_id].clone();
         reservation
             .attributes
@@ -15890,7 +16272,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let mut reservation = replay.graph.nodes[&reservation_node_id].clone();
         reservation
             .attributes
@@ -16257,7 +16639,7 @@ acceptanceCriteria:
             },
         )
         .unwrap();
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let reconcile_delta = code_index_reconciliation_delta(&replay.graph, &index_delta);
         assert_eq!(reconcile_delta.create_edges.len(), 1);
         append_operation(
@@ -16273,7 +16655,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert!(replay
             .graph
             .edges
@@ -16293,7 +16675,7 @@ acceptanceCriteria:
     fn strict_code_index_blocks_unplanned_symbol_unless_baseline() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let mut delta =
             code_symbol_delta("src/identity/unplanned.rs", "function", "unplannedReset");
         let mut projected = replay.graph.clone();
@@ -16731,7 +17113,7 @@ acceptanceCriteria:
             },
         )
         .unwrap();
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let wrong_symbol_delta =
             code_symbol_delta("src/identity/other.rs", "function", "requestPasswordReset");
         let mut projected = replay.graph.clone();
@@ -16782,7 +17164,7 @@ acceptanceCriteria:
     fn validation_reports_implemented_declaration_missing_symbol() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
-        let mut graph = replay_events(tmp.path(), ReplayOptions { check_hashes: true })
+        let mut graph = replay_events(tmp.path(), ReplayOptions::checking())
             .unwrap()
             .graph;
         let mut delta = code_object_declaration_delta(
@@ -16911,7 +17293,7 @@ acceptanceCriteria:
             },
         )
         .unwrap();
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         assert!(code_index_strict_findings(&replay.graph, &index_delta).is_empty());
         let reconcile_delta = code_index_reconciliation_delta(&replay.graph, &index_delta);
         append_operation(
@@ -16927,7 +17309,7 @@ acceptanceCriteria:
         )
         .unwrap();
 
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let commit = CommitValidationInput {
             commit: "abc123".to_string(),
             message: "feat: reset\n\nSpec: AUTH-001\nActionGroup: implementation\nCommitPlan: implementation\n".to_string(),
@@ -17050,7 +17432,7 @@ acceptanceCriteria:
             },
         )
         .unwrap();
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let scope_expansion = CommitValidationInput {
             commit: "abc123".to_string(),
             message: "feat: reset\n\nSpec: AUTH-001\nActionGroup: implementation\nCommitPlan: implementation\n".to_string(),
@@ -17156,7 +17538,7 @@ acceptanceCriteria:
             },
         )
         .unwrap();
-        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
         let reconcile_delta = code_index_reconciliation_delta(&replay.graph, &index_delta);
         let relationship = reconcile_delta.create_edges[0]
             .attributes
@@ -17813,6 +18195,27 @@ acceptanceCriteria:
             .unwrap()
     }
 
+    fn contains_tmp_file(path: &Path) -> std::io::Result<bool> {
+        if !path.exists() {
+            return Ok(false);
+        }
+        for entry in fs::read_dir(path)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                if contains_tmp_file(&path)? {
+                    return Ok(true);
+                }
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains(".tmp-"))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn add_valid_spec(root: &Path) {
         init_project(
             root,
@@ -17919,7 +18322,7 @@ acceptanceCriteria:
     }
 
     fn current_password_reset_declaration(root: &Path) -> Node {
-        let replay = replay_events(root, ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(root, ReplayOptions::checking()).unwrap();
         find_code_object_declaration(
             &replay.graph,
             "AUTH-001",
@@ -18025,7 +18428,7 @@ acceptanceCriteria:
     }
 
     fn first_action_id(root: &Path) -> String {
-        let replay = replay_events(root, ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(root, ReplayOptions::checking()).unwrap();
         replay
             .graph
             .nodes
@@ -18308,7 +18711,7 @@ acceptanceCriteria:
     }
 
     fn add_release_for_spec(root: &Path, spec: &str) {
-        let replay = replay_events(root, ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(root, ReplayOptions::checking()).unwrap();
         let project = find_project_node(&replay.graph).unwrap();
         let release_id = node_id("release", &format!("{spec}/1.0.0"));
         let tag_id = node_id("git_tag", &format!("{spec}/v1.0.0"));
@@ -18400,7 +18803,7 @@ acceptanceCriteria:
             },
         )
         .unwrap();
-        let replay = replay_events(root, ReplayOptions { check_hashes: true }).unwrap();
+        let replay = replay_events(root, ReplayOptions::checking()).unwrap();
         let declaration = find_code_object_declaration(
             &replay.graph,
             spec,

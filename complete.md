@@ -138,8 +138,9 @@ Current completed slices:
 - **Phase 0.5C — Generated-code, public contract, docs, and projection governance** added generated-file/source/generator facts, public API contract/request/response/consumer/breaking-change facts, example/changelog evidence, `GeneratedCode.Record` and `PublicContract.Record` ABI/semantic gates, generated-file edit permit blockers, public compatibility/docs requirements, projection drift findings, and tests.
 - **Phase 0.6A — Validation recipes and test intent** added validation recipe/command/build/typecheck/lint/format evidence facts, action/commit-plan recipe requirements, adapter-execution guardrails, recipe gate findings for action/PR/release validation, test intent/assertion/scenario facts, existing/unknown email positive/negative scenario completeness checks, and tests.
 - **Phase 0.6B — Review, rollout, rollback, observability, and post-release gates** added review/requested-change/resolution/approval facts, unresolved review blockers for action/PR/release gates, rollout/feature-flag/rollback evidence, post-release and release-health checks with follow-up requirements, metric/log/trace/audit/alert/SLO facts, risky/security release gate findings, and tests.
+- **Phase 1A — Branch-aware replay layout and atomic writes** added branch-scoped event files under `.specgraph/events/<graph-branch>/00000001.jsonl`, graph-branch replay options, parent/main inheritance for branch replay, branch-aware query replay, branch metadata head fields, legacy root event replay compatibility, and atomic temp-file/rename writes for events, receipts, snapshots, and metadata.
 
-Next focus: **Phase 1 — Branch-aware event store and atomic runtime**. Start from the latest `development`, design the branch-aware event layout, and preserve legacy event replay/migration behavior.
+Next focus: **Phase 1B — Repository write lock, branch CLI, and legacy migration hardening**. Start from the latest `development`, add repository-level write locking, graph branch create/list/show commands, explicit legacy migration, and the remaining Phase 1 branch CLI/gate tests.
 
 ---
 
@@ -542,15 +543,15 @@ Make graph branches real, isolated, replayable, mergeable, and safe for producti
 
 ## Checklist
 
-- [ ] **Design and add branch-aware event layout.** Implement `.specgraph/events/<graph-branch>/00000001.jsonl` while preserving migration support for the existing `.specgraph/events/00000001.jsonl`. Add a versioned branch metadata schema that records branch id, parent branch, base snapshot id, base event sequence, head event id, head state hash, created actor, created timestamp, and last updated timestamp.
+- [x] **Design and add branch-aware event layout.** Implement `.specgraph/events/<graph-branch>/00000001.jsonl` while preserving migration support for the existing `.specgraph/events/00000001.jsonl`. Add a versioned branch metadata schema that records branch id, parent branch, base snapshot id, base event sequence, head event id, head state hash, created actor, created timestamp, and last updated timestamp.
 
-- [ ] **Extend replay options to include graph branch.** Change `ReplayOptions` in `sg-store` to include `graph_branch: Option<String>`. Update `replay_events`, `replay_events_until`, store methods, CLI handlers, server handlers, and tests so replay can load `main`, any named branch, or a snapshot deterministically.
+- [x] **Extend replay options to include graph branch.** Change `ReplayOptions` in `sg-store` to include `graph_branch: Option<String>`. Update `replay_events`, `replay_events_until`, store methods, CLI handlers, server handlers, and tests so replay can load `main`, any named branch, or a snapshot deterministically.
 
-- [ ] **Implement branch inheritance/replay semantics.** If a branch was created from `main` at sequence N, replay parent events through N, then replay branch-local events. Verify the resulting graph hash differs correctly when branch-local changes exist.
+- [x] **Implement branch inheritance/replay semantics.** If a branch was created from `main` at sequence N, replay parent events through N, then replay branch-local events. Verify the resulting graph hash differs correctly when branch-local changes exist.
 
-- [ ] **Make query branch-aware.** Update `query_graph` so `QueryTarget::Branch { graph_branch }` replays the requested branch instead of the current global event log. Keep `QueryTarget::Snapshot` reading exact snapshot state.
+- [x] **Make query branch-aware.** Update `query_graph` so `QueryTarget::Branch { graph_branch }` replays the requested branch instead of the current global event log. Keep `QueryTarget::Snapshot` reading exact snapshot state.
 
-- [ ] **Add atomic append transaction.** Replace direct event/receipt/snapshot writes with a transaction helper that writes temp files, fsyncs file and directory where practical, renames atomically, updates branch head metadata, and leaves no accepted partial mutation after interruption.
+- [x] **Add atomic append transaction.** Replace direct event/receipt/snapshot writes with a transaction helper that writes temp files, fsyncs file and directory where practical, renames atomically, updates branch head metadata, and leaves no accepted partial mutation after interruption.
 
 - [ ] **Add repository-level write lock.** Create `.specgraph/locks/graph.lock` and use an exclusive file lock during append, branch creation, merge acceptance, release record, and migration. Return a clear error if the lock cannot be acquired.
 
