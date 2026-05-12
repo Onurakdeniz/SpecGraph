@@ -1455,7 +1455,7 @@ pub fn plan_code_workflow(
             create_allowed: false,
             link_existing_allowed: true,
             needs_user_choice: true,
-            required_operations: vec!["HumanDecision.SelectExistingObject".to_string()],
+            required_operations: vec!["HumanDecision.Record".to_string()],
             allowed_files: Vec::new(),
             allowed_symbols: Vec::new(),
             missing_graph_facts: Vec::new(),
@@ -2540,7 +2540,7 @@ fn existing_feature_matches(
                 confidence,
                 evidence,
                 recommended_operation: if decision == "possible-duplicate" {
-                    "HumanDecision.SelectExistingFeatureOrVariant".to_string()
+                    "HumanDecision.Record".to_string()
                 } else {
                     "ReferenceExistingFeature".to_string()
                 },
@@ -2573,7 +2573,7 @@ fn add_existing_feature_questions(
             ),
             "Duplicate feature creation is blocked until the user chooses how to relate to the existing feature.",
             feature.evidence.clone(),
-            "HumanDecision.SelectExistingFeatureOrVariant",
+            "HumanDecision.Record",
         ));
     }
 }
@@ -5440,6 +5440,9 @@ fn validate_operation_semantic_preconditions(
         "Intent.RecordDecision" => {
             validate_intent_record_decision_semantic_preconditions(graph, delta)
         }
+        "HumanDecision.Record" => {
+            validate_human_decision_record_semantic_preconditions(graph, delta)
+        }
         "Proposal.Accept" => validate_proposal_accept_semantic_preconditions(graph, request, delta),
         _ => Vec::new(),
     }
@@ -6679,6 +6682,278 @@ fn validate_intent_record_decision_semantic_preconditions(
     }
 
     findings
+}
+
+fn validate_human_decision_record_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    let decisions = delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "HumanDecision")
+        .collect::<Vec<_>>();
+    if decisions.len() != 1 {
+        findings.push(semantic_finding(
+            "semantic.human_decision.decision_required",
+            "HumanDecision.Record must create exactly one HumanDecision node.",
+        ));
+        return findings;
+    }
+
+    let decision = decisions[0];
+    let decision_id = node_attr(decision, "decisionId").unwrap_or("");
+    if decision_id.trim().is_empty()
+        || node_attr(decision, "authorizesOperation").is_none_or(str::is_empty)
+        || node_attr(decision, "selectedOptionId").is_none_or(str::is_empty)
+        || node_attr(decision, "decidedBy").is_none_or(str::is_empty)
+    {
+        findings.push(semantic_finding(
+            "semantic.human_decision.invalid_decision",
+            "HumanDecision requires decisionId, authorizesOperation, selectedOptionId, and decidedBy.",
+        ));
+    }
+
+    if let Some(expires_at) = node_attr(decision, "expiresAt") {
+        match OffsetDateTime::parse(expires_at, &time::format_description::well_known::Rfc3339) {
+            Ok(expiration) if expiration <= OffsetDateTime::now_utc() => {
+                findings.push(semantic_finding(
+                    "semantic.human_decision.expired_decision",
+                    "HumanDecision expiresAt is in the past; record a fresh scoped decision before proceeding.",
+                ));
+            }
+            Err(_) => findings.push(semantic_finding(
+                "semantic.human_decision.invalid_expiration",
+                "HumanDecision expiresAt must be an RFC3339 timestamp.",
+            )),
+            _ => {}
+        }
+    }
+
+    let option_edges = delta
+        .create_edges
+        .iter()
+        .filter(|edge| edge.from == decision.id && edge.edge_type == "DECISION_HAS_OPTION")
+        .collect::<Vec<_>>();
+    if option_edges.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.human_decision.option_required",
+            "HumanDecision.Record requires at least one linked DecisionOption.",
+        ));
+    }
+    let selected_option_id = node_attr(decision, "selectedOptionId").unwrap_or("");
+    let mut selected_option_found = false;
+    for edge in option_edges {
+        let option = node_by_id(graph, delta, &edge.to);
+        if option.is_none_or(|node| node.node_type != "DecisionOption") {
+            findings.push(semantic_finding(
+                "semantic.human_decision.option_node_required",
+                format!(
+                    "DECISION_HAS_OPTION target `{}` must be a DecisionOption.",
+                    edge.to
+                ),
+            ));
+            continue;
+        }
+        let option = option.expect("checked above");
+        if node_attr(option, "optionId").is_none_or(str::is_empty)
+            || node_attr(option, "label").is_none_or(str::is_empty)
+        {
+            findings.push(semantic_finding(
+                "semantic.human_decision.invalid_option",
+                "DecisionOption requires optionId and label.",
+            ));
+        }
+        if node_attr(option, "optionId") == Some(selected_option_id) {
+            selected_option_found = true;
+        }
+    }
+    if !selected_option_id.trim().is_empty() && !selected_option_found {
+        findings.push(semantic_finding(
+            "semantic.human_decision.selected_option_missing",
+            "HumanDecision selectedOptionId must match one linked DecisionOption optionId.",
+        ));
+    }
+
+    let rationale_edges = delta
+        .create_edges
+        .iter()
+        .filter(|edge| edge.from == decision.id && edge.edge_type == "DECISION_HAS_RATIONALE")
+        .collect::<Vec<_>>();
+    if rationale_edges.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.human_decision.rationale_required",
+            "HumanDecision.Record requires a DecisionRationale explaining why the selected option is safe.",
+        ));
+    }
+    for edge in rationale_edges {
+        let rationale = node_by_id(graph, delta, &edge.to);
+        if rationale.is_none_or(|node| node.node_type != "DecisionRationale") {
+            findings.push(semantic_finding(
+                "semantic.human_decision.rationale_node_required",
+                format!(
+                    "DECISION_HAS_RATIONALE target `{}` must be a DecisionRationale.",
+                    edge.to
+                ),
+            ));
+            continue;
+        }
+        if rationale
+            .and_then(|node| node_attr(node, "rationale"))
+            .is_none_or(str::is_empty)
+        {
+            findings.push(semantic_finding(
+                "semantic.human_decision.invalid_rationale",
+                "DecisionRationale requires non-empty rationale text.",
+            ));
+        }
+    }
+
+    let scope_edges = delta
+        .create_edges
+        .iter()
+        .filter(|edge| edge.from == decision.id && edge.edge_type == "DECISION_HAS_SCOPE")
+        .collect::<Vec<_>>();
+    if scope_edges.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.human_decision.scope_required",
+            "HumanDecision.Record requires at least one explicit DecisionScope.",
+        ));
+    }
+    let mut scope_values = Vec::new();
+    for edge in scope_edges {
+        let scope = node_by_id(graph, delta, &edge.to);
+        if scope.is_none_or(|node| node.node_type != "DecisionScope") {
+            findings.push(semantic_finding(
+                "semantic.human_decision.scope_node_required",
+                format!(
+                    "DECISION_HAS_SCOPE target `{}` must be a DecisionScope.",
+                    edge.to
+                ),
+            ));
+            continue;
+        }
+        let scope = scope.expect("checked above");
+        let scope_type = node_attr(scope, "scopeType").unwrap_or("");
+        let scope_value = node_attr(scope, "scopeValue").unwrap_or("");
+        if scope_type.trim().is_empty() || scope_value.trim().is_empty() {
+            findings.push(semantic_finding(
+                "semantic.human_decision.invalid_scope",
+                "DecisionScope requires scopeType and scopeValue.",
+            ));
+        }
+        if matches!(scope_type, "global" | "all") || matches!(scope_value, "*" | "all") {
+            let broad_explicit = scope
+                .attributes
+                .get("broadApprovalExplicit")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if !broad_explicit {
+                findings.push(semantic_finding(
+                    "semantic.human_decision.broad_scope_not_explicit",
+                    "Broad DecisionScope values require broadApprovalExplicit=true.",
+                ));
+            }
+        }
+        if !scope_type.trim().is_empty() && !scope_value.trim().is_empty() {
+            scope_values.push(format!("{scope_type}:{scope_value}"));
+        }
+    }
+
+    let links_authorized_target = delta.create_edges.iter().any(|edge| {
+        edge.from == decision.id
+            && match edge.edge_type.as_str() {
+                "DECISION_FOR_SPEC" => node_exists_with_type(graph, delta, &edge.to, "Spec"),
+                "DECISION_FOR_ACTION" => {
+                    node_exists_with_type(graph, delta, &edge.to, "ActionNode")
+                }
+                "DECISION_APPROVES_CODE_OBJECT" => {
+                    node_exists_with_type(graph, delta, &edge.to, "CodeObjectDeclaration")
+                }
+                _ => false,
+            }
+    });
+    if !links_authorized_target {
+        findings.push(semantic_finding(
+            "semantic.human_decision.authorized_target_required",
+            "HumanDecision must link to the spec, action, or code object it authorizes.",
+        ));
+    }
+
+    for approval_edge in delta
+        .create_edges
+        .iter()
+        .filter(|edge| edge.from == decision.id && edge.edge_type == "DECISION_HAS_APPROVAL")
+    {
+        let Some(approval) = graph.nodes.get(&approval_edge.to) else {
+            findings.push(semantic_finding(
+                "semantic.human_decision.approval_required",
+                format!(
+                    "DECISION_HAS_APPROVAL target `{}` must be an existing Approval.",
+                    approval_edge.to
+                ),
+            ));
+            continue;
+        };
+        if approval.node_type != "Approval" {
+            findings.push(semantic_finding(
+                "semantic.human_decision.approval_node_required",
+                format!(
+                    "DECISION_HAS_APPROVAL target `{}` must be an Approval.",
+                    approval_edge.to
+                ),
+            ));
+            continue;
+        }
+        if let Some(expires_at) = node_attr(approval, "expiresAt") {
+            match OffsetDateTime::parse(expires_at, &time::format_description::well_known::Rfc3339)
+            {
+                Ok(expiration) if expiration <= OffsetDateTime::now_utc() => {
+                    findings.push(semantic_finding(
+                        "semantic.human_decision.expired_approval",
+                        format!("Approval `{}` is expired.", approval.id),
+                    ));
+                }
+                Err(_) => findings.push(semantic_finding(
+                    "semantic.human_decision.invalid_approval_expiration",
+                    format!("Approval `{}` has invalid expiresAt.", approval.id),
+                )),
+                _ => {}
+            }
+        }
+        if !human_decision_approval_scope_matches(approval, decision, &scope_values) {
+            findings.push(semantic_finding(
+                "semantic.human_decision.approval_scope_mismatch",
+                format!(
+                    "Approval `{}` must be scoped to the human decision, operation, or one explicit DecisionScope.",
+                    approval.id
+                ),
+            ));
+        }
+    }
+
+    findings
+}
+
+fn human_decision_approval_scope_matches(
+    approval: &Node,
+    decision: &Node,
+    decision_scopes: &[String],
+) -> bool {
+    let Some(scope) = node_attr(approval, "scope") else {
+        return false;
+    };
+    let decision_scope = node_attr(decision, "decisionId")
+        .map(|decision_id| format!("human-decision:{decision_id}"));
+    let operation_scope = node_attr(decision, "authorizesOperation")
+        .map(|operation| format!("operation:{operation}"));
+
+    Some(scope) == decision_scope.as_deref()
+        || Some(scope) == operation_scope.as_deref()
+        || decision_scopes
+            .iter()
+            .any(|decision_scope| decision_scope == scope)
 }
 
 fn validate_proposal_accept_semantic_preconditions(
@@ -12183,6 +12458,174 @@ acceptanceCriteria:
         )
         .unwrap();
         assert!(receipt.dry_run);
+    }
+
+    #[test]
+    fn human_decision_record_persists_scoped_option_and_rationale() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let decision_id = "AUTH-001/select-existing-object";
+        let spec_id = node_id("spec", "AUTH-001");
+        let decision_node_id = node_id("human_decision", decision_id);
+        let option_id = node_id("decision_option", &format!("{decision_id}/reuse"));
+        let rationale_id = node_id("decision_rationale", decision_id);
+        let scope_id = node_id(
+            "decision_scope",
+            &format!("{decision_id}/file/src/identity/password-reset.rs"),
+        );
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "HumanDecision.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"decision": decision_id}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![
+                        Node {
+                            id: decision_node_id.clone(),
+                            stable_key: format!("human-decision:{decision_id}"),
+                            node_type: "HumanDecision".to_string(),
+                            attributes: BTreeMap::from([
+                                ("decisionId".to_string(), json!(decision_id)),
+                                (
+                                    "authorizesOperation".to_string(),
+                                    json!("CodeObject.LinkExisting"),
+                                ),
+                                ("selectedOptionId".to_string(), json!("reuse-existing")),
+                                ("decidedBy".to_string(), json!("local:developer")),
+                            ]),
+                        },
+                        Node {
+                            id: option_id.clone(),
+                            stable_key: format!("decision-option:{decision_id}/reuse"),
+                            node_type: "DecisionOption".to_string(),
+                            attributes: BTreeMap::from([
+                                ("optionId".to_string(), json!("reuse-existing")),
+                                (
+                                    "label".to_string(),
+                                    json!("Link the existing private symbol"),
+                                ),
+                            ]),
+                        },
+                        Node {
+                            id: rationale_id.clone(),
+                            stable_key: format!("decision-rationale:{decision_id}"),
+                            node_type: "DecisionRationale".to_string(),
+                            attributes: BTreeMap::from([(
+                                "rationale".to_string(),
+                                json!("Discovery found one private implementation candidate."),
+                            )]),
+                        },
+                        Node {
+                            id: scope_id.clone(),
+                            stable_key: format!(
+                                "decision-scope:{decision_id}/file/src/identity/password-reset.rs"
+                            ),
+                            node_type: "DecisionScope".to_string(),
+                            attributes: BTreeMap::from([
+                                ("scopeType".to_string(), json!("file")),
+                                (
+                                    "scopeValue".to_string(),
+                                    json!("src/identity/password-reset.rs"),
+                                ),
+                            ]),
+                        },
+                    ],
+                    create_edges: vec![
+                        edge(&spec_id, "HAS_HUMAN_DECISION", &decision_node_id),
+                        edge(&decision_node_id, "DECISION_HAS_OPTION", &option_id),
+                        edge(&decision_node_id, "DECISION_HAS_RATIONALE", &rationale_id),
+                        edge(&decision_node_id, "DECISION_HAS_SCOPE", &scope_id),
+                        edge(&decision_node_id, "DECISION_FOR_SPEC", &spec_id),
+                    ],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "HumanDecision.Record");
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert!(replay
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "HumanDecision"
+                && node_attr(node, "authorizesOperation") == Some("CodeObject.LinkExisting")));
+    }
+
+    #[test]
+    fn human_decision_record_blocks_expired_broad_or_unscoped_choices() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let decision_id = "AUTH-001/broad-risky-choice";
+        let decision_node_id = node_id("human_decision", decision_id);
+        let option_id = node_id("decision_option", &format!("{decision_id}/approve-all"));
+        let scope_id = node_id("decision_scope", &format!("{decision_id}/global"));
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "HumanDecision.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"decision": decision_id}),
+                dry_run: true,
+                delta: GraphDelta {
+                    create_nodes: vec![
+                        Node {
+                            id: decision_node_id.clone(),
+                            stable_key: format!("human-decision:{decision_id}"),
+                            node_type: "HumanDecision".to_string(),
+                            attributes: BTreeMap::from([
+                                ("decisionId".to_string(), json!(decision_id)),
+                                ("authorizesOperation".to_string(), json!("Release.Record")),
+                                ("selectedOptionId".to_string(), json!("approve-everything")),
+                                ("decidedBy".to_string(), json!("local:developer")),
+                                ("expiresAt".to_string(), json!("2000-01-01T00:00:00Z")),
+                            ]),
+                        },
+                        Node {
+                            id: option_id.clone(),
+                            stable_key: format!("decision-option:{decision_id}/approve-all"),
+                            node_type: "DecisionOption".to_string(),
+                            attributes: BTreeMap::from([
+                                ("optionId".to_string(), json!("approve-everything")),
+                                ("label".to_string(), json!("Approve all release actions")),
+                            ]),
+                        },
+                        Node {
+                            id: scope_id.clone(),
+                            stable_key: format!("decision-scope:{decision_id}/global"),
+                            node_type: "DecisionScope".to_string(),
+                            attributes: BTreeMap::from([
+                                ("scopeType".to_string(), json!("global")),
+                                ("scopeValue".to_string(), json!("*")),
+                            ]),
+                        },
+                    ],
+                    create_edges: vec![
+                        edge(&decision_node_id, "DECISION_HAS_OPTION", &option_id),
+                        edge(&decision_node_id, "DECISION_HAS_SCOPE", &scope_id),
+                    ],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 4,
+            } if operation == "HumanDecision.Record"
+        ));
     }
 
     #[test]

@@ -161,6 +161,21 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "dependency-boundary:interface->infrastructure",
     },
     StableKeyFamily {
+        prefix: "decision-option",
+        description: "Human decision option that may be selected to unblock work",
+        example: "decision-option:AUTH-001/choose-existing/requestPasswordReset",
+    },
+    StableKeyFamily {
+        prefix: "decision-rationale",
+        description: "Rationale evidence for a human decision",
+        example: "decision-rationale:AUTH-001/choose-existing",
+    },
+    StableKeyFamily {
+        prefix: "decision-scope",
+        description: "Explicit operation, spec, action, module, file, API, dependency, migration, release, or time scope for a human decision",
+        example: "decision-scope:AUTH-001/choose-existing/file/src/identity/password-reset.rs",
+    },
+    StableKeyFamily {
         prefix: "execution-attempt",
         description: "ActionNode execution attempt evidence",
         example: "execution-attempt:node_action/auth-001/start-1",
@@ -229,6 +244,11 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         prefix: "graph-snapshot",
         description: "Graph snapshot fact",
         example: "graph-snapshot:sha256:abc123",
+    },
+    StableKeyFamily {
+        prefix: "human-decision",
+        description: "Scoped human decision authorizing or selecting a graph/workflow operation",
+        example: "human-decision:AUTH-001/choose-existing-object",
     },
     StableKeyFamily {
         prefix: "impact-analysis",

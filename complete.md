@@ -128,8 +128,9 @@ Current completed slices:
 - **Phase 0.2F — Rename/move alias migration evidence** added `CodeObjectAlias` graph facts, `CODE_OBJECT_HAS_ALIAS` links, stable-key support, ABI/ontology coverage, and semantic gates requiring alias migration evidence when referenced code objects are renamed or moved.
 - **Phase 0.2G — Broader delete safety** expanded `CodeObject.Delete` blockers across spec declarations, files, implementation links, endpoints/use cases/public interfaces, parent/child objects, impact/refactor/root-cause references, aliases, and released specs; approved removal plans can proceed.
 - **Phase 0.2H — Refactor closure and public API preservation** added semantic validation for `Refactor.Record`, requiring no behavior change, a refactor plan, preserved behavior, passed equivalence validation, target code objects, and public API preservation evidence for public targets.
+- **Phase 0.3A — Human decision graph facts** added `HumanDecision.Record`, `HumanDecision`, `DecisionOption`, `DecisionRationale`, and `DecisionScope` ontology/stable-key support, scoped target links, semantic checks for selected options/rationale/scopes/expiration, and tests for valid scoped choices plus expired broad unscoped blockers.
 
-Next focus: **Phase 0.3 — Agent Autonomy and Human Decision Boundaries**. Start from the latest `development`, define auto-allowed vs approval-required operations, human decision facts, user-choice blockers, scoped approvals, autonomous audit trails, and tests.
+Next focus: **Phase 0.3B — Agent autonomy policy and risky-operation gates**. Start from the latest `development`, define auto-allowed vs approval-required/forbidden operations, block risky module/API/data/security/release choices without scoped approval, and add autonomous audit trails.
 
 ---
 
@@ -395,7 +396,7 @@ Make it explicit which operations a coding agent may perform automatically and w
 
 - [ ] **Define agent autonomy policy.** Add a policy table for auto-allowed, approval-required, and forbidden operations. Examples: linking an existing private symbol may be auto-allowed; creating a module, adding a dependency, changing public API, destructive migration, security-sensitive behavior, or release requires approval.
 
-- [ ] **Add HumanDecision graph facts.** Model `HumanDecision`, `DecisionOption`, `DecisionRationale`, and `DecisionScope`. Decisions must link to the operation/spec/action they authorize.
+- [x] **Add HumanDecision graph facts.** Model `HumanDecision`, `DecisionOption`, `DecisionRationale`, and `DecisionScope`. Decisions must link to the operation/spec/action they authorize.
 
 - [ ] **Add user-choice blockers.** When the system finds ambiguous candidates, risky assumptions, multiple valid module placements, or competing implementation strategies, return a blocker that requires user selection rather than guessing.
 
