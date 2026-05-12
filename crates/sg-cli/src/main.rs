@@ -2121,7 +2121,9 @@ fn handle_workflow(
                 }))?;
             } else if !output.quiet {
                 println!("workflowPlanStatus: {:?}", plan.status);
+                println!("decision: {}", plan.decision);
                 println!("stateHash: {}", plan.state_hash);
+                println!("humanMessage: {}", plan.human_message);
                 println!("observations: {}", plan.observations.len());
                 for observation in &plan.observations {
                     println!(
@@ -2138,6 +2140,43 @@ fn handle_workflow(
                     println!(
                         "question: {} area={} blocks={} prompt={}",
                         question.id, question.area, question.blocks_operation, question.prompt
+                    );
+                }
+                println!(
+                    "intentQuestions: {}",
+                    plan.intent_clarification.questions.len()
+                );
+                for question in &plan.intent_clarification.questions {
+                    println!(
+                        "intentQuestion: {} area={} risky={} blocks={} prompt={}",
+                        question.id,
+                        question.area,
+                        question.risky,
+                        question.blocks_operation,
+                        question.prompt
+                    );
+                }
+                println!(
+                    "intentAssumptions: {}",
+                    plan.intent_clarification.assumptions.len()
+                );
+                for assumption in &plan.intent_clarification.assumptions {
+                    println!(
+                        "intentAssumption: {} risk={} approvalRequired={} assumption={}",
+                        assumption.id,
+                        assumption.risk,
+                        assumption.requires_approval,
+                        assumption.assumption
+                    );
+                }
+                println!("existingFeatures: {}", plan.existing_features.len());
+                for feature in &plan.existing_features {
+                    println!(
+                        "existingFeature: spec={} decision={} confidence={:.2} evidence={}",
+                        feature.spec.as_deref().unwrap_or(""),
+                        feature.decision,
+                        feature.confidence,
+                        feature.evidence.join("|")
                     );
                 }
                 println!("dryRuns: {}", plan.dry_runs.len());

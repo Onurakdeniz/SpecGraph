@@ -293,11 +293,64 @@ pub struct WorkflowCodePlan {
 pub struct WorkflowPlan {
     pub schema_version: String,
     pub status: WorkflowPlanStatus,
+    pub decision: String,
     pub state_hash: String,
     pub observations: Vec<WorkflowObservation>,
     pub required_questions: Vec<WorkflowQuestion>,
     pub optional_suggestions: Vec<WorkflowSuggestion>,
     pub dry_runs: Vec<WorkflowDryRun>,
+    pub intent_clarification: IntentClarification,
+    pub existing_features: Vec<ExistingFeatureMatch>,
+    pub human_message: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntentClarification {
+    pub questions: Vec<IntentQuestion>,
+    pub answers: Vec<IntentAnswer>,
+    pub assumptions: Vec<IntentAssumption>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntentQuestion {
+    pub id: String,
+    pub area: String,
+    pub prompt: String,
+    pub reason: String,
+    pub blocks_operation: String,
+    pub risky: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntentAnswer {
+    pub question_id: String,
+    pub answer: String,
+    pub answered_by: String,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntentAssumption {
+    pub id: String,
+    pub area: String,
+    pub assumption: String,
+    pub risk: String,
+    pub requires_approval: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExistingFeatureMatch {
+    pub spec: Option<String>,
+    pub title: Option<String>,
+    pub decision: String,
+    pub confidence: f32,
+    pub evidence: Vec<String>,
+    pub recommended_operation: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -980,7 +1033,29 @@ pub fn plan_workflow(root: &Path, options: WorkflowPlanOptions) -> Result<Workfl
 
     add_project_workflow_questions(&project_report, &observations, &mut required_questions);
     add_module_workflow_questions(&module_report, &observations, &mut required_questions);
-    add_spec_workflow_questions(&replay.graph, &options, &mut required_questions);
+    let intent_clarification = intent_clarification_for_request(&options);
+    let existing_features = existing_feature_matches(&replay.graph, &options);
+    let docs_only = docs_only_workflow_intent(&options);
+    let existing_feature_resolves_request = existing_features
+        .iter()
+        .any(|feature| matches!(feature.decision.as_str(), "no-op" | "reference-existing"));
+
+    if !docs_only && !existing_feature_resolves_request {
+        add_spec_workflow_questions(&replay.graph, &options, &mut required_questions);
+        for question in &intent_clarification.questions {
+            required_questions.push(workflow_question(
+                question.id.clone(),
+                question.area.clone(),
+                question.prompt.clone(),
+                question.reason.clone(),
+                Vec::new(),
+                question.blocks_operation.clone(),
+            ));
+        }
+    }
+    if !docs_only {
+        add_existing_feature_questions(&existing_features, &mut required_questions);
+    }
 
     let optional_suggestions = workflow_suggestions(&project_report, &module_report, &observations);
     let dry_runs = workflow_dry_runs(
@@ -991,20 +1066,31 @@ pub fn plan_workflow(root: &Path, options: WorkflowPlanOptions) -> Result<Workfl
         !project_report.complete,
         !module_report.complete,
     );
+    let decision = workflow_plan_decision(
+        &options,
+        &existing_features,
+        &intent_clarification,
+        &required_questions,
+    );
     let status = if required_questions.is_empty() {
         WorkflowPlanStatus::Ready
     } else {
         WorkflowPlanStatus::QuestionsRequired
     };
+    let human_message = workflow_plan_human_message(&decision, &existing_features);
 
     Ok(WorkflowPlan {
         schema_version: "specgraph.workflow-plan/v1".to_string(),
         status,
+        decision,
         state_hash: replay.state_hash,
         observations,
         required_questions,
         optional_suggestions,
         dry_runs,
+        intent_clarification,
+        existing_features,
+        human_message,
     })
 }
 
@@ -1013,6 +1099,28 @@ pub fn plan_code_workflow(
     options: WorkflowCodePlanOptions,
 ) -> Result<WorkflowCodePlan> {
     let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    if docs_only_code_intent(&options) {
+        return Ok(WorkflowCodePlan {
+            schema_version: "specgraph.workflow-code-plan/v1".to_string(),
+            allowed: false,
+            blocked: false,
+            decision: "docs-only".to_string(),
+            state_hash: replay.state_hash,
+            existing_candidates: Vec::new(),
+            selected_existing_object: None,
+            duplicate_risk: false,
+            create_allowed: false,
+            link_existing_allowed: false,
+            needs_user_choice: false,
+            required_operations: vec!["Docs.Update".to_string()],
+            allowed_files: Vec::new(),
+            allowed_symbols: Vec::new(),
+            missing_graph_facts: Vec::new(),
+            human_message:
+                "Request appears documentation-only; do not issue an implementation edit permit."
+                    .to_string(),
+        });
+    }
     let Some(spec_node) = find_spec_node(&replay.graph, &options.spec) else {
         return Ok(blocked_code_plan(
             replay.state_hash,
@@ -1025,6 +1133,30 @@ pub fn plan_code_workflow(
             ),
         ));
     };
+    if spec_has_release(&replay.graph, Some(&options.spec))
+        || node_attr(spec_node, "state") == Some("Released")
+    {
+        return Ok(WorkflowCodePlan {
+            schema_version: "specgraph.workflow-code-plan/v1".to_string(),
+            allowed: false,
+            blocked: false,
+            decision: "no-op".to_string(),
+            state_hash: replay.state_hash,
+            existing_candidates: Vec::new(),
+            selected_existing_object: None,
+            duplicate_risk: false,
+            create_allowed: false,
+            link_existing_allowed: false,
+            needs_user_choice: false,
+            required_operations: Vec::new(),
+            allowed_files: Vec::new(),
+            allowed_symbols: Vec::new(),
+            missing_graph_facts: Vec::new(),
+            human_message:
+                "The requested spec is already released; reference existing evidence instead of editing code."
+                    .to_string(),
+        });
+    }
     let Some((kind, name)) = options
         .wants
         .first()
@@ -1168,6 +1300,29 @@ fn blocked_code_plan(
         missing_graph_facts,
         human_message,
     }
+}
+
+fn docs_only_code_intent(options: &WorkflowCodePlanOptions) -> bool {
+    let text = std::iter::once(options.action.as_str())
+        .chain(options.wants.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    mentions_any(
+        &text,
+        &["docs", "documentation", "readme", "changelog", "guide"],
+    ) && !mentions_any(
+        &text,
+        &[
+            "function",
+            "method",
+            "class",
+            "route",
+            "migration",
+            "schema",
+            "type:",
+        ],
+    )
 }
 
 fn parse_wanted_object(value: &str) -> Option<(String, String)> {
@@ -1688,6 +1843,648 @@ fn detect_workflow_observations(
         ));
     }
     observations
+}
+
+fn intent_clarification_for_request(options: &WorkflowPlanOptions) -> IntentClarification {
+    let mut questions = Vec::new();
+    let mut assumptions = Vec::new();
+    let text = workflow_request_text(options);
+    let normalized = text.to_ascii_lowercase();
+
+    if vague_workflow_request(options, &normalized) {
+        questions.push(intent_question(
+            "intent.required_behavior",
+            "IntentClarification",
+            "What exact user-visible behavior, success case, failure case, and acceptance scenario should this request produce?",
+            "The request is too vague to safely create a production spec or implementation plan.",
+            "Spec.Create",
+            false,
+        ));
+    }
+
+    if mentions_any(&normalized, &["endpoint", "api", "route", "http", "rest"])
+        && !mentions_any(
+            &normalized,
+            &[
+                "get ", "post ", "put ", "patch ", "delete ", "path ", "/api/", "status",
+                "response",
+            ],
+        )
+    {
+        questions.push(intent_question(
+            "intent.endpoint_shape",
+            "IntentClarification",
+            "Which HTTP method, path, request shape, status codes, and response semantics are required?",
+            "Public endpoint behavior is a product/API decision and cannot be inferred safely.",
+            "Spec.Create",
+            true,
+        ));
+    }
+
+    if security_sensitive_request(&normalized) && !has_security_decision(&normalized) {
+        questions.push(intent_question(
+            "intent.security_behavior",
+            "IntentClarification",
+            "What authentication, authorization, abuse-prevention, and token/session behavior is required?",
+            "Security behavior is risky and requires explicit human intent or approval.",
+            "Spec.Create",
+            true,
+        ));
+        assumptions.push(IntentAssumption {
+            id: "assumption.security.requires_approval".to_string(),
+            area: "Security".to_string(),
+            assumption: "No security-sensitive behavior will be invented without an explicit answer or scoped approval.".to_string(),
+            risk: "high".to_string(),
+            requires_approval: true,
+        });
+    }
+
+    if data_lifecycle_request(&normalized) && !has_data_lifecycle_decision(&normalized) {
+        questions.push(intent_question(
+            "intent.data_policy",
+            "IntentClarification",
+            "What data retention, deletion, audit, export, or privacy rule applies?",
+            "Data lifecycle behavior can be destructive or regulated and cannot be assumed silently.",
+            "Spec.Create",
+            true,
+        ));
+        assumptions.push(IntentAssumption {
+            id: "assumption.data_policy.requires_approval".to_string(),
+            area: "DataPolicy".to_string(),
+            assumption: "No destructive data behavior will be inferred without an explicit answer or scoped approval.".to_string(),
+            risk: "high".to_string(),
+            requires_approval: true,
+        });
+    }
+
+    if rollout_sensitive_request(&normalized)
+        && !mentions_any(
+            &normalized,
+            &[
+                "rollout",
+                "flag",
+                "gradual",
+                "migration",
+                "backward compatible",
+                "compatibility",
+            ],
+        )
+    {
+        questions.push(intent_question(
+            "intent.rollout_policy",
+            "IntentClarification",
+            "Does this require rollout, feature flag, compatibility, or migration constraints?",
+            "Production rollout and compatibility behavior can affect existing users and must not be guessed for risky changes.",
+            "Spec.Create",
+            true,
+        ));
+    }
+
+    if options.title.is_some()
+        && !options.requirements.is_empty()
+        && !options.acceptance_criteria.is_empty()
+        && !mentions_any(&normalized, &["priority", "urgent", "p0", "p1", "p2"])
+    {
+        assumptions.push(IntentAssumption {
+            id: "assumption.priority.normal".to_string(),
+            area: "Planning".to_string(),
+            assumption: "Treat priority as normal until the user states otherwise.".to_string(),
+            risk: "low".to_string(),
+            requires_approval: false,
+        });
+    }
+
+    if options.planned_objects.is_empty()
+        && !options.touches_modules.is_empty()
+        && !options.requirements.is_empty()
+        && !options.acceptance_criteria.is_empty()
+    {
+        assumptions.push(IntentAssumption {
+            id: "assumption.no_initial_code_objects".to_string(),
+            area: "Planning".to_string(),
+            assumption: "Start with spec intent and defer exact code-object declarations until discovery or planning identifies them.".to_string(),
+            risk: "low".to_string(),
+            requires_approval: false,
+        });
+    }
+
+    IntentClarification {
+        questions,
+        answers: Vec::new(),
+        assumptions,
+    }
+}
+
+fn existing_feature_matches(
+    graph: &Graph,
+    options: &WorkflowPlanOptions,
+) -> Vec<ExistingFeatureMatch> {
+    let request_terms = workflow_request_terms(options);
+    if request_terms.is_empty() && options.spec.is_none() {
+        return Vec::new();
+    }
+    let request_title_norm = options
+        .title
+        .as_deref()
+        .map(normalize_workflow_text)
+        .unwrap_or_default();
+    let requested_modules = options
+        .touches_modules
+        .iter()
+        .map(|module| module.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    let mut matches = graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "Spec")
+        .filter_map(|spec_node| {
+            let existing_spec = node_attr(spec_node, "spec").map(ToString::to_string);
+            if existing_spec.as_deref() == options.spec.as_deref() {
+                return None;
+            }
+            let existing_title = node_attr(spec_node, "title").unwrap_or("");
+            let existing_terms = spec_feature_terms(graph, spec_node);
+            let title_similarity = if request_title_norm.is_empty() || existing_title.is_empty() {
+                0.0
+            } else {
+                workflow_text_similarity(
+                    &request_title_norm,
+                    &normalize_workflow_text(existing_title),
+                )
+            };
+            let term_similarity = term_similarity(&request_terms, &existing_terms);
+            let module_overlap = if requested_modules.is_empty() {
+                false
+            } else {
+                spec_touched_modules(graph, &spec_node.id)
+                    .iter()
+                    .any(|module| {
+                        requested_modules
+                            .iter()
+                            .any(|requested| requested == &module.to_ascii_lowercase())
+                    })
+            };
+            let planned_overlap = planned_object_overlap(spec_node, &options.planned_objects);
+            let confidence = (title_similarity.max(term_similarity)
+                + if module_overlap { 0.12 } else { 0.0 }
+                + if planned_overlap { 0.18 } else { 0.0 })
+            .min(1.0);
+            if confidence < 0.62 {
+                return None;
+            }
+
+            let released = spec_has_release(graph, existing_spec.as_deref())
+                || node_attr(spec_node, "state") == Some("Released");
+            let implemented = released || spec_is_implemented(graph, spec_node);
+            let decision = if released {
+                "no-op"
+            } else if implemented && confidence >= 0.82 {
+                "reference-existing"
+            } else {
+                "possible-duplicate"
+            };
+            let mut evidence = Vec::new();
+            if let Some(spec) = existing_spec.as_deref() {
+                evidence.push(format!("spec:{spec}"));
+            }
+            if !existing_title.is_empty() {
+                evidence.push(format!("matching-title:{existing_title}"));
+            }
+            if title_similarity > 0.0 {
+                evidence.push(format!("title-similarity:{title_similarity:.2}"));
+            }
+            if term_similarity > 0.0 {
+                evidence.push(format!("semantic-term-overlap:{term_similarity:.2}"));
+            }
+            if module_overlap {
+                evidence.push("matching-module".to_string());
+            }
+            if planned_overlap {
+                evidence.push("matching-planned-object".to_string());
+            }
+            if released {
+                evidence.push("release-evidence".to_string());
+            } else if implemented {
+                evidence.push("implementation-evidence".to_string());
+            }
+
+            Some(ExistingFeatureMatch {
+                spec: existing_spec,
+                title: (!existing_title.is_empty()).then(|| existing_title.to_string()),
+                decision: decision.to_string(),
+                confidence,
+                evidence,
+                recommended_operation: if decision == "possible-duplicate" {
+                    "HumanDecision.SelectExistingFeatureOrVariant".to_string()
+                } else {
+                    "ReferenceExistingFeature".to_string()
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|left, right| {
+        right
+            .confidence
+            .partial_cmp(&left.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    matches
+}
+
+fn add_existing_feature_questions(
+    matches: &[ExistingFeatureMatch],
+    questions: &mut Vec<WorkflowQuestion>,
+) {
+    for feature in matches
+        .iter()
+        .filter(|feature| feature.decision == "possible-duplicate")
+    {
+        let spec = feature.spec.as_deref().unwrap_or("unknown");
+        questions.push(workflow_question(
+            format!("intent.existing_feature.{spec}"),
+            "IntentClarification",
+            format!(
+                "A similar feature/spec `{spec}` already exists. Should this request extend, supersede, fork, or create an approved variant?"
+            ),
+            "Duplicate feature creation is blocked until the user chooses how to relate to the existing feature.",
+            feature.evidence.clone(),
+            "HumanDecision.SelectExistingFeatureOrVariant",
+        ));
+    }
+}
+
+fn workflow_plan_decision(
+    options: &WorkflowPlanOptions,
+    existing_features: &[ExistingFeatureMatch],
+    intent: &IntentClarification,
+    required_questions: &[WorkflowQuestion],
+) -> String {
+    if existing_features
+        .iter()
+        .any(|feature| feature.decision == "no-op" && feature.confidence >= 0.82)
+    {
+        "no-op".to_string()
+    } else if docs_only_workflow_intent(options) && required_questions.is_empty() {
+        "docs-only".to_string()
+    } else if existing_features
+        .iter()
+        .any(|feature| feature.decision == "reference-existing")
+    {
+        "reference-existing".to_string()
+    } else if existing_features
+        .iter()
+        .any(|feature| feature.decision == "possible-duplicate")
+    {
+        "needs-human-decision".to_string()
+    } else if workflow_questions_have_blockers(required_questions) {
+        "questions-required".to_string()
+    } else if intent
+        .assumptions
+        .iter()
+        .any(|assumption| assumption.requires_approval)
+    {
+        "approval-required".to_string()
+    } else {
+        "create-spec".to_string()
+    }
+}
+
+fn workflow_plan_human_message(
+    decision: &str,
+    existing_features: &[ExistingFeatureMatch],
+) -> String {
+    match decision {
+        "no-op" => "A matching released feature already exists; reference it instead of creating duplicate work.".to_string(),
+        "reference-existing" => "A matching implemented feature exists; extend or reference the existing spec/action instead of duplicating it.".to_string(),
+        "needs-human-decision" => "A similar feature exists; choose extend, supersede, fork, or approved variant before creating a duplicate spec.".to_string(),
+        "questions-required" => "Required intent, project, module, or spec questions must be answered before graph work continues.".to_string(),
+        "docs-only" => "The request appears documentation-only; route it to docs/change evidence instead of implementation work unless the user says code is required.".to_string(),
+        "approval-required" => "Risky assumptions require explicit scoped approval before creating graph facts or code changes.".to_string(),
+        _ if existing_features.iter().any(|feature| feature.decision == "possible-duplicate") => "A similar feature exists; choose extend/supersede/fork/variant before creating a duplicate spec.".to_string(),
+        _ => "Workflow plan is ready for the next graph operation.".to_string(),
+    }
+}
+
+fn workflow_request_text(options: &WorkflowPlanOptions) -> String {
+    let mut parts = Vec::new();
+    parts.extend(options.spec.clone());
+    parts.extend(options.title.clone());
+    parts.extend(options.requirements.iter().map(|item| item.text.clone()));
+    parts.extend(
+        options
+            .acceptance_criteria
+            .iter()
+            .map(|item| item.text.clone()),
+    );
+    parts.extend(options.touches_modules.iter().cloned());
+    parts.extend(
+        options
+            .planned_objects
+            .iter()
+            .map(|object| format!("{} {}", object.kind, object.name)),
+    );
+    parts.join("\n")
+}
+
+fn mentions_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn vague_workflow_request(options: &WorkflowPlanOptions, normalized: &str) -> bool {
+    let term_count = text_terms(normalized).len();
+    let lacks_detail = options.requirements.is_empty() || options.acceptance_criteria.is_empty();
+    let vague_word = mentions_any(
+        normalized,
+        &[
+            "improve",
+            "fix",
+            "handle",
+            "support",
+            "better",
+            "stuff",
+            "thing",
+            "misc",
+            "somehow",
+            "make it work",
+            "update flow",
+        ],
+    );
+    term_count <= 4 || (vague_word && lacks_detail)
+}
+
+fn security_sensitive_request(text: &str) -> bool {
+    mentions_any(
+        text,
+        &[
+            "password",
+            "auth",
+            "security",
+            "permission",
+            "role",
+            "token",
+            "session",
+            "login",
+            "sign in",
+            "reset",
+            "credential",
+        ],
+    )
+}
+
+fn has_security_decision(text: &str) -> bool {
+    mentions_any(
+        text,
+        &[
+            "authenticated",
+            "authorized",
+            "authorization",
+            "role",
+            "permission",
+            "rate limit",
+            "one-time",
+            "expires",
+            "expiry",
+            "mfa",
+            "audit",
+        ],
+    )
+}
+
+fn data_lifecycle_request(text: &str) -> bool {
+    mentions_any(
+        text,
+        &[
+            "delete",
+            "remove account",
+            "retention",
+            "personal data",
+            "pii",
+            "export data",
+            "erase",
+            "purge",
+            "redact",
+        ],
+    )
+}
+
+fn has_data_lifecycle_decision(text: &str) -> bool {
+    mentions_any(
+        text,
+        &[
+            "retain",
+            "retention",
+            "purge",
+            "redact",
+            "audit",
+            "gdpr",
+            "export",
+            "soft delete",
+        ],
+    )
+}
+
+fn rollout_sensitive_request(text: &str) -> bool {
+    mentions_any(
+        text,
+        &[
+            "public api",
+            "breaking",
+            "production",
+            "roll out",
+            "rollout",
+        ],
+    )
+}
+
+fn docs_only_workflow_intent(options: &WorkflowPlanOptions) -> bool {
+    let text = workflow_request_text(options).to_ascii_lowercase();
+    let docs_terms = [
+        "docs",
+        "documentation",
+        "readme",
+        "changelog",
+        "guide",
+        "tutorial",
+    ];
+    mentions_any(&text, &docs_terms)
+        && options.planned_objects.is_empty()
+        && options.module_changes.is_empty()
+        && !mentions_any(
+            &text,
+            &["endpoint", "api", "database", "migration", "schema"],
+        )
+}
+
+fn intent_question(
+    id: impl Into<String>,
+    area: impl Into<String>,
+    prompt: impl Into<String>,
+    reason: impl Into<String>,
+    blocks_operation: impl Into<String>,
+    risky: bool,
+) -> IntentQuestion {
+    IntentQuestion {
+        id: id.into(),
+        area: area.into(),
+        prompt: prompt.into(),
+        reason: reason.into(),
+        blocks_operation: blocks_operation.into(),
+        risky,
+    }
+}
+
+fn workflow_questions_have_blockers(questions: &[WorkflowQuestion]) -> bool {
+    !questions.is_empty()
+}
+
+fn normalize_workflow_text(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn workflow_text_similarity(left: &str, right: &str) -> f32 {
+    if left.is_empty() || right.is_empty() {
+        0.0
+    } else if left == right {
+        0.95
+    } else if left.contains(right) || right.contains(left) {
+        0.72
+    } else {
+        let left_terms = text_terms(left);
+        let right_terms = text_terms(right);
+        term_similarity(&left_terms, &right_terms)
+    }
+}
+
+fn workflow_request_terms(options: &WorkflowPlanOptions) -> Vec<String> {
+    text_terms(&workflow_request_text(options))
+}
+
+fn spec_feature_terms(graph: &Graph, spec_node: &Node) -> Vec<String> {
+    let mut parts = Vec::new();
+    for key in ["spec", "title", "module", "state"] {
+        if let Some(value) = node_attr(spec_node, key) {
+            parts.push(value.to_string());
+        }
+    }
+    for key in ["requirements", "acceptanceCriteria"] {
+        if let Some(values) = spec_node.attributes.get(key).and_then(Value::as_array) {
+            for value in values {
+                if let Some(text) = value.get("text").and_then(Value::as_str) {
+                    parts.push(text.to_string());
+                }
+            }
+        }
+    }
+    parts.extend(spec_touched_modules(graph, &spec_node.id));
+    text_terms(&parts.join("\n"))
+}
+
+fn text_terms(value: &str) -> Vec<String> {
+    let stop_words = [
+        "the", "and", "for", "with", "that", "this", "user", "can", "should", "must", "when",
+        "then", "from", "into", "able", "will", "request", "feature", "spec", "docs", "doc",
+        "update", "change",
+    ];
+    let mut terms = Vec::new();
+    let mut current = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            current.push(ch.to_ascii_lowercase());
+        } else if !current.is_empty() {
+            if current.len() > 2 && !stop_words.contains(&current.as_str()) {
+                terms.push(std::mem::take(&mut current));
+            } else {
+                current.clear();
+            }
+        }
+    }
+    if !current.is_empty() && current.len() > 2 && !stop_words.contains(&current.as_str()) {
+        terms.push(current);
+    }
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn term_similarity(left: &[String], right: &[String]) -> f32 {
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let shared = left.iter().filter(|term| right.contains(term)).count() as f32;
+    let union = left
+        .iter()
+        .chain(right.iter())
+        .collect::<std::collections::BTreeSet<_>>()
+        .len() as f32;
+    if union == 0.0 {
+        0.0
+    } else {
+        shared / union
+    }
+}
+
+fn spec_touched_modules(graph: &Graph, spec_node_id: &str) -> Vec<String> {
+    let mut modules = graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == spec_node_id && edge.edge_type == "TOUCHES_MODULE")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter_map(|node| node_attr(node, "name"))
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if let Some(spec_node) = graph.nodes.get(spec_node_id) {
+        if let Some(module) = node_attr(spec_node, "module") {
+            modules.push(module.to_string());
+        }
+    }
+    modules.sort();
+    modules.dedup();
+    modules
+}
+
+fn planned_object_overlap(spec_node: &Node, planned_objects: &[PlannedObject]) -> bool {
+    let Some(existing) = spec_node
+        .attributes
+        .get("plannedObjects")
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    existing.iter().any(|existing| {
+        let kind = existing.get("kind").and_then(Value::as_str);
+        let name = existing.get("name").and_then(Value::as_str);
+        planned_objects.iter().any(|planned| {
+            Some(planned.kind.as_str()) == kind && Some(planned.name.as_str()) == name
+        })
+    })
+}
+
+fn spec_has_release(graph: &Graph, spec: Option<&str>) -> bool {
+    let Some(spec) = spec else {
+        return false;
+    };
+    graph
+        .nodes
+        .values()
+        .any(|node| node.node_type == "Release" && node_attr(node, "spec") == Some(spec))
+}
+
+fn spec_is_implemented(graph: &Graph, spec_node: &Node) -> bool {
+    matches!(
+        node_attr(spec_node, "state"),
+        Some("Implemented" | "Accepted" | "Released")
+    ) || graph.edges.values().any(|edge| {
+        edge.from == spec_node.id
+            && matches!(
+                edge.edge_type.as_str(),
+                "HAS_ACTION_GRAPH" | "HAS_GIT_COMMIT" | "HAS_PULL_REQUEST" | "VALIDATED_BY"
+            )
+    })
 }
 
 fn add_project_workflow_questions(
@@ -6987,11 +7784,11 @@ acceptanceCriteria:
                 touches_modules: vec!["Identity".to_string()],
                 requirements: vec![sg_spec::TextItem {
                     id: "REQ-001".to_string(),
-                    text: "User can change password".to_string(),
+                    text: "Authenticated user can change password".to_string(),
                 }],
                 acceptance_criteria: vec![sg_spec::TextItem {
                     id: "AC-001".to_string(),
-                    text: "Password change is confirmed".to_string(),
+                    text: "Password change is confirmed for an authenticated session".to_string(),
                 }],
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
@@ -7012,6 +7809,222 @@ acceptanceCriteria:
             .receipt
             .as_ref()
             .is_some_and(|receipt| receipt.dry_run));
+    }
+
+    #[test]
+    fn workflow_plan_blocks_ambiguous_request_with_intent_questions() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let plan = plan_workflow(
+            tmp.path(),
+            WorkflowPlanOptions {
+                spec: Some("CHECKOUT-001".to_string()),
+                title: Some("Improve checkout".to_string()),
+                touches_modules: vec!["Identity".to_string()],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..WorkflowPlanOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(plan.status, WorkflowPlanStatus::QuestionsRequired));
+        assert_eq!(plan.decision, "questions-required");
+        assert!(plan
+            .intent_clarification
+            .questions
+            .iter()
+            .any(|question| question.id == "intent.required_behavior"));
+        assert!(plan
+            .required_questions
+            .iter()
+            .any(|question| question.id == "intent.required_behavior"));
+    }
+
+    #[test]
+    fn workflow_plan_records_safe_assumptions_without_blocking_ready_request() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let plan = plan_workflow(
+            tmp.path(),
+            WorkflowPlanOptions {
+                spec: Some("NOTIFY-001".to_string()),
+                title: Some("Email notification preferences".to_string()),
+                touches_modules: vec!["Identity".to_string()],
+                requirements: vec![sg_spec::TextItem {
+                    id: "REQ-001".to_string(),
+                    text: "User can enable or disable notification preferences".to_string(),
+                }],
+                acceptance_criteria: vec![sg_spec::TextItem {
+                    id: "AC-001".to_string(),
+                    text: "Preference changes are persisted and visible on reload".to_string(),
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..WorkflowPlanOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(plan.status, WorkflowPlanStatus::Ready));
+        assert_eq!(plan.decision, "create-spec");
+        assert!(plan
+            .intent_clarification
+            .assumptions
+            .iter()
+            .any(|assumption| {
+                assumption.id == "assumption.priority.normal" && !assumption.requires_approval
+            }));
+    }
+
+    #[test]
+    fn workflow_plan_requires_approval_for_risky_security_assumption() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let plan = plan_workflow(
+            tmp.path(),
+            WorkflowPlanOptions {
+                spec: Some("SESSION-001".to_string()),
+                title: Some("Login session refresh".to_string()),
+                touches_modules: vec!["Identity".to_string()],
+                requirements: vec![sg_spec::TextItem {
+                    id: "REQ-001".to_string(),
+                    text: "User can refresh login sessions".to_string(),
+                }],
+                acceptance_criteria: vec![sg_spec::TextItem {
+                    id: "AC-001".to_string(),
+                    text: "Refresh succeeds".to_string(),
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..WorkflowPlanOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(plan.status, WorkflowPlanStatus::QuestionsRequired));
+        assert!(plan
+            .intent_clarification
+            .questions
+            .iter()
+            .any(|question| { question.id == "intent.security_behavior" && question.risky }));
+        assert!(plan
+            .intent_clarification
+            .assumptions
+            .iter()
+            .any(|assumption| {
+                assumption.id == "assumption.security.requires_approval"
+                    && assumption.requires_approval
+                    && assumption.risk == "high"
+            }));
+    }
+
+    #[test]
+    fn workflow_plan_returns_noop_for_released_existing_feature() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_release_for_spec(tmp.path(), "AUTH-001");
+
+        let plan = plan_workflow(
+            tmp.path(),
+            WorkflowPlanOptions {
+                spec: Some("AUTH-002".to_string()),
+                title: Some("Password reset".to_string()),
+                touches_modules: vec!["Identity".to_string()],
+                requirements: vec![sg_spec::TextItem {
+                    id: "REQ-001".to_string(),
+                    text: "User can request password reset".to_string(),
+                }],
+                acceptance_criteria: vec![sg_spec::TextItem {
+                    id: "AC-001".to_string(),
+                    text: "Password reset response is generic".to_string(),
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..WorkflowPlanOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(plan.status, WorkflowPlanStatus::Ready));
+        assert_eq!(plan.decision, "no-op");
+        assert!(plan.existing_features.iter().any(|feature| {
+            feature.spec.as_deref() == Some("AUTH-001")
+                && feature.decision == "no-op"
+                && feature
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence == "release-evidence")
+        }));
+    }
+
+    #[test]
+    fn workflow_plan_requires_user_decision_for_similar_existing_spec() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let plan = plan_workflow(
+            tmp.path(),
+            WorkflowPlanOptions {
+                spec: Some("AUTH-002".to_string()),
+                title: Some("Password reset flow".to_string()),
+                touches_modules: vec!["Identity".to_string()],
+                requirements: vec![sg_spec::TextItem {
+                    id: "REQ-001".to_string(),
+                    text: "User can request a password reset flow".to_string(),
+                }],
+                acceptance_criteria: vec![sg_spec::TextItem {
+                    id: "AC-001".to_string(),
+                    text: "Reset flow request is accepted".to_string(),
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..WorkflowPlanOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(plan.decision, "needs-human-decision");
+        assert!(plan.existing_features.iter().any(|feature| {
+            feature.spec.as_deref() == Some("AUTH-001") && feature.decision == "possible-duplicate"
+        }));
+        assert!(plan
+            .required_questions
+            .iter()
+            .any(|question| question.id == "intent.existing_feature.AUTH-001"));
+    }
+
+    #[test]
+    fn workflow_plan_returns_docs_only_for_documentation_request() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let plan = plan_workflow(
+            tmp.path(),
+            WorkflowPlanOptions {
+                spec: Some("DOCS-001".to_string()),
+                title: Some("Update README docs for password reset".to_string()),
+                requirements: vec![sg_spec::TextItem {
+                    id: "REQ-001".to_string(),
+                    text: "Documentation explains the existing password reset flow".to_string(),
+                }],
+                acceptance_criteria: vec![sg_spec::TextItem {
+                    id: "AC-001".to_string(),
+                    text: "README includes the updated password reset guidance".to_string(),
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                ..WorkflowPlanOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(plan.status, WorkflowPlanStatus::Ready));
+        assert_eq!(plan.decision, "docs-only");
+        assert!(plan.required_questions.is_empty());
     }
 
     #[test]
@@ -9715,6 +10728,53 @@ acceptanceCriteria:
             .contains(&"CodeObject.LinkExisting".to_string()));
     }
 
+    #[test]
+    fn workflow_code_plan_returns_docs_only_without_edit_permit() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "docs".to_string(),
+                wants: vec!["README password reset documentation".to_string()],
+                file: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(!plan.blocked);
+        assert_eq!(plan.decision, "docs-only");
+    }
+
+    #[test]
+    fn workflow_code_plan_returns_noop_for_released_spec() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_release_for_spec(tmp.path(), "AUTH-001");
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(!plan.blocked);
+        assert_eq!(plan.decision, "no-op");
+    }
+
     fn string_array_node_attr(node: &Node, key: &str) -> Vec<String> {
         node.attributes
             .get(key)
@@ -9770,6 +10830,66 @@ acceptanceCriteria:
                 input: projection.operation_input(),
                 dry_run: false,
                 delta: projection.to_delta(),
+            },
+        )
+        .unwrap();
+    }
+
+    fn add_release_for_spec(root: &Path, spec: &str) {
+        let replay = replay_events(root, ReplayOptions { check_hashes: true }).unwrap();
+        let project = find_project_node(&replay.graph).unwrap();
+        let release_id = node_id("release", &format!("{spec}/1.0.0"));
+        let tag_id = node_id("git_tag", &format!("{spec}/v1.0.0"));
+        let commit_id = node_id("git_commit", &format!("{spec}/release"));
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "Release.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "version": "1.0.0",
+                    "tag": format!("{spec}-v1.0.0"),
+                    "commit": format!("{spec}-release"),
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![
+                        Node {
+                            id: release_id.clone(),
+                            stable_key: format!("release:{spec}:1.0.0"),
+                            node_type: "Release".to_string(),
+                            attributes: BTreeMap::from([
+                                ("spec".to_string(), json!(spec)),
+                                ("version".to_string(), json!("1.0.0")),
+                            ]),
+                        },
+                        Node {
+                            id: tag_id.clone(),
+                            stable_key: format!("git-tag:{spec}:v1.0.0"),
+                            node_type: "GitTag".to_string(),
+                            attributes: BTreeMap::from([
+                                ("name".to_string(), json!(format!("{spec}-v1.0.0"))),
+                                ("spec".to_string(), json!(spec)),
+                            ]),
+                        },
+                        Node {
+                            id: commit_id.clone(),
+                            stable_key: format!("git-commit:{spec}:release"),
+                            node_type: "GitCommit".to_string(),
+                            attributes: BTreeMap::from([
+                                ("commit".to_string(), json!(format!("{spec}-release"))),
+                                ("spec".to_string(), json!(spec)),
+                            ]),
+                        },
+                    ],
+                    create_edges: vec![
+                        edge(&project.id, "HAS_RELEASE", &release_id),
+                        edge(&release_id, "RELEASES_TAG", &tag_id),
+                        edge(&release_id, "RELEASES_COMMIT", &commit_id),
+                    ],
+                    ..GraphDelta::default()
+                },
             },
         )
         .unwrap();
