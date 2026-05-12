@@ -520,6 +520,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Implementation.Authorize",
+            category: "workflow",
+            description: "Dry-run a coding work permit for intended spec/action/files/symbols before editing source files.",
+            required_input_fields: &["spec", "action", "wants"],
+            preconditions: &[],
+            allowed_create_node_types: &[],
+            allowed_create_edge_types: &[],
+            postconditions: &[],
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Trace.Import",
             category: "trace",
             description: "Import manifest, annotation, and inferred traceability links.",
@@ -1032,6 +1043,18 @@ mod tests {
         assert!(built_in_operations()
             .iter()
             .all(|definition| definition.schema_version == OPERATION_DEFINITION_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn implementation_authorize_is_dry_run_only_abi() {
+        let definition = find_operation("Implementation.Authorize").unwrap();
+        assert_eq!(definition.category, "workflow");
+        assert_eq!(
+            definition.required_input_fields,
+            &["spec", "action", "wants"]
+        );
+        assert!(definition.allowed_create_node_types.is_empty());
+        assert!(definition.allowed_create_edge_types.is_empty());
     }
 
     #[test]

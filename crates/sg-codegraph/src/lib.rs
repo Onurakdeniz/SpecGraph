@@ -392,7 +392,6 @@ pub fn resolve_code_object(
     source_fallbacks: &[SourceFallback],
 ) -> CodeObjectResolution {
     let mut candidates = Vec::new();
-    candidates.extend(resolve_declared_objects(graph, query));
     candidates.extend(resolve_symbols(graph, query));
     candidates.extend(resolve_routes(graph, query));
     candidates.extend(resolve_source_fallbacks(query, source_fallbacks));
@@ -421,33 +420,6 @@ pub fn resolve_code_object(
         needs_user_choice,
         selected_existing_object,
     }
-}
-
-fn resolve_declared_objects(
-    graph: &Graph,
-    query: &CodeObjectQuery,
-) -> Vec<ExistingCodeObjectCandidate> {
-    graph
-        .nodes
-        .values()
-        .filter(|node| node.node_type == "CodeObjectDeclaration")
-        .filter(|node| declaration_matches(node, query))
-        .map(|node| ExistingCodeObjectCandidate {
-            node_id: node.id.clone(),
-            stable_key: node.stable_key.clone(),
-            symbol: attr_str(node, "name").unwrap_or_default().to_string(),
-            kind: attr_str(node, "kind").unwrap_or("declaration").to_string(),
-            module: attr_str(node, "module").map(ToString::to_string),
-            file: attr_str(node, "expectedFile").map(ToString::to_string),
-            line: None,
-            trust_state: attr_str(node, "trustState")
-                .unwrap_or("Accepted")
-                .to_string(),
-            confidence: 1.0,
-            reason: "accepted CodeObjectDeclaration matches requested kind/name/module".to_string(),
-            recommended_operation: "CodeObject.LinkExisting".to_string(),
-        })
-        .collect()
 }
 
 fn resolve_symbols(graph: &Graph, query: &CodeObjectQuery) -> Vec<ExistingCodeObjectCandidate> {
@@ -546,15 +518,6 @@ fn resolve_source_fallbacks(
                 })
         })
         .collect()
-}
-
-fn declaration_matches(node: &Node, query: &CodeObjectQuery) -> bool {
-    attr_str(node, "name").is_some_and(|name| normalize_name(name) == normalize_name(&query.name))
-        && attr_str(node, "kind").is_some_and(|kind| kind == query.kind)
-        && query
-            .module
-            .as_deref()
-            .is_none_or(|module| attr_str(node, "module") == Some(module))
 }
 
 fn symbol_confidence(

@@ -885,6 +885,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sg-canonical",
+ "sg-codegraph",
  "sg-gitgraph",
  "sg-model",
  "sg-module-graph",

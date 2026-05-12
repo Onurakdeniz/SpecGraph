@@ -88,13 +88,14 @@ Important consistency rules:
 
 ## Current Repo Baseline
 
-As of commit `10ed53f` on `development`, the repository already contains several foundations that later phases should reuse instead of rebuilding:
+As of the latest `development` baseline after the Phase 0C work-permit slice, the repository already contains several foundations that later phases should reuse instead of rebuilding:
 
 - Operation Runtime receipts, dry-run behavior, ABI validation, policy gate, approval/waiver facts, and actor/identity foundations.
 - Project profile and module baseline enforcement before spec authoring.
 - Spec intent validation, ActionGraph/CommitPlan foundations, action lifecycle commands, commit trailer enforcement, and validation recording.
 - CodeGraph, lightweight framework-aware indexing, link manifests, trace validation, and annotation link parsing.
 - CodeObjectDeclaration, `CodeObject.Declare`, discovery resolver, and `CodeObject.LinkExisting` foundations for spec/module-owned implementation objects.
+- `Implementation.Authorize` dry-run ABI plus `sg workflow code-plan` permit decisions with duplicate/link guidance, ambiguity blockers, required operations, allowed files/symbols, and human remediation output.
 - DataGraph and migration runtime foundations.
 - GitGraph facts for branches, commits, tags, merges, PR placeholders, and basic release records.
 - Graph diff/conflict reports, graph merge/rebase dry-run, and `sg graph integrate` acceptance path.
@@ -110,13 +111,9 @@ Current completed slices:
 
 - **Phase 0A — Code object model and operation ABI** introduced `CodeObjectDeclaration`, `CodeObject.Declare`, placement defaults, parent/link validation, dry-run support, CLI declaration, and tests.
 - **Phase 0B — Discovery-before-create resolver** introduced candidate extraction, graph/source resolution, duplicate/ambiguity decision fields, `sg code resolve-object`, and `CodeObject.LinkExisting`.
+- **Phase 0C — Work permit command** introduced `Implementation.Authorize`, `sg workflow code-plan`, permit/block decisions, duplicate/link guidance, ambiguity blockers, allowed files/symbols, and tests.
 
-Next focus: **Phase 0C — Work permit command**. This should expose the resolver and declaration/link decisions through `sg workflow code-plan` so coding agents receive an explicit permit or blocker before editing:
-
-1. Add `Implementation.Authorize` dry-run decision model.
-2. Add `sg workflow code-plan` with `existingCandidates`, `requiredOperations`, `allowedFiles`, `allowedSymbols`, and remediation.
-3. Return link-existing/no-create guidance when resolver finds a concrete existing object.
-4. Return ambiguity/user-choice blockers when multiple plausible candidates exist.
+Next focus: **Phase 0D — ActionGraph and CommitPlan integration**. This should make generated action groups and commit validation consume declarations, discovered existing objects, allowed files, allowed symbols, and scope-expansion/replan decisions.
 
 ---
 
@@ -196,9 +193,9 @@ Next operation: CodeObject.LinkExisting or CodeGraph.Upsert to accept/link the e
 
 - [ ] **Add `Spec.Intent.Update` operation.** Add a safe operation to update touched modules, module changes, planned objects, and intended graph delta after discovery. This is required because coding agents often discover missing types/functions during implementation. Updating intent must trigger ActionGraph replan if it changes scope.
 
-- [ ] **Add `Implementation.Authorize` work-permit dry-run.** Add the CLI/API command `sg workflow code-plan` backed by an `Implementation.Authorize` dry-run decision model. It takes spec, action, intended files, symbols, and operation summary, then returns `allowed`, `blocked`, `missingGraphFacts`, `requiredOperations`, `allowedFiles`, `allowedSymbols`, and `humanMessage`.
+- [x] **Add `Implementation.Authorize` work-permit dry-run.** Add the CLI/API command `sg workflow code-plan` backed by an `Implementation.Authorize` dry-run decision model. It takes spec, action, intended files, symbols, and operation summary, then returns `allowed`, `blocked`, `missingGraphFacts`, `requiredOperations`, `allowedFiles`, `allowedSymbols`, and `humanMessage`.
 
-- [ ] **Add discovery mode to work permit.** `sg workflow code-plan` must run discovery by default before returning create/edit permission. It should return `existingCandidates`, `selectedExistingObject`, `duplicateRisk`, `createAllowed`, `linkExistingAllowed`, and `needsUserChoice` when multiple plausible matches exist.
+- [x] **Add discovery mode to work permit.** `sg workflow code-plan` must run discovery by default before returning create/edit permission. It should return `existingCandidates`, `selectedExistingObject`, `duplicateRisk`, `createAllowed`, `linkExistingAllowed`, and `needsUserChoice` when multiple plausible matches exist.
 
 - [ ] **Add blocker categories for agent guidance.** Findings must distinguish `missing_module`, `missing_code_object_declaration`, `existing_candidate_found`, `duplicate_candidate_exists`, `ambiguous_existing_candidates`, `missing_parent_type`, `wrong_module_path`, `private_boundary_violation`, `needs_spec_intent_update`, `needs_action_replan`, `needs_approval`, and `outside_commit_plan`. Each finding must include a remediation command.
 
@@ -214,7 +211,7 @@ Next operation: CodeObject.LinkExisting or CodeGraph.Upsert to accept/link the e
 
 - [ ] **Add type-specific placement defaults.** Define defaults such as: domain entities/value objects in domain layer; services/use-case functions in application layer; route handlers/controllers and request/response DTOs in interface layer; repository implementations in adapter/infrastructure layer; migrations in data layer; tests in test package linked to acceptance criteria.
 
-- [ ] **Add coding-agent workflow command.** Implement a command that a coding agent can call before each edit:
+- [x] **Add coding-agent workflow command.** Implement a command that a coding agent can call before each edit:
 
   ```bash
   sg workflow code-plan \
@@ -262,7 +259,7 @@ Phase 0 is too large to implement safely as one unreviewable change. Keep the ph
 
 - [x] **Phase 0A — Code object model and operation ABI.** Add `CodeObjectDeclaration`, ownership fields, object kinds, parent-child rules, placement defaults, and dry-run validation shape. This slice should not yet require full source-code discovery.
 - [x] **Phase 0B — Discovery-before-create resolver.** Add text/spec candidate extraction, trusted graph search, observed CodeGraph search, source/index fallback, duplicate findings, ambiguity findings, and `CodeObject.LinkExisting`.
-- [ ] **Phase 0C — Work permit command.** Implement `Implementation.Authorize` and `sg workflow code-plan` with `existingCandidates`, `requiredOperations`, `allowedFiles`, `allowedSymbols`, and human-readable remediation output.
+- [x] **Phase 0C — Work permit command.** Implement `Implementation.Authorize` and `sg workflow code-plan` with `existingCandidates`, `requiredOperations`, `allowedFiles`, `allowedSymbols`, and human-readable remediation output.
 - [ ] **Phase 0D — ActionGraph and CommitPlan integration.** Make generated action groups and commit validation consume code object declarations, discovered existing objects, allowed files, allowed symbols, and scope-expansion/replan decisions.
 - [ ] **Phase 0E — Index reconciliation and strict-mode blockers.** Reconcile observed symbols back to declarations or accepted baseline facts, and block undeclared/new symbols, declared-but-missing symbols, wrong placement, and private boundary violations in strict mode.
 - [ ] **Phase 0F — Scenario tests and documentation examples.** Add the full happy/failure scenario suite and update examples so coding agents know when to declare, link, extend, replan, or stop.

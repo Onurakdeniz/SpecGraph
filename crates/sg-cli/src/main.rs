@@ -48,7 +48,8 @@ use sg_store::{
     LinkModuleCapabilityOptions, ModuleDefinition, ModuleInterface, ModuleLifecycleOptions,
     ModuleLifecycleState, ProjectProfileInput, RecordApprovalOptions, RecordCommitOptions,
     RecordPolicyReportOptions, ReplayOptions, ReplayReport, SpecGraphStore, TransitionSpecOptions,
-    UpsertActorOptions, UpsertModuleGraphOptions, UpsertProjectProfileOptions, WorkflowPlanOptions,
+    UpsertActorOptions, UpsertModuleGraphOptions, UpsertProjectProfileOptions,
+    WorkflowCodePlanOptions, WorkflowPlanOptions,
 };
 use sg_testgraph::{
     validate_required_tests_pass, validate_trace_links, LinksManifest, TestCaseResult, TestLink,
@@ -620,6 +621,8 @@ struct WorkflowArgs {
 enum WorkflowCommand {
     /// Detect untrusted repo facts and plan required Project/Module/Spec questions.
     Plan(WorkflowPlanArgs),
+    /// Authorize or block a coding edit before files are changed.
+    CodePlan(WorkflowCodePlanArgs),
 }
 
 #[derive(Debug, Args)]
@@ -644,6 +647,22 @@ struct WorkflowPlanArgs {
     requirements: Vec<String>,
     #[arg(long = "acceptance-criterion", value_name = "ID:TEXT")]
     acceptance_criteria: Vec<String>,
+    #[arg(long, default_value = "local:planner")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowCodePlanArgs {
+    #[arg(long)]
+    spec: String,
+    #[arg(long, default_value = "implementation")]
+    action: String,
+    #[arg(long = "wants")]
+    wants: Vec<String>,
+    #[arg(long)]
+    file: Option<String>,
     #[arg(long, default_value = "local:planner")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -2112,6 +2131,44 @@ fn handle_workflow(
                         dry_run.operation,
                         dry_run.status,
                         dry_run.error.as_deref().unwrap_or("none")
+                    );
+                }
+            }
+        }
+        WorkflowCommand::CodePlan(args) => {
+            let plan = store.plan_code_workflow(WorkflowCodePlanOptions {
+                spec: args.spec,
+                action: args.action,
+                wants: args.wants,
+                file: args.file,
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+            })?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "command": "sg workflow code-plan",
+                    "status": "ok",
+                    "codePlan": plan,
+                }))?;
+            } else if !output.quiet {
+                println!("allowed: {}", plan.allowed);
+                println!("blocked: {}", plan.blocked);
+                println!("decision: {}", plan.decision);
+                println!("duplicateRisk: {}", plan.duplicate_risk);
+                println!("needsUserChoice: {}", plan.needs_user_choice);
+                println!("requiredOperations: {}", plan.required_operations.join(","));
+                println!("allowedFiles: {}", plan.allowed_files.join(","));
+                println!("allowedSymbols: {}", plan.allowed_symbols.join(","));
+                println!("humanMessage: {}", plan.human_message);
+                for candidate in &plan.existing_candidates {
+                    println!(
+                        "candidate: {} kind={} file={} confidence={} op={}",
+                        candidate.symbol,
+                        candidate.kind,
+                        candidate.file.as_deref().unwrap_or(""),
+                        candidate.confidence,
+                        candidate.recommended_operation
                     );
                 }
             }

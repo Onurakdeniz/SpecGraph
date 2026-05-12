@@ -10,6 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 sg-canonical.workspace = true
+sg-codegraph.workspace = true
 sg-gitgraph.workspace = true
 sg-model.workspace = true
 sg-module-graph.workspace = true

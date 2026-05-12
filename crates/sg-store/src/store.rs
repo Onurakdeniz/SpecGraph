@@ -1,6 +1,7 @@
 use crate::identity::{actor_permissions, actor_roles, infer_actor_kind, resolve_actor_identity};
 use serde_json::{json, Value};
 use sg_canonical::state_hash;
+use sg_codegraph::{resolve_code_object, CodeObjectQuery, ExistingCodeObjectCandidate};
 use sg_gitgraph::{parse_commit_trailers, validate_commit_binding, CommitValidationInput};
 use sg_model::{
     Edge, Event, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt,
@@ -254,6 +255,37 @@ pub struct WorkflowPlanOptions {
     pub acceptance_criteria: Vec<TextItem>,
     pub actor: String,
     pub graph_branch: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorkflowCodePlanOptions {
+    pub spec: String,
+    pub action: String,
+    pub wants: Vec<String>,
+    pub file: Option<String>,
+    pub actor: String,
+    pub graph_branch: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowCodePlan {
+    pub schema_version: String,
+    pub allowed: bool,
+    pub blocked: bool,
+    pub decision: String,
+    pub state_hash: String,
+    pub existing_candidates: Vec<ExistingCodeObjectCandidate>,
+    pub selected_existing_object: Option<ExistingCodeObjectCandidate>,
+    pub duplicate_risk: bool,
+    pub create_allowed: bool,
+    pub link_existing_allowed: bool,
+    pub needs_user_choice: bool,
+    pub required_operations: Vec<String>,
+    pub allowed_files: Vec<String>,
+    pub allowed_symbols: Vec<String>,
+    pub missing_graph_facts: Vec<String>,
+    pub human_message: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -558,6 +590,10 @@ impl SpecGraphStore {
 
     pub fn plan_workflow(&self, options: WorkflowPlanOptions) -> Result<WorkflowPlan> {
         plan_workflow(self.root(), options)
+    }
+
+    pub fn plan_code_workflow(&self, options: WorkflowCodePlanOptions) -> Result<WorkflowCodePlan> {
+        plan_code_workflow(self.root(), options)
     }
 
     pub fn upsert_actor(&self, options: UpsertActorOptions) -> Result<OperationReceipt> {
@@ -969,6 +1005,241 @@ pub fn plan_workflow(root: &Path, options: WorkflowPlanOptions) -> Result<Workfl
         required_questions,
         optional_suggestions,
         dry_runs,
+    })
+}
+
+pub fn plan_code_workflow(
+    root: &Path,
+    options: WorkflowCodePlanOptions,
+) -> Result<WorkflowCodePlan> {
+    let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let Some(spec_node) = find_spec_node(&replay.graph, &options.spec) else {
+        return Ok(blocked_code_plan(
+            replay.state_hash,
+            "missing-spec",
+            vec!["Spec.Create".to_string()],
+            vec![format!("spec:{}", options.spec)],
+            format!(
+                "Spec `{}` is missing. Create/import the spec before requesting a code permit.",
+                options.spec
+            ),
+        ));
+    };
+    let Some((kind, name)) = options
+        .wants
+        .first()
+        .and_then(|want| parse_wanted_object(want))
+    else {
+        return Ok(blocked_code_plan(
+            replay.state_hash,
+            "missing-wanted-object",
+            vec!["CodeObject.Declare".to_string()],
+            vec!["wantedObject".to_string()],
+            "Code plan requires --wants KIND:NAME.".to_string(),
+        ));
+    };
+
+    let module = code_object_module_for_request(&replay.graph, spec_node, &kind, &name, &options);
+    let query = CodeObjectQuery {
+        kind: kind.clone(),
+        name: name.clone(),
+        module: module.clone(),
+        file: options.file.clone(),
+    };
+    let resolution = resolve_code_object(&replay.graph, &query, &[]);
+
+    if resolution.needs_user_choice {
+        return Ok(WorkflowCodePlan {
+            schema_version: "specgraph.workflow-code-plan/v1".to_string(),
+            allowed: false,
+            blocked: true,
+            decision: "ambiguous-existing-candidates".to_string(),
+            state_hash: replay.state_hash,
+            existing_candidates: resolution.existing_candidates,
+            selected_existing_object: None,
+            duplicate_risk: true,
+            create_allowed: false,
+            link_existing_allowed: true,
+            needs_user_choice: true,
+            required_operations: vec!["HumanDecision.SelectExistingObject".to_string()],
+            allowed_files: Vec::new(),
+            allowed_symbols: Vec::new(),
+            missing_graph_facts: Vec::new(),
+            human_message:
+                "Multiple plausible existing objects were found; choose one before editing."
+                    .to_string(),
+        });
+    }
+
+    if let Some(selected) = resolution.selected_existing_object.clone() {
+        return Ok(WorkflowCodePlan {
+            schema_version: "specgraph.workflow-code-plan/v1".to_string(),
+            allowed: false,
+            blocked: true,
+            decision: "link-existing".to_string(),
+            state_hash: replay.state_hash,
+            existing_candidates: resolution.existing_candidates,
+            selected_existing_object: Some(selected),
+            duplicate_risk: true,
+            create_allowed: false,
+            link_existing_allowed: true,
+            needs_user_choice: false,
+            required_operations: vec!["CodeObject.LinkExisting".to_string()],
+            allowed_files: Vec::new(),
+            allowed_symbols: Vec::new(),
+            missing_graph_facts: Vec::new(),
+            human_message:
+                "Matching code already exists; link or extend it instead of creating a duplicate."
+                    .to_string(),
+        });
+    }
+
+    let Some(declaration_node) = find_code_object_declaration(
+        &replay.graph,
+        &options.spec,
+        &kind,
+        &name,
+        module.as_deref(),
+    ) else {
+        return Ok(blocked_code_plan(
+            replay.state_hash,
+            "declare-code-object",
+            vec!["CodeObject.Declare".to_string()],
+            vec![format!(
+                "code-object:{}/{}/{}/{}",
+                options.spec,
+                module.clone().unwrap_or_else(|| "<module>".to_string()),
+                kind,
+                name
+            )],
+            format!(
+                "No CodeObjectDeclaration exists for `{kind}:{name}`. Declare ownership and placement before editing."
+            ),
+        ));
+    };
+    let allowed_file = options
+        .file
+        .clone()
+        .or_else(|| node_attr(declaration_node, "expectedFile").map(ToString::to_string));
+
+    Ok(WorkflowCodePlan {
+        schema_version: "specgraph.workflow-code-plan/v1".to_string(),
+        allowed: true,
+        blocked: false,
+        decision: "edit-permit".to_string(),
+        state_hash: replay.state_hash,
+        existing_candidates: Vec::new(),
+        selected_existing_object: None,
+        duplicate_risk: false,
+        create_allowed: true,
+        link_existing_allowed: false,
+        needs_user_choice: false,
+        required_operations: Vec::new(),
+        allowed_files: allowed_file.into_iter().collect(),
+        allowed_symbols: vec![name],
+        missing_graph_facts: Vec::new(),
+        human_message: "Code object is declared and no existing duplicate candidate was found."
+            .to_string(),
+    })
+}
+
+fn blocked_code_plan(
+    state_hash: String,
+    decision: &str,
+    required_operations: Vec<String>,
+    missing_graph_facts: Vec<String>,
+    human_message: String,
+) -> WorkflowCodePlan {
+    WorkflowCodePlan {
+        schema_version: "specgraph.workflow-code-plan/v1".to_string(),
+        allowed: false,
+        blocked: true,
+        decision: decision.to_string(),
+        state_hash,
+        existing_candidates: Vec::new(),
+        selected_existing_object: None,
+        duplicate_risk: false,
+        create_allowed: false,
+        link_existing_allowed: false,
+        needs_user_choice: false,
+        required_operations,
+        allowed_files: Vec::new(),
+        allowed_symbols: Vec::new(),
+        missing_graph_facts,
+        human_message,
+    }
+}
+
+fn parse_wanted_object(value: &str) -> Option<(String, String)> {
+    let (kind, name) = value.split_once(':')?;
+    let kind = kind.trim();
+    let name = name.trim();
+    if kind.is_empty() || name.is_empty() {
+        None
+    } else {
+        Some((kind.to_string(), name.to_string()))
+    }
+}
+
+fn code_object_module_for_request(
+    graph: &Graph,
+    spec_node: &Node,
+    kind: &str,
+    name: &str,
+    options: &WorkflowCodePlanOptions,
+) -> Option<String> {
+    find_code_object_declaration(graph, &options.spec, kind, name, None)
+        .and_then(|node| node_attr(node, "module"))
+        .map(ToString::to_string)
+        .or_else(|| planned_object_module(spec_node, kind, name))
+        .or_else(|| {
+            options
+                .file
+                .as_deref()
+                .and_then(|file| module_name_for_file(graph, file))
+        })
+}
+
+fn planned_object_module(spec_node: &Node, kind: &str, name: &str) -> Option<String> {
+    spec_node
+        .attributes
+        .get("plannedObjects")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|value| {
+            value.get("kind").and_then(Value::as_str) == Some(kind)
+                && value.get("name").and_then(Value::as_str) == Some(name)
+        })
+        .and_then(|value| value.get("module"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
+fn module_name_for_file(graph: &Graph, file: &str) -> Option<String> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "Module")
+        .find(|node| {
+            node_attr(node, "package").is_some_and(|package| path_is_inside_package(file, package))
+        })
+        .and_then(|node| node_attr(node, "name"))
+        .map(ToString::to_string)
+}
+
+fn find_code_object_declaration<'a>(
+    graph: &'a Graph,
+    spec: &str,
+    kind: &str,
+    name: &str,
+    module: Option<&str>,
+) -> Option<&'a Node> {
+    graph.nodes.values().find(|node| {
+        node.node_type == "CodeObjectDeclaration"
+            && node_attr(node, "spec") == Some(spec)
+            && node_attr(node, "kind") == Some(kind)
+            && node_attr(node, "name") == Some(name)
+            && module.is_none_or(|module| node_attr(node, "module") == Some(module))
     })
 }
 
@@ -8194,6 +8465,147 @@ acceptanceCriteria:
         .unwrap();
 
         assert_eq!(receipt.operation, "CodeObject.LinkExisting");
+    }
+
+    #[test]
+    fn workflow_code_plan_requires_declaration_before_edit() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(plan.blocked);
+        assert_eq!(plan.decision, "declare-code-object");
+        assert!(plan
+            .required_operations
+            .contains(&"CodeObject.Declare".to_string()));
+    }
+
+    #[test]
+    fn workflow_code_plan_allows_declared_object_without_duplicate() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(plan.allowed);
+        assert!(!plan.blocked);
+        assert_eq!(plan.decision, "edit-permit");
+        assert!(!plan.duplicate_risk);
+        assert_eq!(
+            plan.allowed_files,
+            vec!["src/identity/password-reset.rs".to_string()]
+        );
+        assert_eq!(
+            plan.allowed_symbols,
+            vec!["requestPasswordReset".to_string()]
+        );
+    }
+
+    #[test]
+    fn workflow_code_plan_returns_link_existing_for_duplicate_candidate() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeGraph.Upsert".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeGraph": "symbol"}),
+                dry_run: false,
+                delta: code_symbol_delta(
+                    "src/identity/password-reset.rs",
+                    "function",
+                    "requestPasswordReset",
+                ),
+            },
+        )
+        .unwrap();
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(plan.blocked);
+        assert_eq!(plan.decision, "link-existing");
+        assert!(plan.duplicate_risk);
+        assert!(plan
+            .required_operations
+            .contains(&"CodeObject.LinkExisting".to_string()));
     }
 
     fn only_snapshot_path(root: &Path) -> PathBuf {
