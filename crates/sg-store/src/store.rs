@@ -1473,15 +1473,37 @@ pub fn plan_code_workflow(
         &name,
         module.as_deref(),
     ) else {
+        let scope_expansion = action_binding.0.is_some();
+        let required_operations = if scope_expansion {
+            vec![
+                "Spec.Intent.Update".to_string(),
+                "Action.Replan".to_string(),
+            ]
+        } else {
+            vec!["CodeObject.Declare".to_string()]
+        };
+        let human_message = if scope_expansion {
+            format!(
+                "`{kind}:{name}` is outside the current graph scope. Update spec intent and replan before editing."
+            )
+        } else {
+            format!(
+                "No CodeObjectDeclaration exists for `{kind}:{name}`. Declare ownership and placement before editing."
+            )
+        };
         return Ok(blocked_code_plan(BlockedCodePlan {
             state_hash: replay.state_hash,
-            decision: "declare-code-object".to_string(),
+            decision: if scope_expansion {
+                "scope-expansion-replan-required".to_string()
+            } else {
+                "declare-code-object".to_string()
+            },
             change_type,
             graph_branch: options.graph_branch,
             action_id: action_binding.0,
             commit_plan_id: action_binding.1,
             file_hashes,
-            required_operations: vec!["CodeObject.Declare".to_string()],
+            required_operations,
             missing_graph_facts: vec![format!(
                 "code-object:{}/{}/{}/{}",
                 options.spec,
@@ -1489,11 +1511,27 @@ pub fn plan_code_workflow(
                 kind,
                 name
             )],
-            human_message: format!(
-                "No CodeObjectDeclaration exists for `{kind}:{name}`. Declare ownership and placement before editing."
-            ),
+            human_message,
         }));
     };
+    if change_type == "bugfix"
+        && !code_object_has_root_cause_target(&replay.graph, &declaration_node.id)
+    {
+        return Ok(blocked_code_plan(BlockedCodePlan {
+            state_hash: replay.state_hash,
+            decision: "bugfix-root-cause-required".to_string(),
+            change_type,
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
+            required_operations: vec!["IssueGraph.Record".to_string()],
+            missing_graph_facts: vec![format!("root-cause-target:{}", declaration_node.id)],
+            human_message:
+                "Bugfix work must target an existing RootCause linked to the affected CodeObjectDeclaration."
+                    .to_string(),
+        }));
+    }
     let allowed_file = options
         .file
         .clone()
@@ -1685,6 +1723,17 @@ fn workflow_action_binding(
             .map(|edge| edge.to.clone())
     });
     (action_id, commit_plan_id)
+}
+
+fn code_object_has_root_cause_target(graph: &Graph, declaration_id: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.edge_type == "ROOT_CAUSE_TARGETS_CODE_OBJECT"
+            && edge.to == declaration_id
+            && graph
+                .nodes
+                .get(&edge.from)
+                .is_some_and(|node| node.node_type == "RootCause")
+    })
 }
 
 fn parse_wanted_object(value: &str) -> Option<(String, String)> {
@@ -5317,6 +5366,7 @@ fn validate_operation_semantic_preconditions(
         "ActionGraph.Generate" => {
             validate_action_graph_semantic_preconditions(graph, request, delta)
         }
+        "Action.Fail" => validate_action_fail_semantic_preconditions(graph, delta),
         "CodeObject.Declare" => validate_code_object_declare_semantic_preconditions(graph, delta),
         "CodeObject.LinkExisting" | "CodeObject.Reconcile" => {
             validate_code_object_link_existing_semantic_preconditions(graph, delta)
@@ -5508,6 +5558,89 @@ fn validate_action_graph_semantic_preconditions(
             "semantic.action_graph.incomplete_delta",
             "ActionGraph.Generate must create an ActionGraph, ActionGroup(s), CommitPlan(s), and HAS_ACTION_GRAPH edge from the Spec.",
         ));
+    }
+
+    findings
+}
+
+fn validate_action_fail_semantic_preconditions(graph: &Graph, delta: &GraphDelta) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    let attempts = delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "ExecutionAttempt")
+        .collect::<Vec<_>>();
+    if attempts.len() != 1 {
+        findings.push(semantic_finding(
+            "semantic.action_fail.attempt_required",
+            "Action.Fail must create exactly one ExecutionAttempt.",
+        ));
+        return findings;
+    }
+    let attempt = attempts[0];
+    let action_edge = delta
+        .create_edges
+        .iter()
+        .find(|edge| edge.edge_type == "HAS_EXECUTION_ATTEMPT" && edge.to == attempt.id);
+    let Some(action_edge) = action_edge else {
+        findings.push(semantic_finding(
+            "semantic.action_fail.action_link_required",
+            "Action.Fail must link an ActionNode to the failed ExecutionAttempt.",
+        ));
+        return findings;
+    };
+    let action = graph.nodes.get(&action_edge.from);
+    if action.is_none_or(|node| node.node_type != "ActionNode") {
+        findings.push(semantic_finding(
+            "semantic.action_fail.action_required",
+            "Action.Fail HAS_EXECUTION_ATTEMPT source must be an existing ActionNode.",
+        ));
+        return findings;
+    }
+    let has_failure = delta.create_edges.iter().any(|edge| {
+        edge.from == attempt.id
+            && edge.edge_type == "HAS_FAILURE_CAUSE"
+            && node_exists_with_type(graph, delta, &edge.to, "FailureCause")
+    });
+    if !has_failure {
+        findings.push(semantic_finding(
+            "semantic.action_fail.failure_cause_required",
+            "Action.Fail requires a FailureCause linked from the ExecutionAttempt.",
+        ));
+    }
+    let has_correction = delta.create_edges.iter().any(|edge| {
+        edge.from == attempt.id
+            && edge.edge_type == "HAS_CORRECTION_PLAN"
+            && node_exists_with_type(graph, delta, &edge.to, "CorrectionPlan")
+    });
+    if !has_correction {
+        findings.push(semantic_finding(
+            "semantic.action_fail.correction_plan_required",
+            "Action.Fail requires a CorrectionPlan linked from the ExecutionAttempt.",
+        ));
+    }
+    let prior_failures = graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == action_edge.from && edge.edge_type == "HAS_EXECUTION_ATTEMPT")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| {
+            node.node_type == "ExecutionAttempt"
+                && node_attr(node, "state").is_some_and(|state| state == "Failed")
+        })
+        .count();
+    if prior_failures >= 1 {
+        let has_escalation = delta.create_edges.iter().any(|edge| {
+            edge.from == attempt.id
+                && edge.edge_type == "HAS_ESCALATION"
+                && node_exists_with_type(graph, delta, &edge.to, "EscalationRequired")
+        });
+        if !has_escalation {
+            findings.push(semantic_finding(
+                "semantic.action_fail.escalation_required",
+                "Repeated Action.Fail attempts require EscalationRequired evidence.",
+            ));
+        }
     }
 
     findings
@@ -11381,6 +11514,75 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn action_fail_requires_escalation_after_repeated_failure() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_action_graph_for_valid_spec(tmp.path());
+        let action_id = first_action_id(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Action.Fail".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "action": action_id,
+                    "state": "Failed",
+                    "failureCause": "test-failure",
+                    "correctionPlan": "fix-test",
+                }),
+                dry_run: false,
+                delta: action_fail_delta(&action_id, "first", false),
+            },
+        )
+        .unwrap();
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Action.Fail".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "action": action_id,
+                    "state": "Failed",
+                    "failureCause": "test-failure-again",
+                    "correctionPlan": "escalate",
+                }),
+                dry_run: true,
+                delta: action_fail_delta(&action_id, "second", false),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "Action.Fail"
+        ));
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Action.Fail".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "action": action_id,
+                    "state": "Failed",
+                    "failureCause": "test-failure-again",
+                    "correctionPlan": "escalate",
+                }),
+                dry_run: true,
+                delta: action_fail_delta(&action_id, "second", true),
+            },
+        )
+        .unwrap();
+        assert!(receipt.dry_run);
+    }
+
+    #[test]
     fn code_index_reconciles_observed_symbol_to_declaration() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -12064,6 +12266,83 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn workflow_code_plan_blocks_scope_expansion_until_intent_update_and_replan() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        add_action_graph_for_valid_spec(tmp.path());
+        let action_id = first_action_id(tmp.path());
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: action_id.clone(),
+                wants: vec!["dto:PasswordResetResponse".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(plan.blocked);
+        assert_eq!(plan.decision, "scope-expansion-replan-required");
+        assert_eq!(plan.action_id.as_deref(), Some(action_id.as_str()));
+        assert!(plan
+            .required_operations
+            .contains(&"Spec.Intent.Update".to_string()));
+        assert!(plan
+            .required_operations
+            .contains(&"Action.Replan".to_string()));
+    }
+
+    #[test]
+    fn workflow_code_plan_blocks_bugfix_without_root_cause_target() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+
+        let blocked = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "bugfix".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: None,
+                expected_state_hash: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!blocked.allowed);
+        assert_eq!(blocked.decision, "bugfix-root-cause-required");
+        assert!(blocked
+            .required_operations
+            .contains(&"IssueGraph.Record".to_string()));
+
+        add_root_cause_target_for_password_reset(tmp.path());
+        let allowed = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "bugfix".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: None,
+                expected_state_hash: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(allowed.allowed);
+        assert_eq!(allowed.change_type, "bugfix");
+    }
+
+    #[test]
     fn workflow_code_plan_returns_link_existing_for_duplicate_candidate() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -12271,6 +12550,175 @@ acceptanceCriteria:
         )
         .unwrap()
         .clone()
+    }
+
+    fn add_action_graph_for_valid_spec(root: &Path) {
+        bind_spec_branch(
+            root,
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "spec/auth-001-password-reset".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        generate_action_graph(
+            root,
+            GenerateActionGraphOptions {
+                spec: "AUTH-001".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+    }
+
+    fn first_action_id(root: &Path) -> String {
+        let replay = replay_events(root, ReplayOptions { check_hashes: true }).unwrap();
+        replay
+            .graph
+            .nodes
+            .values()
+            .find(|node| {
+                node.node_type == "ActionNode"
+                    && node_attr(node, "name") == Some("Implement required behavior")
+            })
+            .or_else(|| {
+                replay
+                    .graph
+                    .nodes
+                    .values()
+                    .find(|node| node.node_type == "ActionNode")
+            })
+            .unwrap()
+            .id
+            .clone()
+    }
+
+    fn add_root_cause_target_for_password_reset(root: &Path) {
+        let declaration = current_password_reset_declaration(root);
+        let issue_id = node_id("issue", "BUG-001");
+        let root_cause_id = node_id("root_cause", "BUG-001/password-reset");
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "IssueGraph.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"issue": "BUG-001"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![
+                        Node {
+                            id: issue_id.clone(),
+                            stable_key: "issue:BUG-001".to_string(),
+                            node_type: "Issue".to_string(),
+                            attributes: BTreeMap::from([
+                                ("issueId".to_string(), json!("BUG-001")),
+                                ("title".to_string(), json!("Password reset bug")),
+                            ]),
+                        },
+                        Node {
+                            id: root_cause_id.clone(),
+                            stable_key: "root-cause:BUG-001/password-reset".to_string(),
+                            node_type: "RootCause".to_string(),
+                            attributes: BTreeMap::from([
+                                ("issueId".to_string(), json!("BUG-001")),
+                                (
+                                    "summary".to_string(),
+                                    json!("Password reset implementation defect"),
+                                ),
+                            ]),
+                        },
+                    ],
+                    create_edges: vec![
+                        edge(&issue_id, "HAS_ROOT_CAUSE", &root_cause_id),
+                        edge(
+                            &root_cause_id,
+                            "ROOT_CAUSE_TARGETS_CODE_OBJECT",
+                            &declaration.id,
+                        ),
+                    ],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+    }
+
+    fn action_fail_delta(
+        action_id: &str,
+        attempt_suffix: &str,
+        include_escalation: bool,
+    ) -> GraphDelta {
+        let attempt_id = node_id(
+            "execution_attempt",
+            &format!("{action_id}/{attempt_suffix}"),
+        );
+        let failure_id = node_id("failure_cause", &format!("{action_id}/{attempt_suffix}"));
+        let correction_id = node_id("correction_plan", &format!("{action_id}/{attempt_suffix}"));
+        let mut create_nodes = vec![
+            Node {
+                id: attempt_id.clone(),
+                stable_key: format!("execution-attempt:{action_id}/{attempt_suffix}"),
+                node_type: "ExecutionAttempt".to_string(),
+                attributes: BTreeMap::from([
+                    ("state".to_string(), json!("Failed")),
+                    ("attempt".to_string(), json!(attempt_suffix)),
+                ]),
+            },
+            Node {
+                id: failure_id.clone(),
+                stable_key: format!("failure-cause:{action_id}/{attempt_suffix}"),
+                node_type: "FailureCause".to_string(),
+                attributes: BTreeMap::from([(
+                    "summary".to_string(),
+                    json!("Validation failed during action execution"),
+                )]),
+            },
+            Node {
+                id: correction_id.clone(),
+                stable_key: format!("correction-plan:{action_id}/{attempt_suffix}"),
+                node_type: "CorrectionPlan".to_string(),
+                attributes: BTreeMap::from([(
+                    "summary".to_string(),
+                    json!("Revise implementation before retrying"),
+                )]),
+            },
+        ];
+        let mut create_edges = vec![
+            edge(action_id, "HAS_EXECUTION_ATTEMPT", &attempt_id),
+            edge(&attempt_id, "HAS_FAILURE_CAUSE", &failure_id),
+            edge(&attempt_id, "HAS_CORRECTION_PLAN", &correction_id),
+        ];
+        if include_escalation {
+            let escalation_id = node_id(
+                "escalation_required",
+                &format!("{action_id}/{attempt_suffix}"),
+            );
+            create_nodes.push(Node {
+                id: escalation_id.clone(),
+                stable_key: format!("escalation-required:{action_id}/{attempt_suffix}"),
+                node_type: "EscalationRequired".to_string(),
+                attributes: BTreeMap::from([
+                    (
+                        "reason".to_string(),
+                        json!("Repeated failed execution attempt"),
+                    ),
+                    (
+                        "recommendedAction".to_string(),
+                        json!("Replan or request human review"),
+                    ),
+                ]),
+            });
+            create_edges.push(edge(&attempt_id, "HAS_ESCALATION", &escalation_id));
+        }
+        GraphDelta {
+            create_nodes,
+            create_edges,
+            ..GraphDelta::default()
+        }
     }
 
     fn impact_analysis_delta(target_id: &str, impact_id: &str) -> GraphDelta {

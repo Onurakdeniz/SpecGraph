@@ -353,6 +353,29 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             allowed_create_edge_types: &["HAS_EXECUTION_ATTEMPT", "DEPENDS_ON", "REPLANNED_BY"],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Action.Fail",
+            category: "action",
+            description: "Record a failed execution attempt with failure cause, correction plan, retry, and escalation evidence.",
+            required_input_fields: &["action", "state", "failureCause", "correctionPlan"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "ActionNode",
+                "ExecutionAttempt",
+                "FailureCause",
+                "CorrectionPlan",
+                "EscalationRequired",
+            ],
+            allowed_create_edge_types: &[
+                "HAS_EXECUTION_ATTEMPT",
+                "HAS_FAILURE_CAUSE",
+                "HAS_CORRECTION_PLAN",
+                "HAS_ESCALATION",
+                "RETRY_OF",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
 
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
@@ -712,7 +735,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             required_input_fields: &["issue"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
             allowed_create_node_types: &["Issue", "ReproductionStep", "FailingTest", "RootCause", "FixSpec", "RegressionTest", "ClosureEvidence"],
-            allowed_create_edge_types: &["HAS_ISSUE_EVIDENCE", "HAS_REPRODUCTION", "HAS_FAILING_TEST", "HAS_ROOT_CAUSE", "HAS_FIX_SPEC", "HAS_REGRESSION_TEST", "HAS_CLOSURE_EVIDENCE"],
+            allowed_create_edge_types: &["HAS_ISSUE_EVIDENCE", "HAS_REPRODUCTION", "HAS_FAILING_TEST", "HAS_ROOT_CAUSE", "HAS_FIX_SPEC", "HAS_REGRESSION_TEST", "HAS_CLOSURE_EVIDENCE", "ROOT_CAUSE_TARGETS_CODE_OBJECT"],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {

@@ -122,8 +122,9 @@ Current completed slices:
 - **Phase 0.1B — Persisted intent decisions and wider existing-feature evidence** added `Intent.RecordDecision`, ontology/stable-key support for intent clarification facts, scoped approval enforcement for risky assumptions, and broader existing-feature evidence from endpoints, tests, PRs, docs, and CodeGraph-linked symbols.
 - **Phase 0.2A — Code object lifecycle ABI and change classification** added distinct `CodeObject.Update/Rename/Move/Deprecate/Delete` operation ABI entries, lifecycle semantic validation for declaration identity and placement, `sg workflow code-plan` change type classification, and tests for update, rename evidence, move placement, and lifecycle classification.
 - **Phase 0.2B — Impact, delete/refactor safety, and stale permit foundations** added update impact evidence, referenced-object delete blockers, refactor-only graph facts, work-permit state/hash metadata, and stale expected-state rejection tests.
+- **Phase 0.2C — Scope expansion, bugfix targeting, and failure/correction lifecycle** added action-scoped scope-expansion blockers requiring `Spec.Intent.Update` plus `Action.Replan`, bugfix permits gated on `RootCause -> CodeObjectDeclaration` evidence, `Action.Fail` failure/correction/escalation facts, and tests for replan blockers, root-cause targeting, and repeated-failure escalation.
 
-Next focus: **Phase 0.2C — Scope expansion, bugfix targeting, and failure/correction lifecycle**. Start from the latest `development`, add scope-expansion replan blockers plus bugfix/failure evidence before marking Phase 0.2 complete.
+Next focus: **Phase 0.2D — Remaining lifecycle hardening before Phase 0.2 closure**. Start from the latest `development`, finish public/private boundary approvals, rename/move alias/reference migration, broader delete safety coverage, and file-hash expiry checks before marking Phase 0.2 complete.
 
 ---
 
@@ -360,22 +361,22 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [~] **Add refactor-only workflow.** Add `RefactorSpec`, `PreservedBehavior`, `RefactorPlan`, and `EquivalenceValidation` facts. Refactors must declare no intended behavior change, preserve public APIs unless approved, and revalidate existing behavior links.
 
-- [ ] **Add bugfix workflow targeting.** Bugfix work must link IssueGraph root cause to exact module/function/type/route/data object. Fixes should update existing root-cause objects rather than create duplicate workaround implementations.
+- [x] **Add bugfix workflow targeting.** Bugfix work must link IssueGraph root cause to exact module/function/type/route/data object. Fixes should update existing root-cause objects rather than create duplicate workaround implementations.
 
-- [ ] **Add scope expansion detector.** If a coding agent discovers a new DTO, entity, dependency, config variable, module, migration, public API change, or file outside the current CommitPlan, the system must block coding and require `Spec.Intent.Update` plus `Action.Replan`.
+- [x] **Add scope expansion detector.** If a coding agent discovers a new DTO, entity, dependency, config variable, module, migration, public API change, or file outside the current CommitPlan, the system must block coding and require `Spec.Intent.Update` plus `Action.Replan`.
 
 - [~] **Add stale work permit validation.** Work permits must include graph state hash, branch id, action id, commit plan id, and file content hashes for all intended edits. If graph or file hashes change, the permit expires and `sg workflow code-plan` must be rerun.
 
-- [ ] **Add failure/correction lifecycle.** Extend `ExecutionAttempt` with `FailureCause`, `CorrectionPlan`, `Retry`, and `EscalationRequired`. Repeated failures should suggest replan or human intervention instead of endless retries.
+- [x] **Add failure/correction lifecycle.** Extend `ExecutionAttempt` with `FailureCause`, `CorrectionPlan`, `Retry`, and `EscalationRequired`. Repeated failures should suggest replan or human intervention instead of endless retries.
 
 - [~] **Add tests.** Cover update of existing symbol, rename with references, delete blocked by reference, refactor preserving public API, bugfix targeting existing root cause, scope expansion requiring replan, stale permit rejection, and repeated failure escalation.
 
 ## Phase Gate
 
 - [~] Create/update/rename/move/delete/deprecate are distinct graph operations with different gates.
-- [ ] Agent cannot expand scope silently.
+- [x] Agent cannot expand scope silently.
 - [~] Stale work permits are rejected before edit/commit validation.
-- [~] Refactor-only and bugfix flows have explicit graph evidence.
+- [x] Refactor-only and bugfix flows have explicit graph evidence.
 
 ---
 

@@ -160,6 +160,21 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "execution-attempt:node_action/auth-001/start-1",
     },
     StableKeyFamily {
+        prefix: "failure-cause",
+        description: "Failure cause for an execution attempt",
+        example: "failure-cause:AUTH-001/action-1/attempt-1",
+    },
+    StableKeyFamily {
+        prefix: "correction-plan",
+        description: "Correction plan for a failed execution attempt",
+        example: "correction-plan:AUTH-001/action-1/attempt-1",
+    },
+    StableKeyFamily {
+        prefix: "escalation-required",
+        description: "Escalation requirement after repeated failed attempts",
+        example: "escalation-required:AUTH-001/action-1/attempt-2",
+    },
+    StableKeyFamily {
         prefix: "finding",
         description: "Validation finding evidence",
         example: "finding:run-001/0/trace.missing",
