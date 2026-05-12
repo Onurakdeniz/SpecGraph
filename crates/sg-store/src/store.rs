@@ -277,8 +277,15 @@ pub struct WorkflowCodePlanOptions {
     pub wants: Vec<String>,
     pub file: Option<String>,
     pub expected_state_hash: Option<String>,
+    pub expected_file_hashes: Vec<WorkflowExpectedFileHash>,
     pub actor: String,
     pub graph_branch: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorkflowExpectedFileHash {
+    pub file: String,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1289,6 +1296,7 @@ pub fn plan_code_workflow(
     let action_binding = workflow_action_binding(&replay.graph, &options);
     let requested_files = requested_workflow_files(&options);
     let file_hashes = workflow_file_hashes(root, &requested_files);
+    let stale_file_hashes = stale_workflow_file_hashes(&options, &file_hashes);
     if options
         .expected_state_hash
         .as_deref()
@@ -1306,6 +1314,25 @@ pub fn plan_code_workflow(
             missing_graph_facts: vec!["stateHash".to_string()],
             human_message:
                 "Work permit is stale; rerun sg workflow code-plan against the current graph state."
+                    .to_string(),
+        }));
+    }
+    if !stale_file_hashes.is_empty() {
+        return Ok(blocked_code_plan(BlockedCodePlan {
+            state_hash: replay.state_hash,
+            decision: "stale-work-permit".to_string(),
+            change_type,
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
+            required_operations: vec!["Implementation.Authorize".to_string()],
+            missing_graph_facts: stale_file_hashes
+                .iter()
+                .map(|file| format!("fileHash:{file}"))
+                .collect(),
+            human_message:
+                "Work permit file hashes are stale; rerun sg workflow code-plan before editing."
                     .to_string(),
         }));
     }
@@ -1666,7 +1693,13 @@ fn classify_code_change_type(options: &WorkflowCodePlanOptions) -> String {
 }
 
 fn requested_workflow_files(options: &WorkflowCodePlanOptions) -> Vec<String> {
-    options.file.clone().into_iter().collect()
+    let mut files = options.file.clone().into_iter().collect::<Vec<_>>();
+    for expected in &options.expected_file_hashes {
+        if !files.contains(&expected.file) {
+            files.push(expected.file.clone());
+        }
+    }
+    files
 }
 
 fn workflow_file_hashes(root: &Path, files: &[String]) -> Vec<WorkflowFileHash> {
@@ -1691,6 +1724,24 @@ fn workflow_file_hashes(root: &Path, files: &[String]) -> Vec<WorkflowFileHash> 
                 },
             }
         })
+        .collect()
+}
+
+fn stale_workflow_file_hashes(
+    options: &WorkflowCodePlanOptions,
+    file_hashes: &[WorkflowFileHash],
+) -> Vec<String> {
+    options
+        .expected_file_hashes
+        .iter()
+        .filter(|expected| {
+            file_hashes
+                .iter()
+                .find(|hash| hash.file == expected.file)
+                .and_then(|hash| hash.sha256.as_deref())
+                != Some(expected.sha256.as_str())
+        })
+        .map(|expected| expected.file.clone())
         .collect()
 }
 
@@ -11805,6 +11856,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11841,6 +11893,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -11960,6 +12013,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: None,
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12135,6 +12189,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12182,6 +12237,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: None,
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12216,6 +12272,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: None,
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12245,6 +12302,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: Some("sha256:stale".to_string()),
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12266,6 +12324,67 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn workflow_code_plan_rejects_stale_expected_file_hash() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        fs::create_dir_all(tmp.path().join("src/identity")).unwrap();
+        fs::write(
+            tmp.path().join("src/identity/password-reset.rs"),
+            "fn requestPasswordReset() {}\n",
+        )
+        .unwrap();
+
+        let fresh = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let expected_hash = fresh.file_hashes[0].sha256.clone().unwrap();
+
+        fs::write(
+            tmp.path().join("src/identity/password-reset.rs"),
+            "fn requestPasswordReset() { /* changed */ }\n",
+        )
+        .unwrap();
+        let stale = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
+                expected_file_hashes: vec![WorkflowExpectedFileHash {
+                    file: "src/identity/password-reset.rs".to_string(),
+                    sha256: expected_hash,
+                }],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!stale.allowed);
+        assert!(stale.blocked);
+        assert_eq!(stale.decision, "stale-work-permit");
+        assert!(stale
+            .missing_graph_facts
+            .contains(&"fileHash:src/identity/password-reset.rs".to_string()));
+        assert!(stale
+            .required_operations
+            .contains(&"Implementation.Authorize".to_string()));
+    }
+
+    #[test]
     fn workflow_code_plan_blocks_scope_expansion_until_intent_update_and_replan() {
         let tmp = tempdir().unwrap();
         add_declared_password_reset_object(tmp.path());
@@ -12280,6 +12399,7 @@ acceptanceCriteria:
                 wants: vec!["dto:PasswordResetResponse".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12311,6 +12431,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: None,
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12332,6 +12453,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: None,
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12391,6 +12513,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12419,6 +12542,7 @@ acceptanceCriteria:
                 wants: vec!["README password reset documentation".to_string()],
                 file: None,
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },
@@ -12444,6 +12568,7 @@ acceptanceCriteria:
                 wants: vec!["function:requestPasswordReset".to_string()],
                 file: Some("src/identity/password-reset.rs".to_string()),
                 expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
                 actor: "test".to_string(),
                 graph_branch: "main".to_string(),
             },

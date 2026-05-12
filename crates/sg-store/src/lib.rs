@@ -25,6 +25,7 @@ pub use store::{
     RecordPolicyReportOptions, ReplayOptions, ReplayReport, SnapshotValidationReport,
     SpecGraphStore, SpecStatusSummary, SpecValidationReport, TransitionSpecOptions,
     UpsertActorOptions, UpsertModuleGraphOptions, UpsertProjectProfileOptions, WorkflowCodePlan,
-    WorkflowCodePlanOptions, WorkflowDryRun, WorkflowFileHash, WorkflowObservation, WorkflowPlan,
-    WorkflowPlanOptions, WorkflowPlanStatus, WorkflowQuestion, WorkflowSuggestion,
+    WorkflowCodePlanOptions, WorkflowDryRun, WorkflowExpectedFileHash, WorkflowFileHash,
+    WorkflowObservation, WorkflowPlan, WorkflowPlanOptions, WorkflowPlanStatus, WorkflowQuestion,
+    WorkflowSuggestion,
 };

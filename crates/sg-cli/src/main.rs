@@ -50,7 +50,7 @@ use sg_store::{
     ModuleLifecycleState, ProjectProfileInput, RecordApprovalOptions, RecordCommitOptions,
     RecordPolicyReportOptions, ReplayOptions, ReplayReport, SpecGraphStore, TransitionSpecOptions,
     UpsertActorOptions, UpsertModuleGraphOptions, UpsertProjectProfileOptions,
-    WorkflowCodePlanOptions, WorkflowPlanOptions,
+    WorkflowCodePlanOptions, WorkflowExpectedFileHash, WorkflowPlanOptions,
 };
 use sg_testgraph::{
     validate_required_tests_pass, validate_trace_links, LinksManifest, TestCaseResult, TestLink,
@@ -666,6 +666,8 @@ struct WorkflowCodePlanArgs {
     file: Option<String>,
     #[arg(long = "expected-state-hash")]
     expected_state_hash: Option<String>,
+    #[arg(long = "expected-file-hash", value_name = "FILE=SHA256")]
+    expected_file_hashes: Vec<String>,
     #[arg(long, default_value = "local:planner")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -2193,12 +2195,14 @@ fn handle_workflow(
             }
         }
         WorkflowCommand::CodePlan(args) => {
+            let expected_file_hashes = parse_expected_file_hashes(&args.expected_file_hashes)?;
             let plan = store.plan_code_workflow(WorkflowCodePlanOptions {
                 spec: args.spec,
                 action: args.action,
                 wants: args.wants,
                 file: args.file,
                 expected_state_hash: args.expected_state_hash,
+                expected_file_hashes,
                 actor: args.actor,
                 graph_branch: args.graph_branch,
             })?;
@@ -2248,6 +2252,26 @@ fn handle_workflow(
         }
     }
     Ok(())
+}
+
+fn parse_expected_file_hashes(values: &[String]) -> anyhow::Result<Vec<WorkflowExpectedFileHash>> {
+    values
+        .iter()
+        .map(|value| {
+            let Some((file, sha256)) = value.split_once('=') else {
+                bail!("expected file hash must use FILE=SHA256 format");
+            };
+            let file = file.trim();
+            let sha256 = sha256.trim();
+            if file.is_empty() || !sha256.starts_with("sha256:") {
+                bail!("expected file hash must include a non-empty file and sha256: hash");
+            }
+            Ok(WorkflowExpectedFileHash {
+                file: file.to_string(),
+                sha256: sha256.to_string(),
+            })
+        })
+        .collect()
 }
 
 fn handle_impact(store: &SpecGraphStore, args: ImpactArgs) -> anyhow::Result<()> {

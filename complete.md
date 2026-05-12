@@ -123,8 +123,9 @@ Current completed slices:
 - **Phase 0.2A — Code object lifecycle ABI and change classification** added distinct `CodeObject.Update/Rename/Move/Deprecate/Delete` operation ABI entries, lifecycle semantic validation for declaration identity and placement, `sg workflow code-plan` change type classification, and tests for update, rename evidence, move placement, and lifecycle classification.
 - **Phase 0.2B — Impact, delete/refactor safety, and stale permit foundations** added update impact evidence, referenced-object delete blockers, refactor-only graph facts, work-permit state/hash metadata, and stale expected-state rejection tests.
 - **Phase 0.2C — Scope expansion, bugfix targeting, and failure/correction lifecycle** added action-scoped scope-expansion blockers requiring `Spec.Intent.Update` plus `Action.Replan`, bugfix permits gated on `RootCause -> CodeObjectDeclaration` evidence, `Action.Fail` failure/correction/escalation facts, and tests for replan blockers, root-cause targeting, and repeated-failure escalation.
+- **Phase 0.2D — Stale file-hash permit expiry** added `--expected-file-hash FILE=sha256:...` support to `sg workflow code-plan`, validates intended edit file hashes alongside graph state hashes, blocks stale file permits with `stale-work-permit`, and tests changed-file expiry.
 
-Next focus: **Phase 0.2D — Remaining lifecycle hardening before Phase 0.2 closure**. Start from the latest `development`, finish public/private boundary approvals, rename/move alias/reference migration, broader delete safety coverage, and file-hash expiry checks before marking Phase 0.2 complete.
+Next focus: **Phase 0.2E — Remaining lifecycle hardening before Phase 0.2 closure**. Start from the latest `development`, finish public/private boundary approvals, rename/move alias/reference migration, and broader delete safety coverage before marking Phase 0.2 complete.
 
 ---
 
@@ -365,7 +366,7 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [x] **Add scope expansion detector.** If a coding agent discovers a new DTO, entity, dependency, config variable, module, migration, public API change, or file outside the current CommitPlan, the system must block coding and require `Spec.Intent.Update` plus `Action.Replan`.
 
-- [~] **Add stale work permit validation.** Work permits must include graph state hash, branch id, action id, commit plan id, and file content hashes for all intended edits. If graph or file hashes change, the permit expires and `sg workflow code-plan` must be rerun.
+- [x] **Add stale work permit validation.** Work permits must include graph state hash, branch id, action id, commit plan id, and file content hashes for all intended edits. If graph or file hashes change, the permit expires and `sg workflow code-plan` must be rerun.
 
 - [x] **Add failure/correction lifecycle.** Extend `ExecutionAttempt` with `FailureCause`, `CorrectionPlan`, `Retry`, and `EscalationRequired`. Repeated failures should suggest replan or human intervention instead of endless retries.
 
@@ -375,7 +376,7 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [~] Create/update/rename/move/delete/deprecate are distinct graph operations with different gates.
 - [x] Agent cannot expand scope silently.
-- [~] Stale work permits are rejected before edit/commit validation.
+- [x] Stale work permits are rejected before edit/commit validation.
 - [x] Refactor-only and bugfix flows have explicit graph evidence.
 
 ---
