@@ -32,4 +32,7 @@ pub use store::{
     WorkReservationStatus, WorkflowCodePlan, WorkflowCodePlanOptions, WorkflowDryRun,
     WorkflowExpectedFileHash, WorkflowFileHash, WorkflowObservation, WorkflowPlan,
     WorkflowPlanOptions, WorkflowPlanStatus, WorkflowQuestion, WorkflowSuggestion,
+    PERMISSION_GRAPH_ADMIN, PERMISSION_GRAPH_QUERY_BRANCH, PERMISSION_GRAPH_QUERY_SNAPSHOT,
+    PERMISSION_GRAPH_READ, PERMISSION_GRAPH_READ_SENSITIVE, PERMISSION_OPERATION_DRY_RUN,
+    PERMISSION_OPERATION_SUBMIT,
 };

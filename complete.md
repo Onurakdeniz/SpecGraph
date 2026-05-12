@@ -140,8 +140,9 @@ Current completed slices:
 - **Phase 0.6B — Review, rollout, rollback, observability, and post-release gates** added review/requested-change/resolution/approval facts, unresolved review blockers for action/PR/release gates, rollout/feature-flag/rollback evidence, post-release and release-health checks with follow-up requirements, metric/log/trace/audit/alert/SLO facts, risky/security release gate findings, and tests.
 - **Phase 1A — Branch-aware replay layout and atomic writes** added branch-scoped event files under `.specgraph/events/<graph-branch>/00000001.jsonl`, graph-branch replay options, parent/main inheritance for branch replay, branch-aware query replay, branch metadata head fields, legacy root event replay compatibility, and atomic temp-file/rename writes for events, receipts, snapshots, and metadata.
 - **Phase 1B — Branch CLI, write lock, and legacy migration hardening** added `.specgraph/locks/graph.lock` mutation locking, `sg graph branch create/list/show`, branch-aware `sg graph status --branch`, first-write legacy root-event migration into `main` with before/after hash verification, branch-aware snapshot validation, and tests for branch creation, isolated branch append, migration, lock contention, temp cleanup, snapshot query, and tampered branch metadata.
+- **Phase 2 — Query permissions and authorization enforcement** added built-in graph/operation permission constants, `StoreError::PermissionDenied`, `QueryContext.require_permission` enforcement through Actor/Role/Permission facts, branch/snapshot query permission checks, deny-entire-query handling for `secret`/`production` sensitivity, CLI/API query auth flags, server/SDK propagation tests, and phase-gate CLI verification.
 
-Next focus: **Phase 2 — Query permissions and authorization enforcement**. Start from the latest `development`, define graph read/admin permissions, enforce `QueryContext.require_permission`, add sensitivity handling, and propagate authz through CLI/server/SDK query paths.
+Next focus: **Phase 3 — Real HTTP API server and SDK transport**. Start from the latest `development`, choose the HTTP runtime, add `sg api serve`, implement schema-versioned envelopes and auth, and replace SDK HTTP placeholder behavior with real HTTP calls.
 
 ---
 
@@ -579,24 +580,24 @@ Make graph reads enforce actor permissions before the API server is exposed in p
 
 ## Checklist
 
-- [ ] **Define permission constants.** Add built-in permissions such as `graph.read`, `graph.read.sensitive`, `graph.query.snapshot`, `graph.query.branch`, `graph.admin`, `operation.submit`, and `operation.dry_run`.
+- [x] **Define permission constants.** Add built-in permissions such as `graph.read`, `graph.read.sensitive`, `graph.query.snapshot`, `graph.query.branch`, `graph.admin`, `operation.submit`, and `operation.dry_run`.
 
-- [ ] **Enforce permissions in query execution.** In `sg-store::query_graph` or `sg-query`, if `QueryContext.require_permission` is true, resolve the actor using Actor/Role/Permission graph facts and reject missing permissions with `StoreError::PermissionDenied { actor, permission }`.
+- [x] **Enforce permissions in query execution.** In `sg-store::query_graph` or `sg-query`, if `QueryContext.require_permission` is true, resolve the actor using Actor/Role/Permission graph facts and reject missing permissions with `StoreError::PermissionDenied { actor, permission }`.
 
-- [ ] **Add sensitivity labels.** Support node/edge attributes like `sensitivity: public|internal|secret|production`. Require `graph.read.sensitive` for `secret` or `production` facts. Decide whether unauthorized results are denied entirely or filtered; implement one consistent behavior.
+- [x] **Add sensitivity labels.** Support node/edge attributes like `sensitivity: public|internal|secret|production`. Require `graph.read.sensitive` for `secret` or `production` facts. Decide whether unauthorized results are denied entirely or filtered; implement one consistent behavior.
 
-- [ ] **Propagate authz through server and SDK schemas.** Ensure `ApiQueryRequest.actor` and `requirePermission` are passed into `QueryContext`. Ensure SDKs can set actor and permission mode.
+- [x] **Propagate authz through server and SDK schemas.** Ensure `ApiQueryRequest.actor` and `requirePermission` are passed into `QueryContext`. Ensure SDKs can set actor and permission mode.
 
-- [ ] **Add CLI support.** Add `sg graph query --actor <actor> --require-permission` and equivalent API query flags.
+- [x] **Add CLI support.** Add `sg graph query --actor <actor> --require-permission` and equivalent API query flags.
 
-- [ ] **Add tests.** Cover anonymous rejection, actor without permission rejection, actor with `graph.read` success, sensitive-node denial, sensitive-node success with `graph.read.sensitive`, and server/SDK propagation.
+- [x] **Add tests.** Cover anonymous rejection, actor without permission rejection, actor with `graph.read` success, sensitive-node denial, sensitive-node success with `graph.read.sensitive`, and server/SDK propagation.
 
 ## Phase Gate
 
-- [ ] Query with `--require-permission` and no actor fails.
-- [ ] Actor with only `graph.read` can read normal facts.
-- [ ] Actor without `graph.read.sensitive` cannot read secret/production facts.
-- [ ] Server and SDK query paths produce the same authz result as CLI.
+- [x] Query with `--require-permission` and no actor fails.
+- [x] Actor with only `graph.read` can read normal facts.
+- [x] Actor without `graph.read.sensitive` cannot read secret/production facts.
+- [x] Server and SDK query paths produce the same authz result as CLI.
 
 ---
 

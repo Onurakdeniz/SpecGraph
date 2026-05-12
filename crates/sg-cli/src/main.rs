@@ -793,6 +793,10 @@ struct ApiQueryCliArgs {
     branch: Option<String>,
     #[arg(long)]
     snapshot: Option<String>,
+    #[arg(long)]
+    actor: Option<String>,
+    #[arg(long = "require-permission")]
+    require_permission: bool,
     #[arg(long = "max-nodes", default_value_t = 1_000)]
     max_nodes: usize,
     #[arg(long = "max-edges", default_value_t = 5_000)]
@@ -1526,6 +1530,10 @@ struct GraphQueryArgs {
     branch: Option<String>,
     #[arg(long)]
     snapshot: Option<String>,
+    #[arg(long)]
+    actor: Option<String>,
+    #[arg(long = "require-permission")]
+    require_permission: bool,
     #[arg(long = "max-nodes", default_value_t = 1_000)]
     max_nodes: usize,
     #[arg(long = "max-edges", default_value_t = 5_000)]
@@ -2539,6 +2547,8 @@ fn handle_api(store: &SpecGraphStore, root: &Path, args: ApiArgs) -> anyhow::Res
                     max_nodes: args.max_nodes,
                     max_edges: args.max_edges,
                 },
+                actor: args.actor,
+                require_permission: args.require_permission,
                 ..ApiQueryRequest::default()
             })?;
             println!("stateHash: {}", response.state_hash);
@@ -4759,8 +4769,8 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
                     max_nodes: args.max_nodes,
                     max_edges: args.max_edges,
                 },
-                actor: None,
-                require_permission: false,
+                actor: args.actor,
+                require_permission: args.require_permission,
             };
             let report = store.query_graph(context)?;
             let query = GraphQuery::with_context(&report.graph, report.context.clone());

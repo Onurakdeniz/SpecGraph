@@ -277,8 +277,9 @@ mod tests {
     use sg_server::{ApiQueryRequest, ApiQuerySelector};
     use sg_spec::SpecProjection;
     use sg_store::{
-        InitOptions, ModuleDefinition, ProjectProfileInput, SpecGraphStore,
-        UpsertModuleGraphOptions, UpsertProjectProfileOptions,
+        GrantRoleOptions, InitOptions, ModuleDefinition, ProjectProfileInput, SpecGraphStore,
+        UpsertActorOptions, UpsertModuleGraphOptions, UpsertProjectProfileOptions,
+        PERMISSION_GRAPH_READ,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -355,6 +356,49 @@ mod tests {
 
         assert_eq!(response.specs.len(), 1);
         assert_eq!(response.specs[0].spec, "SDK-Q");
+    }
+
+    #[test]
+    fn sdk_query_propagates_actor_and_permission_mode() {
+        let root = initialized_root("sdk-query-authz");
+        let store = SpecGraphStore::new(&root);
+        store
+            .upsert_actor(UpsertActorOptions {
+                actor_id: "local:sdk-reader".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            })
+            .unwrap();
+        store
+            .grant_role(GrantRoleOptions {
+                actor_id: "local:sdk-reader".to_string(),
+                role: "reader".to_string(),
+                permissions: vec![PERMISSION_GRAPH_READ.to_string()],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            })
+            .unwrap();
+
+        let client = SpecGraphClient::local(&root);
+        let denied = client
+            .query(ApiQueryRequest {
+                require_permission: true,
+                ..ApiQueryRequest::default()
+            })
+            .unwrap_err();
+        assert!(denied.to_string().contains("graph.read"));
+
+        let allowed = client
+            .query(ApiQueryRequest {
+                actor: Some("local:sdk-reader".to_string()),
+                require_permission: true,
+                ..ApiQueryRequest::default()
+            })
+            .unwrap();
+        assert!(!allowed.nodes.is_empty());
     }
 
     #[test]

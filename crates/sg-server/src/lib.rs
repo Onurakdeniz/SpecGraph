@@ -662,8 +662,9 @@ mod tests {
     use sg_model::Node;
     use sg_spec::SpecProjection;
     use sg_store::{
-        InitOptions, ModuleDefinition, ProjectProfileInput, UpsertModuleGraphOptions,
-        UpsertProjectProfileOptions,
+        GrantRoleOptions, InitOptions, ModuleDefinition, ProjectProfileInput, SpecGraphStore,
+        UpsertActorOptions, UpsertModuleGraphOptions, UpsertProjectProfileOptions,
+        PERMISSION_GRAPH_READ,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -698,6 +699,49 @@ mod tests {
         assert_eq!(response.specs[0].spec, "AUTH-001");
         assert_eq!(response.nodes[0].node_type, "Spec");
         assert_eq!(response.edges.len(), 0);
+    }
+
+    #[test]
+    fn read_api_propagates_query_permission_context() {
+        let root = initialized_root("read-api-authz");
+        let api = SpecGraphApi::new(&root);
+        let denied = api
+            .query(ApiQueryRequest {
+                require_permission: true,
+                ..ApiQueryRequest::default()
+            })
+            .unwrap_err();
+        assert!(denied.message.contains("graph.read"));
+
+        let store = SpecGraphStore::new(&root);
+        store
+            .upsert_actor(UpsertActorOptions {
+                actor_id: "local:reader".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            })
+            .unwrap();
+        store
+            .grant_role(GrantRoleOptions {
+                actor_id: "local:reader".to_string(),
+                role: "reader".to_string(),
+                permissions: vec![PERMISSION_GRAPH_READ.to_string()],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            })
+            .unwrap();
+
+        let allowed = api
+            .query(ApiQueryRequest {
+                actor: Some("local:reader".to_string()),
+                require_permission: true,
+                ..ApiQueryRequest::default()
+            })
+            .unwrap();
+        assert!(!allowed.nodes.is_empty());
     }
 
     #[test]

@@ -1,4 +1,6 @@
-use crate::identity::{actor_permissions, actor_roles, infer_actor_kind, resolve_actor_identity};
+use crate::identity::{
+    actor_permissions, actor_roles, infer_actor_kind, resolve_actor_identity, ActorIdentity,
+};
 use serde_json::{json, Value};
 use sg_canonical::state_hash;
 use sg_codegraph::{resolve_code_object, CodeObjectQuery, ExistingCodeObjectCandidate};
@@ -41,6 +43,13 @@ use uuid::Uuid;
 
 const VALIDATOR_OPERATION_SEMANTIC_PRECONDITIONS: &str =
     "validator.operation_semantic_preconditions";
+pub const PERMISSION_GRAPH_READ: &str = "graph.read";
+pub const PERMISSION_GRAPH_READ_SENSITIVE: &str = "graph.read.sensitive";
+pub const PERMISSION_GRAPH_QUERY_SNAPSHOT: &str = "graph.query.snapshot";
+pub const PERMISSION_GRAPH_QUERY_BRANCH: &str = "graph.query.branch";
+pub const PERMISSION_GRAPH_ADMIN: &str = "graph.admin";
+pub const PERMISSION_OPERATION_SUBMIT: &str = "operation.submit";
+pub const PERMISSION_OPERATION_DRY_RUN: &str = "operation.dry_run";
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -139,6 +148,8 @@ pub enum StoreError {
     LegacyMigrationHashMismatch { before: String, after: String },
     #[error("invalid graph branch name `{0}`")]
     InvalidGraphBranchName(String),
+    #[error("permission denied for actor `{actor}`; missing `{permission}`")]
+    PermissionDenied { actor: String, permission: String },
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -6923,6 +6934,7 @@ pub fn query_graph(root: &Path, context: QueryContext) -> Result<QueryGraphRepor
         }
         QueryTarget::Snapshot { snapshot_id } => read_snapshot_by_id(root, snapshot_id)?,
     };
+    enforce_query_permissions(&graph, &context)?;
     let state_hash = state_hash(&graph, CORE_ONTOLOGY_VERSION);
     let query = sg_query::GraphQuery::with_context(&graph, context.clone());
     let cost = query
@@ -6934,6 +6946,88 @@ pub fn query_graph(root: &Path, context: QueryContext) -> Result<QueryGraphRepor
         context,
         cost,
     })
+}
+
+fn enforce_query_permissions(graph: &Graph, context: &QueryContext) -> Result<()> {
+    if !context.require_permission {
+        return Ok(());
+    }
+    let actor = context
+        .actor
+        .as_deref()
+        .filter(|actor| !actor.trim().is_empty())
+        .ok_or_else(|| StoreError::PermissionDenied {
+            actor: "<anonymous>".to_string(),
+            permission: PERMISSION_GRAPH_READ.to_string(),
+        })?;
+    let identity =
+        resolve_actor_identity(graph, actor).ok_or_else(|| StoreError::PermissionDenied {
+            actor: actor.to_string(),
+            permission: PERMISSION_GRAPH_READ.to_string(),
+        })?;
+
+    for permission in required_query_permissions(context) {
+        if !identity_has_permission(&identity, permission) {
+            return Err(StoreError::PermissionDenied {
+                actor: actor.to_string(),
+                permission: permission.to_string(),
+            });
+        }
+    }
+    if graph_contains_sensitive_facts(graph)
+        && !identity_has_permission(&identity, PERMISSION_GRAPH_READ_SENSITIVE)
+    {
+        return Err(StoreError::PermissionDenied {
+            actor: actor.to_string(),
+            permission: PERMISSION_GRAPH_READ_SENSITIVE.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn required_query_permissions(context: &QueryContext) -> Vec<&'static str> {
+    let mut permissions = vec![PERMISSION_GRAPH_READ];
+    match &context.target {
+        QueryTarget::Branch { .. } => permissions.push(PERMISSION_GRAPH_QUERY_BRANCH),
+        QueryTarget::Snapshot { .. } => permissions.push(PERMISSION_GRAPH_QUERY_SNAPSHOT),
+        QueryTarget::Current { graph_branch } if graph_branch != "main" => {
+            permissions.push(PERMISSION_GRAPH_QUERY_BRANCH);
+        }
+        QueryTarget::Current { .. } => {}
+    }
+    permissions
+}
+
+fn identity_has_permission(identity: &ActorIdentity, permission: &str) -> bool {
+    identity
+        .permissions
+        .iter()
+        .any(|value| value == PERMISSION_GRAPH_ADMIN)
+        || identity.roles.iter().any(|role| {
+            matches!(
+                role.as_str(),
+                "admin" | "maintainer" | "graph-admin" | "graph_admin"
+            )
+        })
+        || identity.permissions.iter().any(|value| value == permission)
+}
+
+fn graph_contains_sensitive_facts(graph: &Graph) -> bool {
+    graph
+        .nodes
+        .values()
+        .any(|node| attributes_are_sensitive(&node.attributes))
+        || graph
+            .edges
+            .values()
+            .any(|edge| attributes_are_sensitive(&edge.attributes))
+}
+
+fn attributes_are_sensitive(attributes: &BTreeMap<String, Value>) -> bool {
+    attributes
+        .get("sensitivity")
+        .and_then(Value::as_str)
+        .is_some_and(|value| matches!(value, "secret" | "production"))
 }
 
 fn read_snapshot_by_id(root: &Path, snapshot_id: &str) -> Result<Graph> {
@@ -12150,6 +12244,233 @@ mod tests {
         )
         .unwrap();
         assert_eq!(snapshot_report.state_hash, current.state_hash);
+    }
+
+    #[test]
+    fn query_permission_rejects_anonymous_and_unprivileged_actors() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let anonymous = query_graph(
+            tmp.path(),
+            QueryContext {
+                require_permission: true,
+                ..QueryContext::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            anonymous,
+            StoreError::PermissionDenied { actor, permission }
+                if actor == "<anonymous>" && permission == PERMISSION_GRAPH_READ
+        ));
+
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:reader".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let unprivileged = query_graph(
+            tmp.path(),
+            QueryContext {
+                actor: Some("local:reader".to_string()),
+                require_permission: true,
+                ..QueryContext::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            unprivileged,
+            StoreError::PermissionDenied { actor, permission }
+                if actor == "local:reader" && permission == PERMISSION_GRAPH_READ
+        ));
+    }
+
+    #[test]
+    fn query_permission_allows_graph_read_and_requires_branch_permission() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:reader".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        grant_role(
+            tmp.path(),
+            GrantRoleOptions {
+                actor_id: "local:reader".to_string(),
+                role: "reader".to_string(),
+                permissions: vec![PERMISSION_GRAPH_READ.to_string()],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let current = query_graph(
+            tmp.path(),
+            QueryContext {
+                actor: Some("local:reader".to_string()),
+                require_permission: true,
+                ..QueryContext::default()
+            },
+        )
+        .unwrap();
+        assert!(current.graph.nodes.len() >= 2);
+
+        let branch_error = query_graph(
+            tmp.path(),
+            QueryContext {
+                target: QueryTarget::Branch {
+                    graph_branch: "main".to_string(),
+                },
+                actor: Some("local:reader".to_string()),
+                require_permission: true,
+                ..QueryContext::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            branch_error,
+            StoreError::PermissionDenied { actor, permission }
+                if actor == "local:reader" && permission == PERMISSION_GRAPH_QUERY_BRANCH
+        ));
+    }
+
+    #[test]
+    fn query_permission_denies_sensitive_facts_without_sensitive_read() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let sensitive_node = Node {
+            id: node_id("actor", "local:secret"),
+            stable_key: "actor:local:secret".to_string(),
+            node_type: "Actor".to_string(),
+            attributes: BTreeMap::from([
+                ("actorId".to_string(), json!("local:secret")),
+                ("displayName".to_string(), json!("Secret actor")),
+                ("provider".to_string(), json!("local")),
+                ("subject".to_string(), json!("local:secret")),
+                ("kind".to_string(), json!("Human")),
+                ("sensitivity".to_string(), json!("secret")),
+            ]),
+        };
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Identity.UpsertActor".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"actorId": "local:secret"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![sensitive_node],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        upsert_actor(
+            tmp.path(),
+            UpsertActorOptions {
+                actor_id: "local:reader".to_string(),
+                display_name: None,
+                provider: None,
+                subject: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        grant_role(
+            tmp.path(),
+            GrantRoleOptions {
+                actor_id: "local:reader".to_string(),
+                role: "reader".to_string(),
+                permissions: vec![PERMISSION_GRAPH_READ.to_string()],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let sensitive_error = query_graph(
+            tmp.path(),
+            QueryContext {
+                actor: Some("local:reader".to_string()),
+                require_permission: true,
+                ..QueryContext::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            sensitive_error,
+            StoreError::PermissionDenied { actor, permission }
+                if actor == "local:reader" && permission == PERMISSION_GRAPH_READ_SENSITIVE
+        ));
+
+        grant_role(
+            tmp.path(),
+            GrantRoleOptions {
+                actor_id: "local:reader".to_string(),
+                role: "sensitive-reader".to_string(),
+                permissions: vec![PERMISSION_GRAPH_READ_SENSITIVE.to_string()],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let allowed = query_graph(
+            tmp.path(),
+            QueryContext {
+                actor: Some("local:reader".to_string()),
+                require_permission: true,
+                ..QueryContext::default()
+            },
+        )
+        .unwrap();
+        assert!(allowed
+            .graph
+            .nodes
+            .values()
+            .any(|node| node.stable_key == "actor:local:secret"));
     }
 
     #[test]
