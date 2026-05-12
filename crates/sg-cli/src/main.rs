@@ -13,9 +13,9 @@ use sg_codegraph::{
     CodeObjectDeclaration, CodeObjectQuery, SourceFallback,
 };
 use sg_gitgraph::{
-    git_graph_stable, pull_request_node_id, validate_commit_binding, validate_pr_hosting_graph,
-    validation_run_node_id, CommitValidationInput, GitGraphProjection, GitReleaseFact,
-    PullRequestFact,
+    git_graph_stable, merge_node_id, pull_request_node_id, release_node_id,
+    validate_commit_binding, validate_pr_hosting_graph, validation_run_node_id,
+    CommitValidationInput, GitGraphProjection, GitMergeFact, GitReleaseFact, PullRequestFact,
 };
 use sg_impact::analyze_impact;
 use sg_merge::{
@@ -868,6 +868,8 @@ struct PrSyncArgs {
     base_sha: Option<String>,
     #[arg(long = "validation-run-id")]
     validation_run_id: Option<String>,
+    #[arg(long)]
+    spec: Option<String>,
     #[arg(long, default_value = "local:hosting")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -890,6 +892,9 @@ struct PrValidateArgs {
     base: Option<String>,
     #[arg(long = "report-file")]
     report_file: Option<PathBuf>,
+    /// Require the PR, commit, and recorded validation to be scoped to this Spec.
+    #[arg(long)]
+    spec: Option<String>,
     /// Append ValidationRun, PR validation link, and provider check nodes.
     #[arg(long)]
     record: bool,
@@ -1476,6 +1481,14 @@ struct GraphIntegrateArgs {
     source_branch: String,
     #[arg(long)]
     target_branch: String,
+    #[arg(long = "git-merge-id")]
+    git_merge_id: Option<String>,
+    #[arg(long = "git-base")]
+    git_base: Option<String>,
+    #[arg(long = "git-head")]
+    git_head: Option<String>,
+    #[arg(long = "git-result")]
+    git_result: Option<String>,
     #[arg(long)]
     dry_run: bool,
     #[arg(long, default_value = "local:user")]
@@ -2676,7 +2689,16 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
                 pull_requests: vec![pr.clone()],
                 ..GitGraphProjection::default()
             };
-            let delta = projection.to_upsert_delta(&replay.graph);
+            let mut delta = projection.to_upsert_delta(&replay.graph);
+            if let Some(spec) = args.spec.as_ref() {
+                let spec_id = find_spec_node_id(&replay.graph, spec)?;
+                let pr_id = pull_request_node_id(&args.provider, &args.number);
+                upsert_edge_delta(
+                    &replay.graph,
+                    &mut delta,
+                    gitgraph_edge(&spec_id, "SPEC_HAS_PULL_REQUEST", &pr_id),
+                );
+            }
             let receipt = store.append_operation(AppendOperationOptions {
                 operation: "Hosting.Sync".to_string(),
                 actor: args.actor,
@@ -2734,6 +2756,12 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
             }
 
             findings.extend(validate_pr_hosting_graph(&replay.graph));
+            findings.extend(validate_pr_scope_graph(
+                &replay.graph,
+                &args.provider,
+                &args.number,
+                args.spec.as_deref(),
+            ));
             findings.extend(review_gate_findings(&replay.graph));
             findings.extend(release_governance_gate_findings(&replay.graph));
             findings.extend(post_release_gate_findings(&replay.graph));
@@ -2810,6 +2838,24 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
                     &run_id,
                 )?;
                 extend_delta(&mut delta, pr_link);
+                if let Some(spec) = args.spec.as_ref() {
+                    let spec_id = find_spec_node_id(&replay.graph, spec)?;
+                    let pr_id = pull_request_node_id(&args.provider, &args.number);
+                    upsert_edge_delta(
+                        &replay.graph,
+                        &mut delta,
+                        gitgraph_edge(&spec_id, "SPEC_HAS_PULL_REQUEST", &pr_id),
+                    );
+                    upsert_edge_delta(
+                        &replay.graph,
+                        &mut delta,
+                        gitgraph_edge(
+                            &spec_id,
+                            "SPEC_HAS_VALIDATION_RUN",
+                            &validation_run_node_id(&run_id),
+                        ),
+                    );
+                }
                 extend_delta(&mut delta, report.to_delta(&replay.graph));
                 let receipt = store.append_operation(AppendOperationOptions {
                     operation: "Hosting.Sync".to_string(),
@@ -3910,6 +3956,108 @@ fn find_project_node_id(graph: &Graph) -> anyhow::Result<String> {
         .context("SpecGraph project node not found; run `sg init` first")
 }
 
+fn find_spec_node_id(graph: &Graph, spec: &str) -> anyhow::Result<String> {
+    graph
+        .nodes
+        .values()
+        .find(|node| {
+            node.node_type == "Spec"
+                && node
+                    .attributes
+                    .get("spec")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| value == spec)
+        })
+        .map(|node| node.id.clone())
+        .with_context(|| format!("Spec `{spec}` not found in graph"))
+}
+
+fn validate_pr_scope_graph(
+    graph: &Graph,
+    provider: &str,
+    number: &str,
+    spec: Option<&str>,
+) -> Vec<Finding> {
+    let Some(spec) = spec else {
+        return Vec::new();
+    };
+    let mut findings = Vec::new();
+    let pr_id = pull_request_node_id(provider, number);
+    let spec_node = graph.nodes.values().find(|node| {
+        node.node_type == "Spec"
+            && node
+                .attributes
+                .get("spec")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| value == spec)
+    });
+    let Some(spec_node) = spec_node else {
+        findings.push(
+            Finding::new(
+                "pr_hosting.spec_missing",
+                FindingSeverity::Error,
+                format!("Spec `{spec}` is missing; PR validation cannot prove scoped evidence."),
+            )
+            .with_validator(VALIDATOR_PR_HOSTING, CORE_VALIDATOR_VERSION)
+            .with_location(sg_model::FindingLocation::command("sg pr validate")),
+        );
+        return findings;
+    };
+    if !graph.edges.values().any(|edge| {
+        edge.from == spec_node.id && edge.edge_type == "SPEC_HAS_PULL_REQUEST" && edge.to == pr_id
+    }) {
+        findings.push(
+            Finding::new(
+                "pr_hosting.spec_pr_scope_missing",
+                FindingSeverity::Error,
+                format!("PullRequest `{provider}/{number}` is not linked to Spec `{spec}` with SPEC_HAS_PULL_REQUEST."),
+            )
+            .with_validator(VALIDATOR_PR_HOSTING, CORE_VALIDATOR_VERSION)
+            .with_location(sg_model::FindingLocation::command("sg pr validate")),
+        );
+    }
+
+    let pr_head_commits = graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == pr_id && edge.edge_type == "PR_HEAD_COMMIT")
+        .map(|edge| edge.to.as_str())
+        .collect::<Vec<_>>();
+    if !pr_head_commits.is_empty() {
+        let spec_action_groups = graph
+            .edges
+            .values()
+            .filter(|edge| edge.from == spec_node.id && edge.edge_type == "HAS_ACTION_GRAPH")
+            .flat_map(|edge| {
+                graph
+                    .edges
+                    .values()
+                    .filter(move |inner| {
+                        inner.from == edge.to && inner.edge_type == "HAS_ACTION_GROUP"
+                    })
+                    .map(|inner| inner.to.as_str())
+            })
+            .collect::<Vec<_>>();
+        let commit_scoped = graph.edges.values().any(|edge| {
+            pr_head_commits.contains(&edge.from.as_str())
+                && edge.edge_type == "IMPLEMENTS_ACTION_GROUP"
+                && spec_action_groups.contains(&edge.to.as_str())
+        });
+        if !commit_scoped {
+            findings.push(
+                Finding::new(
+                    "pr_hosting.commit_scope_missing",
+                    FindingSeverity::Error,
+                    format!("PullRequest `{provider}/{number}` head commit is not linked to Spec `{spec}` action evidence."),
+                )
+                .with_validator(VALIDATOR_PR_HOSTING, CORE_VALIDATOR_VERSION)
+                .with_location(sg_model::FindingLocation::command("sg pr validate")),
+            );
+        }
+    }
+    findings
+}
+
 fn collect_git_range_findings(
     graph: &Graph,
     root: &Path,
@@ -3985,6 +4133,24 @@ fn gitgraph_edge(from: &str, edge_type: &str, to: &str) -> Edge {
         from: from.to_string(),
         to: to.to_string(),
         attributes: BTreeMap::new(),
+    }
+}
+
+fn upsert_edge_delta(graph: &Graph, delta: &mut GraphDelta, edge: Edge) {
+    if graph.edges.contains_key(&edge.id) {
+        if !delta
+            .update_edges
+            .iter()
+            .any(|existing| existing.id == edge.id)
+        {
+            delta.update_edges.push(edge);
+        }
+    } else if !delta
+        .create_edges
+        .iter()
+        .any(|existing| existing.id == edge.id)
+    {
+        delta.create_edges.push(edge);
     }
 }
 
@@ -4095,13 +4261,36 @@ fn handle_release(
                 validation_run_id: args.validation_run_id.clone(),
                 url: args.url.clone(),
                 evidence_path: args.evidence_path.clone(),
+                evidence_file_hash: None,
+                graph_snapshot_id: None,
+                artifacts: Vec::new(),
             };
             let projection = GitGraphProjection {
                 project_node_id,
                 releases: vec![release.clone()],
                 ..GitGraphProjection::default()
             };
-            let delta = projection.to_upsert_delta(&replay.graph);
+            let mut delta = projection.to_upsert_delta(&replay.graph);
+            if let Some(spec) = args.spec.as_ref() {
+                let spec_id = find_spec_node_id(&replay.graph, spec)?;
+                let release_id = release_node_id(&args.version);
+                upsert_edge_delta(
+                    &replay.graph,
+                    &mut delta,
+                    gitgraph_edge(&spec_id, "SPEC_HAS_RELEASE", &release_id),
+                );
+                if let Some(run_id) = args.validation_run_id.as_ref() {
+                    upsert_edge_delta(
+                        &replay.graph,
+                        &mut delta,
+                        gitgraph_edge(
+                            &spec_id,
+                            "SPEC_HAS_VALIDATION_RUN",
+                            &validation_run_node_id(run_id),
+                        ),
+                    );
+                }
+            }
             let receipt = store.append_operation(AppendOperationOptions {
                 operation: "Release.Record".to_string(),
                 actor: args.actor,
@@ -4870,10 +5059,59 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
             if integration.status != GraphIntegrationStatus::Ready {
                 bail!("graph integration is blocked; resolve conflicts before accepting");
             }
+            if !args.dry_run
+                && (args.git_merge_id.is_none()
+                    || args.git_base.is_none()
+                    || args.git_head.is_none()
+                    || args.git_result.is_none())
+            {
+                bail!("graph integrate accept requires --git-merge-id, --git-base, --git-head, and --git-result so GraphMerge evidence is bound to GitMerge evidence");
+            }
             let mode = match integration.mode {
                 GraphIntegrationMode::Merge => "merge",
                 GraphIntegrationMode::Rebase => "rebase",
             };
+            let mut planned_delta = integration.planned_delta;
+            let graph_merge_id = planned_delta
+                .create_nodes
+                .iter_mut()
+                .find(|node| node.node_type == "GraphMerge")
+                .map(|node| {
+                    node.attributes
+                        .insert("dryRun".to_string(), json!(args.dry_run));
+                    node.id.clone()
+                });
+            if let (
+                Some(graph_merge_id),
+                Some(git_merge_id),
+                Some(git_base),
+                Some(git_head),
+                Some(git_result),
+            ) = (
+                graph_merge_id.as_ref(),
+                args.git_merge_id.as_ref(),
+                args.git_base.as_ref(),
+                args.git_head.as_ref(),
+                args.git_result.as_ref(),
+            ) {
+                let git_delta = GitGraphProjection {
+                    project_node_id: find_project_node_id(&report.graph)?,
+                    merges: vec![GitMergeFact {
+                        id: git_merge_id.clone(),
+                        base: git_base.clone(),
+                        head: git_head.clone(),
+                        result: git_result.clone(),
+                    }],
+                    ..GitGraphProjection::default()
+                }
+                .to_upsert_delta(&report.graph);
+                extend_delta(&mut planned_delta, git_delta);
+                planned_delta.create_edges.push(gitgraph_edge(
+                    &merge_node_id(git_merge_id),
+                    "MERGE_ACCEPTS_GRAPH_MERGE",
+                    graph_merge_id,
+                ));
+            }
             let receipt = store.append_operation(AppendOperationOptions {
                 operation: "GraphMerge.Accept".to_string(),
                 actor: args.actor,
@@ -4885,7 +5123,7 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
                     "conflictCount": integration.conflict_report.conflicts.len(),
                     "postMergeValidationFindings": integration.post_merge_validation.len(),
                 }),
-                delta: integration.planned_delta,
+                delta: planned_delta,
                 dry_run: args.dry_run,
             })?;
             println!("operationId: {}", receipt.operation_id);

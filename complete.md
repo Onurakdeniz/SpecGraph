@@ -143,8 +143,9 @@ Current completed slices:
 - **Phase 1B — Branch CLI, write lock, and legacy migration hardening** added `.specgraph/locks/graph.lock` mutation locking, `sg graph branch create/list/show`, branch-aware `sg graph status --branch`, first-write legacy root-event migration into `main` with before/after hash verification, branch-aware snapshot validation, and tests for branch creation, isolated branch append, migration, lock contention, temp cleanup, snapshot query, and tampered branch metadata.
 - **Phase 2 — Query permissions and authorization enforcement** added built-in graph/operation permission constants, `StoreError::PermissionDenied`, `QueryContext.require_permission` enforcement through Actor/Role/Permission facts, branch/snapshot query permission checks, deny-entire-query handling for `secret`/`production` sensitivity, CLI/API query auth flags, server/SDK propagation tests, and phase-gate CLI verification.
 - **Phase 3 — Std HTTP API server and SDK transport** added a no-extra-dependency std TCP HTTP boundary with `/health`, `/graph/status`, `/graph/query`, `/validation/findings`, and `/operations`, schema-version checks, structured API errors with optional findings, bearer-token mutation auth, `sg api serve`, Rust SDK HTTP transport, TypeScript SDK token/timeouts/typed errors, and HTTP route/SDK tests.
+- **Phase 4A — Scoped release/PR/merge evidence semantics** added spec-scoped validation/PR/release/merge ontology edges, release artifact/checksum/evidence graph facts, scoped `Released` blockers, spec-scoped PR validation/record links, GitMerge-to-GraphMerge binding requirements, and tests for unrelated evidence blockers and graph merge binding.
 
-Next focus: **Phase 4 — Spec-Scoped Git, PR, GraphMerge, and Release Evidence**. Use the latest `development` and group the work into branches of about five checklist items each, starting with scoped ontology/release/PR/merge semantics before CLI and final gate hardening.
+Next focus: **Phase 4B — Release CLI hardening, remaining tests, and Phase 4 gate**. Start from the latest `development`, finish `sg release validate` / `sg release artifact add` / hardened `sg release record`, then cover the full unrelated-PR/release/snapshot/artifact/merge test matrix before checking the Phase 4 gate.
 
 ---
 
@@ -646,15 +647,15 @@ Phase ownership note: Phase 4 owns **graph semantics and spec scoping** for Git/
 
 ## Checklist
 
-- [ ] **Add scoped ontology edges.** Add and validate edges such as `SPEC_HAS_VALIDATION_RUN`, `SPEC_HAS_PULL_REQUEST`, `SPEC_HAS_RELEASE`, `SPEC_HAS_MERGE`, `RELEASE_HAS_SNAPSHOT`, `RELEASE_HAS_ARTIFACT`, `RELEASE_HAS_CHECKSUM`, and `MERGE_ACCEPTS_GRAPH_MERGE`.
+- [x] **Add scoped ontology edges.** Added and validated edges such as `SPEC_HAS_VALIDATION_RUN`, `SPEC_HAS_PULL_REQUEST`, `SPEC_HAS_RELEASE`, `SPEC_HAS_MERGE`, `RELEASE_HAS_SNAPSHOT`, `RELEASE_HAS_ARTIFACT`, `RELEASE_HAS_CHECKSUM`, and `MERGE_ACCEPTS_GRAPH_MERGE`.
 
-- [ ] **Add release artifact graph model.** Add node types `ReleaseArtifact`, `ArtifactChecksum`, and `ReleaseEvidence` with stable keys and endpoint validation. Include artifact path, platform, checksum algorithm, checksum value, and evidence file hash.
+- [x] **Add release artifact graph model.** Added node types `ReleaseArtifact`, `ArtifactChecksum`, and `ReleaseEvidence` with stable keys and endpoint validation. Release artifact/checksum facts include artifact path, platform, checksum algorithm, checksum value, and evidence file hash.
 
-- [ ] **Harden `Spec.Transition -> Released`.** Update release blockers so the target spec must link to its own Release, merged PR, passed ValidationRun, release tag, release commit, and graph snapshot. Unrelated global facts must not satisfy the gate.
+- [x] **Harden `Spec.Transition -> Released`.** Updated release blockers so the target spec must link to its own Release, merged PR, passed ValidationRun, release tag, release commit, graph snapshot, and artifact checksum evidence. Unrelated global facts no longer satisfy the gate.
 
-- [ ] **Harden PR validation scope.** `sg pr validate` must verify the PR branch/commit/validation facts are connected to the target spec/action/commit plan chain, not merely present in the graph.
+- [x] **Harden PR validation scope.** `sg pr validate --spec <id>` verifies the PR and head commit are connected to the target spec/action evidence chain, and recorded validation links are scoped back to the spec.
 
-- [ ] **Bind GraphMerge to GitMerge.** When `sg graph integrate` accepts a merge/rebase, create/require a `GraphMerge` fact and link it to a `GitMerge` or merge commit via `MERGE_ACCEPTS_GRAPH_MERGE`.
+- [x] **Bind GraphMerge to GitMerge.** When `sg graph integrate` accepts a merge/rebase, it requires Git merge evidence and links accepted `GraphMerge` facts to `GitMerge` via `MERGE_ACCEPTS_GRAPH_MERGE`.
 
 - [ ] **Extend release CLI.** Add `sg release validate`, `sg release artifact add`, and harden `sg release record` to require version, tag, commit, snapshot, validation run, artifact checksums, and optional spec id.
 

@@ -5126,46 +5126,51 @@ fn spec_state_blockers(graph: &Graph, spec_node_id: &str, target_state: &str) ->
             blockers.push(finding.message);
         }
 
-        let passed_validation = graph.nodes.values().any(|node| {
-            node.node_type == "ValidationRun"
-                && node
-                    .attributes
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .is_some_and(|status| status == "Passed")
-        });
+        let passed_validation =
+            spec_has_scoped_validation(graph, spec_node_id, "SPEC_HAS_VALIDATION_RUN");
         if !passed_validation {
-            blockers.push("spec needs passed ValidationRun evidence".to_string());
+            blockers.push("spec needs scoped passed ValidationRun evidence".to_string());
         }
 
-        let spec_name = graph
-            .nodes
-            .get(spec_node_id)
-            .and_then(|node| node.attributes.get("spec"))
-            .and_then(Value::as_str);
-        let release_recorded = graph.nodes.values().any(|node| {
-            node.node_type == "Release"
-                && spec_name.is_none_or(|spec| {
-                    node.attributes
-                        .get("spec")
-                        .and_then(Value::as_str)
-                        .is_some_and(|value| value == spec)
-                })
-        });
+        let scoped_releases = scoped_nodes(graph, spec_node_id, "SPEC_HAS_RELEASE", "Release");
+        let release_recorded = !scoped_releases.is_empty();
         if !release_recorded {
-            blockers.push("spec needs graph-bound Release evidence".to_string());
+            blockers.push("spec needs scoped Release evidence".to_string());
+        }
+        if release_recorded
+            && !scoped_releases
+                .iter()
+                .any(|release| release_has_edge_to_type(graph, release, "RELEASES_TAG", "GitTag"))
+        {
+            blockers.push("spec release needs release tag evidence".to_string());
+        }
+        if release_recorded
+            && !scoped_releases.iter().any(|release| {
+                release_has_edge_to_type(graph, release, "RELEASES_COMMIT", "GitCommit")
+            })
+        {
+            blockers.push("spec release needs release commit evidence".to_string());
+        }
+        if release_recorded
+            && !scoped_releases.iter().any(|release| {
+                release_has_edge_to_type(graph, release, "RELEASE_HAS_SNAPSHOT", "GraphSnapshot")
+            })
+        {
+            blockers.push("spec release needs graph snapshot evidence".to_string());
+        }
+        if release_recorded
+            && !scoped_releases
+                .iter()
+                .any(|release| release_has_artifact_checksum(graph, release))
+        {
+            blockers.push("spec release needs artifact checksum evidence".to_string());
         }
 
-        let merged_pr = graph.nodes.values().any(|node| {
-            node.node_type == "PullRequest"
-                && node
-                    .attributes
-                    .get("state")
-                    .and_then(Value::as_str)
-                    .is_some_and(|state| state == "merged")
-        });
+        let merged_pr = scoped_nodes(graph, spec_node_id, "SPEC_HAS_PULL_REQUEST", "PullRequest")
+            .iter()
+            .any(|node| node_attr(node, "state") == Some("merged"));
         if !merged_pr {
-            blockers.push("spec needs merged PullRequest evidence".to_string());
+            blockers.push("spec needs scoped merged PullRequest evidence".to_string());
         }
     }
     blockers
@@ -5608,6 +5613,49 @@ fn release_has_edge_to_type(
                 .get(&edge.to)
                 .is_some_and(|node| node.node_type == node_type)
     })
+}
+
+fn scoped_nodes<'a>(
+    graph: &'a Graph,
+    from: &str,
+    edge_type: &str,
+    node_type: &str,
+) -> Vec<&'a Node> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == from && edge.edge_type == edge_type)
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| node.node_type == node_type)
+        .collect()
+}
+
+fn spec_has_scoped_validation(graph: &Graph, spec_node_id: &str, edge_type: &str) -> bool {
+    scoped_nodes(graph, spec_node_id, edge_type, "ValidationRun")
+        .iter()
+        .any(|node| node_attr(node, "status") == Some("Passed"))
+}
+
+fn release_has_artifact_checksum(graph: &Graph, release: &Node) -> bool {
+    let release_has_checksum =
+        release_has_edge_to_type(graph, release, "RELEASE_HAS_CHECKSUM", "ArtifactChecksum");
+    let artifact_has_checksum = graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == release.id && edge.edge_type == "RELEASE_HAS_ARTIFACT")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| node.node_type == "ReleaseArtifact")
+        .any(|artifact| {
+            graph.edges.values().any(|edge| {
+                edge.from == artifact.id
+                    && edge.edge_type == "ARTIFACT_HAS_CHECKSUM"
+                    && graph
+                        .nodes
+                        .get(&edge.to)
+                        .is_some_and(|node| node.node_type == "ArtifactChecksum")
+            })
+        });
+    release_has_checksum || artifact_has_checksum
 }
 
 fn release_has_any_observability(graph: &Graph, release: &Node) -> bool {
@@ -7176,6 +7224,7 @@ fn validate_operation_semantic_preconditions(
         }
         "TestIntent.Record" => validate_test_intent_semantic_preconditions(graph, delta),
         "Review.Record" => validate_review_record_semantic_preconditions(graph, delta),
+        "Release.Record" => validate_release_record_semantic_preconditions(graph, delta),
         "ReleaseGovernance.Record" => {
             validate_release_governance_semantic_preconditions(graph, delta)
         }
@@ -7195,6 +7244,7 @@ fn validate_operation_semantic_preconditions(
             delta,
         ),
         "Proposal.Accept" => validate_proposal_accept_semantic_preconditions(graph, request, delta),
+        "GraphMerge.Accept" => validate_graph_merge_accept_semantic_preconditions(graph, delta),
         _ => Vec::new(),
     }
 }
@@ -8537,6 +8587,134 @@ fn validate_test_intent_semantic_preconditions(graph: &Graph, delta: &GraphDelta
                 ));
             }
         }
+    }
+    findings
+}
+
+fn validate_release_record_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for release in delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "Release")
+    {
+        let release_known = |node_id: &str| {
+            graph.nodes.contains_key(node_id)
+                || delta.create_nodes.iter().any(|node| node.id == node_id)
+                || delta.update_nodes.iter().any(|node| node.id == node_id)
+        };
+        let has_tag = delta
+            .create_edges
+            .iter()
+            .chain(delta.update_edges.iter())
+            .any(|edge| {
+                edge.from == release.id
+                    && edge.edge_type == "RELEASES_TAG"
+                    && release_known(&edge.to)
+            })
+            || release_has_edge_to_type(graph, release, "RELEASES_TAG", "GitTag");
+        if !has_tag {
+            findings.push(semantic_finding(
+                "semantic.release_record.tag_required",
+                format!(
+                    "Release `{}` must link to a GitTag with RELEASES_TAG.",
+                    release.stable_key
+                ),
+            ));
+        }
+
+        let has_commit = delta
+            .create_edges
+            .iter()
+            .chain(delta.update_edges.iter())
+            .any(|edge| {
+                edge.from == release.id
+                    && edge.edge_type == "RELEASES_COMMIT"
+                    && release_known(&edge.to)
+            })
+            || release_has_edge_to_type(graph, release, "RELEASES_COMMIT", "GitCommit");
+        if !has_commit {
+            findings.push(semantic_finding(
+                "semantic.release_record.commit_required",
+                format!(
+                    "Release `{}` must link to a GitCommit with RELEASES_COMMIT.",
+                    release.stable_key
+                ),
+            ));
+        }
+
+        let artifacts = delta
+            .create_edges
+            .iter()
+            .chain(delta.update_edges.iter())
+            .filter(|edge| edge.from == release.id && edge.edge_type == "RELEASE_HAS_ARTIFACT")
+            .filter_map(|edge| {
+                delta
+                    .create_nodes
+                    .iter()
+                    .chain(delta.update_nodes.iter())
+                    .chain(graph.nodes.values())
+                    .find(|node| node.id == edge.to && node.node_type == "ReleaseArtifact")
+            });
+        for artifact in artifacts {
+            for attr in ["path", "platform", "evidenceFileHash"] {
+                if node_attr(artifact, attr).is_none() {
+                    findings.push(semantic_finding(
+                        "semantic.release_record.artifact_metadata_required",
+                        format!(
+                            "ReleaseArtifact `{}` must include `{attr}` metadata.",
+                            artifact.stable_key
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    findings
+}
+
+fn validate_graph_merge_accept_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let graph_merge_ids = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "GraphMerge")
+        .map(|node| node.id.as_str())
+        .collect::<Vec<_>>();
+    if graph_merge_ids.is_empty() {
+        return findings;
+    }
+    let git_merge_nodes = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .chain(graph.nodes.values())
+        .filter(|node| node.node_type == "GitMerge")
+        .map(|node| node.id.as_str())
+        .collect::<Vec<_>>();
+    let has_binding = delta
+        .create_edges
+        .iter()
+        .chain(delta.update_edges.iter())
+        .chain(graph.edges.values())
+        .any(|edge| {
+            edge.edge_type == "MERGE_ACCEPTS_GRAPH_MERGE"
+                && git_merge_nodes.contains(&edge.from.as_str())
+                && graph_merge_ids.contains(&edge.to.as_str())
+        });
+    if !has_binding {
+        findings.push(semantic_finding(
+            "semantic.graph_merge.git_binding_required",
+            "GraphMerge.Accept must link accepted GraphMerge evidence to a GitMerge with MERGE_ACCEPTS_GRAPH_MERGE.",
+        ));
     }
     findings
 }
@@ -14239,6 +14417,109 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn released_spec_requires_scoped_release_pr_validation_snapshot_and_checksum() {
+        let mut graph = release_scope_base_graph();
+        let blockers = spec_state_blockers(&graph, &node_id("spec", "AUTH-001"), "Released");
+        assert!(blockers
+            .iter()
+            .any(|blocker| blocker.contains("scoped passed ValidationRun")));
+        assert!(blockers
+            .iter()
+            .any(|blocker| blocker.contains("scoped Release")));
+        assert!(blockers
+            .iter()
+            .any(|blocker| blocker.contains("scoped merged PullRequest")));
+
+        add_scoped_release_evidence(&mut graph, false);
+        let blockers = spec_state_blockers(&graph, &node_id("spec", "AUTH-001"), "Released");
+        assert!(blockers
+            .iter()
+            .any(|blocker| blocker.contains("artifact checksum")));
+
+        add_artifact_checksum_evidence(&mut graph);
+        let blockers = spec_state_blockers(&graph, &node_id("spec", "AUTH-001"), "Released");
+        assert!(
+            blockers.is_empty(),
+            "unexpected scoped release blockers: {blockers:?}"
+        );
+    }
+
+    #[test]
+    fn graph_merge_accept_requires_git_merge_binding() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let graph_merge = Node {
+            id: node_id("graph_merge", "feature-into-development"),
+            stable_key: "graph-merge:feature->development".to_string(),
+            node_type: "GraphMerge".to_string(),
+            attributes: BTreeMap::from([
+                ("mode".to_string(), json!("merge")),
+                ("sourceBranch".to_string(), json!("feature")),
+                ("targetBranch".to_string(), json!("development")),
+            ]),
+        };
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "GraphMerge.Accept".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "mode": "merge",
+                    "sourceBranch": "feature",
+                    "targetBranch": "development",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![graph_merge.clone()],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "GraphMerge.Accept"
+        ));
+
+        let git_merge = Node {
+            id: node_id("git_merge", "merge-commit-1"),
+            stable_key: "git-merge:merge-commit-1".to_string(),
+            node_type: "GitMerge".to_string(),
+            attributes: BTreeMap::from([
+                ("base".to_string(), json!("base")),
+                ("head".to_string(), json!("head")),
+                ("result".to_string(), json!("merge-commit-1")),
+            ]),
+        };
+        let findings = validate_graph_merge_accept_semantic_preconditions(
+            &Graph::default(),
+            &GraphDelta {
+                create_nodes: vec![graph_merge.clone(), git_merge.clone()],
+                create_edges: vec![edge(
+                    &git_merge.id,
+                    "MERGE_ACCEPTS_GRAPH_MERGE",
+                    &graph_merge.id,
+                )],
+                ..GraphDelta::default()
+            },
+        );
+        assert!(findings.is_empty());
+    }
+
+    #[test]
     fn release_governance_record_requires_failed_check_follow_up() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -19077,6 +19358,165 @@ acceptanceCriteria:
             },
         )
         .unwrap();
+    }
+
+    fn release_scope_base_graph() -> Graph {
+        let spec_id = node_id("spec", "AUTH-001");
+        let branch_id = node_id("git_branch", "spec/auth-001-password-reset");
+        let action_graph_id = node_id("action_graph", "AUTH-001");
+        let action_group_id = node_id("action_group", "AUTH-001/Implementation");
+        let commit_plan_id = node_id("commit_plan", "AUTH-001/Implementation");
+        let commit_id = node_id("git_commit", "AUTH-001/release");
+        let mut graph = Graph::default();
+        for node in [
+            Node {
+                id: spec_id.clone(),
+                stable_key: "spec:AUTH-001".to_string(),
+                node_type: "Spec".to_string(),
+                attributes: BTreeMap::from([
+                    ("spec".to_string(), json!("AUTH-001")),
+                    ("state".to_string(), json!("Review")),
+                ]),
+            },
+            Node {
+                id: branch_id.clone(),
+                stable_key: "git-branch:spec/auth-001-password-reset".to_string(),
+                node_type: "GitBranch".to_string(),
+                attributes: BTreeMap::from([(
+                    "name".to_string(),
+                    json!("spec/auth-001-password-reset"),
+                )]),
+            },
+            Node {
+                id: action_graph_id.clone(),
+                stable_key: "action-graph:AUTH-001".to_string(),
+                node_type: "ActionGraph".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: action_group_id.clone(),
+                stable_key: "action-group:AUTH-001/Implementation".to_string(),
+                node_type: "ActionGroup".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: commit_plan_id.clone(),
+                stable_key: "commit-plan:AUTH-001/Implementation".to_string(),
+                node_type: "CommitPlan".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: commit_id.clone(),
+                stable_key: "git-commit:AUTH-001/release".to_string(),
+                node_type: "GitCommit".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        ] {
+            graph.nodes.insert(node.id.clone(), node);
+        }
+        for edge_value in [
+            edge(&spec_id, "BOUND_TO_BRANCH", &branch_id),
+            edge(&spec_id, "HAS_ACTION_GRAPH", &action_graph_id),
+            edge(&action_graph_id, "HAS_ACTION_GROUP", &action_group_id),
+            edge(&action_group_id, "HAS_COMMIT_PLAN", &commit_plan_id),
+            edge(&commit_id, "IMPLEMENTS_ACTION_GROUP", &action_group_id),
+        ] {
+            graph.edges.insert(edge_value.id.clone(), edge_value);
+        }
+        graph
+    }
+
+    fn add_scoped_release_evidence(graph: &mut Graph, include_checksum: bool) {
+        let spec_id = node_id("spec", "AUTH-001");
+        let release_id = node_id("release", "AUTH-001/1.0.0");
+        let validation_id = node_id("validation_run", "AUTH-001/release");
+        let pr_id = node_id("pull_request", "AUTH-001/42");
+        let tag_id = node_id("git_tag", "AUTH-001/v1.0.0");
+        let commit_id = node_id("git_commit", "AUTH-001/release");
+        let snapshot_id = node_id("graph_snapshot", "AUTH-001/release");
+        for node in [
+            Node {
+                id: validation_id.clone(),
+                stable_key: "validation-run:AUTH-001/release".to_string(),
+                node_type: "ValidationRun".to_string(),
+                attributes: BTreeMap::from([("status".to_string(), json!("Passed"))]),
+            },
+            Node {
+                id: pr_id.clone(),
+                stable_key: "pull-request:AUTH-001/42".to_string(),
+                node_type: "PullRequest".to_string(),
+                attributes: BTreeMap::from([("state".to_string(), json!("merged"))]),
+            },
+            Node {
+                id: release_id.clone(),
+                stable_key: "release:AUTH-001/1.0.0".to_string(),
+                node_type: "Release".to_string(),
+                attributes: BTreeMap::from([("version".to_string(), json!("1.0.0"))]),
+            },
+            Node {
+                id: tag_id.clone(),
+                stable_key: "git-tag:AUTH-001/v1.0.0".to_string(),
+                node_type: "GitTag".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: snapshot_id.clone(),
+                stable_key: "graph-snapshot:AUTH-001/release".to_string(),
+                node_type: "GraphSnapshot".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        ] {
+            graph.nodes.insert(node.id.clone(), node);
+        }
+        for edge_value in [
+            edge(&spec_id, "SPEC_HAS_VALIDATION_RUN", &validation_id),
+            edge(&spec_id, "SPEC_HAS_PULL_REQUEST", &pr_id),
+            edge(&spec_id, "SPEC_HAS_RELEASE", &release_id),
+            edge(&release_id, "RELEASES_TAG", &tag_id),
+            edge(&release_id, "RELEASES_COMMIT", &commit_id),
+            edge(&release_id, "RELEASE_HAS_SNAPSHOT", &snapshot_id),
+        ] {
+            graph.edges.insert(edge_value.id.clone(), edge_value);
+        }
+        if include_checksum {
+            add_artifact_checksum_evidence(graph);
+        }
+    }
+
+    fn add_artifact_checksum_evidence(graph: &mut Graph) {
+        let release_id = node_id("release", "AUTH-001/1.0.0");
+        let artifact_id = node_id("release_artifact", "AUTH-001/1.0.0/source");
+        let checksum_id = node_id("artifact_checksum", "AUTH-001/1.0.0/source/sha256");
+        for node in [
+            Node {
+                id: artifact_id.clone(),
+                stable_key: "release-artifact:AUTH-001/1.0.0/source".to_string(),
+                node_type: "ReleaseArtifact".to_string(),
+                attributes: BTreeMap::from([
+                    ("path".to_string(), json!("dist/specgraph.tar.gz")),
+                    ("platform".to_string(), json!("source")),
+                    ("evidenceFileHash".to_string(), json!("sha256:evidence")),
+                ]),
+            },
+            Node {
+                id: checksum_id.clone(),
+                stable_key: "artifact-checksum:AUTH-001/1.0.0/source/sha256".to_string(),
+                node_type: "ArtifactChecksum".to_string(),
+                attributes: BTreeMap::from([
+                    ("algorithm".to_string(), json!("sha256")),
+                    ("value".to_string(), json!("abc123")),
+                ]),
+            },
+        ] {
+            graph.nodes.insert(node.id.clone(), node);
+        }
+        for edge_value in [
+            edge(&release_id, "RELEASE_HAS_ARTIFACT", &artifact_id),
+            edge(&release_id, "RELEASE_HAS_CHECKSUM", &checksum_id),
+            edge(&artifact_id, "ARTIFACT_HAS_CHECKSUM", &checksum_id),
+        ] {
+            graph.edges.insert(edge_value.id.clone(), edge_value);
+        }
     }
 
     fn add_email_parity_spec(root: &Path) {

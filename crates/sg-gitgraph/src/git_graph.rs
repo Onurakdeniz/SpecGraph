@@ -84,6 +84,22 @@ pub struct GitReleaseFact {
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_file_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_snapshot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<ReleaseArtifactFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseArtifactFact {
+    pub path: String,
+    pub platform: String,
+    pub checksum_algorithm: String,
+    pub checksum_value: String,
+    pub evidence_file_hash: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +237,50 @@ impl GitGraphProjection {
                         "RELEASE_HAS_VALIDATION_RUN",
                         &validation_run_node_id(run_id),
                     ),
+                );
+            }
+            if let Some(snapshot_id) = &release.graph_snapshot_id {
+                insert_node(&mut nodes, graph_snapshot_node(snapshot_id));
+                insert_edge(
+                    &mut edges,
+                    edge(
+                        &release_id,
+                        "RELEASE_HAS_SNAPSHOT",
+                        &graph_snapshot_node_id(snapshot_id),
+                    ),
+                );
+            }
+            if release.evidence_path.is_some() || release.evidence_file_hash.is_some() {
+                insert_node(&mut nodes, release_evidence_node(release));
+                insert_edge(
+                    &mut edges,
+                    edge(
+                        &release_id,
+                        "RELEASE_HAS_EVIDENCE",
+                        &release_evidence_node_id(&release.version),
+                    ),
+                );
+            }
+            for artifact in &release.artifacts {
+                let artifact_id = release_artifact_node_id(&release.version, &artifact.path);
+                let checksum_id = artifact_checksum_node_id(
+                    &release.version,
+                    &artifact.path,
+                    &artifact.checksum_algorithm,
+                );
+                insert_node(&mut nodes, release_artifact_node(release, artifact));
+                insert_node(&mut nodes, artifact_checksum_node(release, artifact));
+                insert_edge(
+                    &mut edges,
+                    edge(&release_id, "RELEASE_HAS_ARTIFACT", &artifact_id),
+                );
+                insert_edge(
+                    &mut edges,
+                    edge(&release_id, "RELEASE_HAS_CHECKSUM", &checksum_id),
+                );
+                insert_edge(
+                    &mut edges,
+                    edge(&artifact_id, "ARTIFACT_HAS_CHECKSUM", &checksum_id),
                 );
             }
         }
@@ -459,6 +519,74 @@ fn release_node(release: &GitReleaseFact) -> Node {
             ("validationRunId".into(), json!(release.validation_run_id)),
             ("url".into(), json!(release.url)),
             ("evidencePath".into(), json!(release.evidence_path)),
+            ("evidenceFileHash".into(), json!(release.evidence_file_hash)),
+            ("graphSnapshotId".into(), json!(release.graph_snapshot_id)),
+        ]),
+    }
+}
+
+fn graph_snapshot_node(snapshot_id: &str) -> Node {
+    Node {
+        id: graph_snapshot_node_id(snapshot_id),
+        stable_key: format!("graph-snapshot:{}", stable(snapshot_id)),
+        node_type: "GraphSnapshot".into(),
+        attributes: BTreeMap::from([("snapshotId".into(), json!(snapshot_id))]),
+    }
+}
+
+fn release_evidence_node(release: &GitReleaseFact) -> Node {
+    Node {
+        id: release_evidence_node_id(&release.version),
+        stable_key: format!("release-evidence:{}", stable(&release.version)),
+        node_type: "ReleaseEvidence".into(),
+        attributes: BTreeMap::from([
+            ("version".into(), json!(release.version)),
+            ("path".into(), json!(release.evidence_path)),
+            ("evidenceFileHash".into(), json!(release.evidence_file_hash)),
+        ]),
+    }
+}
+
+fn release_artifact_node(release: &GitReleaseFact, artifact: &ReleaseArtifactFact) -> Node {
+    Node {
+        id: release_artifact_node_id(&release.version, &artifact.path),
+        stable_key: format!(
+            "release-artifact:{}/{}",
+            stable(&release.version),
+            stable(&artifact.path)
+        ),
+        node_type: "ReleaseArtifact".into(),
+        attributes: BTreeMap::from([
+            ("version".into(), json!(release.version)),
+            ("path".into(), json!(artifact.path)),
+            ("platform".into(), json!(artifact.platform)),
+            (
+                "evidenceFileHash".into(),
+                json!(artifact.evidence_file_hash),
+            ),
+        ]),
+    }
+}
+
+fn artifact_checksum_node(release: &GitReleaseFact, artifact: &ReleaseArtifactFact) -> Node {
+    Node {
+        id: artifact_checksum_node_id(
+            &release.version,
+            &artifact.path,
+            &artifact.checksum_algorithm,
+        ),
+        stable_key: format!(
+            "artifact-checksum:{}/{}/{}",
+            stable(&release.version),
+            stable(&artifact.path),
+            stable(&artifact.checksum_algorithm)
+        ),
+        node_type: "ArtifactChecksum".into(),
+        attributes: BTreeMap::from([
+            ("version".into(), json!(release.version)),
+            ("artifactPath".into(), json!(artifact.path)),
+            ("algorithm".into(), json!(artifact.checksum_algorithm)),
+            ("value".into(), json!(artifact.checksum_value)),
         ]),
     }
 }
@@ -584,6 +712,23 @@ pub fn pull_request_node_id(provider: &str, number: &str) -> String {
 pub fn release_node_id(version: &str) -> String {
     format!("node_release_{}", stable(version))
 }
+pub fn graph_snapshot_node_id(snapshot_id: &str) -> String {
+    format!("node_graph_snapshot_{}", stable(snapshot_id))
+}
+pub fn release_evidence_node_id(version: &str) -> String {
+    format!("node_release_evidence_{}", stable(version))
+}
+pub fn release_artifact_node_id(version: &str, path: &str) -> String {
+    format!("node_release_artifact_{}_{}", stable(version), stable(path))
+}
+pub fn artifact_checksum_node_id(version: &str, path: &str, algorithm: &str) -> String {
+    format!(
+        "node_artifact_checksum_{}_{}_{}",
+        stable(version),
+        stable(path),
+        stable(algorithm)
+    )
+}
 pub fn validation_run_node_id(run_id: &str) -> String {
     format!("node_validation_run_{}", stable(run_id).replace('-', "_"))
 }
@@ -647,6 +792,15 @@ mod tests {
                 validation_run_id: Some("release-1".into()),
                 url: Some("https://example.test/releases/v0.1.0".into()),
                 evidence_path: Some("dist/specgraph-release-evidence.json".into()),
+                evidence_file_hash: Some("sha256:evidence".into()),
+                graph_snapshot_id: Some("snapshot-1".into()),
+                artifacts: vec![ReleaseArtifactFact {
+                    path: "dist/specgraph.tar.gz".into(),
+                    platform: "source".into(),
+                    checksum_algorithm: "sha256".into(),
+                    checksum_value: "abc123".into(),
+                    evidence_file_hash: "sha256:evidence".into(),
+                }],
             }],
             pull_requests: vec![PullRequestFact {
                 provider: "github".into(),
@@ -681,6 +835,26 @@ mod tests {
             .create_edges
             .iter()
             .any(|edge| edge.edge_type == "RELEASES_COMMIT"));
+        assert!(delta
+            .create_nodes
+            .iter()
+            .any(|node| node.node_type == "ReleaseArtifact"));
+        assert!(delta
+            .create_nodes
+            .iter()
+            .any(|node| node.node_type == "ArtifactChecksum"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "RELEASE_HAS_ARTIFACT"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "RELEASE_HAS_CHECKSUM"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "RELEASE_HAS_SNAPSHOT"));
         assert!(delta
             .create_edges
             .iter()
