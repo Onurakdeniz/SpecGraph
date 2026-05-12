@@ -8,6 +8,15 @@
 
 This plan completes the production backend/runtime/CLI/API/governance system.
 
+## Active Branch Policy
+
+For current development, use `development` as the integration branch.
+
+- Feature and plan branches should be merged back into `development` after their tests and gates pass.
+- Keep `origin/development` updated after accepted local commits so completed work is not stranded on feature branches.
+- Treat `main` as a future stable/release branch only if/when the repository creates one.
+- Before starting a new phase or slice, branch from the latest `development`.
+
 ### Explicitly excluded by request
 
 These are intentionally **not** planned here:
@@ -21,12 +30,19 @@ The system can be production-ready for graph governance, CLI/API, Git/release tr
 ## Implementation Protocol
 
 - [ ] Before each phase, create or select a branch and record the phase name in the issue/PR description.
+- [ ] Start each phase/slice from the latest `development` unless a release branch is explicitly chosen.
 - [ ] Implement only the current phase unless a later-phase change is required to make the current phase compile.
 - [ ] Keep all mutations through Operation Runtime when graph facts are created or changed.
 - [ ] Add happy-path and failure-path tests for every new behavior.
 - [ ] Run the phase gate commands before checking off the phase.
 - [ ] Update this file by changing `[ ]` to `[x]` only after code, tests, and gate checks pass.
 - [ ] If a phase is too large for one safe change set, split it into phase-local implementation slices and complete each slice with tests before marking the phase done.
+
+Status notation:
+
+- `[ ]` not implemented or not yet verified against the current gate.
+- `[~]` partially implemented; usable foundation exists, but production gate remains incomplete.
+- `[x]` implemented and verified with tests/gates.
 
 Recommended baseline gate for every phase:
 
@@ -68,6 +84,33 @@ Important consistency rules:
 - **Every provider/adapter output remains observed until accepted.** Live GitHub/GitLab/LLM/database/package/code adapters may observe or propose, but they must not create trusted facts without Operation Runtime acceptance.
 - **Large phases must be sliced without changing their scope.** Phase 0 is intentionally broad because it defines the coding-agent contract, but it must be implemented as smaller internal slices with their own tests and gates.
 - **Release target gaps must fail explicitly.** A configured release platform may have a documented CI/toolchain blocker, but it must appear as failed release-target evidence rather than being silently dropped from the matrix.
+- **Phase order allows dependency-enabling work.** The default is one phase at a time, but a slice may make a minimal later-phase change when it is required to compile, test, or correctly gate the current phase. Document that exception in the commit or PR.
+
+## Current Repo Baseline
+
+As of commit `10ed53f` on `development`, the repository already contains several foundations that later phases should reuse instead of rebuilding:
+
+- Operation Runtime receipts, dry-run behavior, ABI validation, policy gate, approval/waiver facts, and actor/identity foundations.
+- Project profile and module baseline enforcement before spec authoring.
+- Spec intent validation, ActionGraph/CommitPlan foundations, action lifecycle commands, commit trailer enforcement, and validation recording.
+- CodeGraph, lightweight framework-aware indexing, link manifests, trace validation, and annotation link parsing.
+- DataGraph and migration runtime foundations.
+- GitGraph facts for branches, commits, tags, merges, PR placeholders, and basic release records.
+- Graph diff/conflict reports, graph merge/rebase dry-run, and `sg graph integrate` acceptance path.
+- Transport-neutral server and SDK schemas that route mutations through Operation Runtime.
+- Release evidence/check commands plus basic `sg release record`.
+- Full-system docs, `missing.md`, and this production completion plan.
+
+The unchecked checklist below is therefore a **production hardening and closure plan**, not a claim that the repo is empty. When starting each slice, first compare the checklist item with the current code and either harden the existing implementation or mark the item partial/complete with evidence.
+
+## Recommended Immediate Focus
+
+Start with **Phase 0A — Code object model and operation ABI**. This gives coding agents the missing work-permit vocabulary before they make further code changes:
+
+1. Add `CodeObjectDeclaration` graph facts, stable keys, object kinds, ownership fields, and placement defaults.
+2. Add `CodeObject.Declare` ABI validation and dry-run behavior.
+3. Add parent-child/type-placement blockers with remediation commands.
+4. Add unit tests and one CLI/example path before moving to Phase 0B discovery.
 
 ---
 
@@ -565,6 +608,8 @@ Turn the current transport-neutral server surface into a production HTTP service
 
 Prevent unrelated validation, PRs, commits, or releases from satisfying a spec/release gate.
 
+Phase ownership note: Phase 4 owns **graph semantics and spec scoping** for Git/PR/merge/release evidence. Phase 13 owns **distribution artifacts, installer/publish flow, signing, and multi-platform release hardening**.
+
 ## Checklist
 
 - [ ] **Add scoped ontology edges.** Add and validate edges such as `SPEC_HAS_VALIDATION_RUN`, `SPEC_HAS_PULL_REQUEST`, `SPEC_HAS_RELEASE`, `SPEC_HAS_MERGE`, `RELEASE_HAS_SNAPSHOT`, `RELEASE_HAS_ARTIFACT`, `RELEASE_HAS_CHECKSUM`, and `MERGE_ACCEPTS_GRAPH_MERGE`.
@@ -835,6 +880,8 @@ Turn performance budget files into real measured CI-enforced benchmarks.
 
 Make the project publishable, installable, and graph-evidence-bound.
 
+Phase ownership note: do not duplicate Phase 4's scoped-release semantics here. This phase should build on Phase 4 and focus on artifacts, target matrix, signing, installers, publish dry-runs, and release workflow automation.
+
 ## Checklist
 
 - [ ] **Add multi-platform build matrix.** Update release workflow for Linux x86_64, Linux arm64, macOS x86_64, macOS arm64, and Windows x86_64. If a target cannot be built in CI, document the blocker and keep the release gate failed for that target until resolved.
@@ -897,8 +944,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 cargo run -p sg-cli -- proof run
-sg perf run --check
-sg release validate
+cargo run -p sg-cli -- perf run --check
+cargo run -p sg-cli -- release validate
 ```
 
 ## Included-Scope Definition of Done
