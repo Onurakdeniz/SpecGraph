@@ -105,6 +105,12 @@ pub const BUILT_IN_STABLE_KEY_FAMILIES: &[StableKeyFamily] = &[
         example: "code-object:AUTH-001/identity/function/request-password-reset",
     },
     StableKeyFamily {
+        prefix: "code-object-alias",
+        description:
+            "Compatibility alias or migration reference for a renamed or moved code object",
+        example: "code-object-alias:AUTH-001/requestPasswordReset/rename-20260512",
+    },
+    StableKeyFamily {
         prefix: "code-route",
         description: "Code route handler observation or accepted fact",
         example: "code-route:POST-/password-reset",

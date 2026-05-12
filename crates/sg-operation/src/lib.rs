@@ -593,8 +593,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             description: "Rename an existing declared code object while preserving owner, module placement, and previous-name evidence.",
             required_input_fields: &["codeObject", "newName", "reason"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
-            allowed_create_node_types: &["CodeObjectDeclaration", "CodeSymbol", "CodeRoute"],
-            allowed_create_edge_types: &["CODE_OBJECT_REALIZED_BY", "CODE_OBJECT_IMPLEMENTS"],
+            allowed_create_node_types: &[
+                "CodeObjectDeclaration",
+                "CodeObjectAlias",
+                "CodeSymbol",
+                "CodeRoute",
+            ],
+            allowed_create_edge_types: &[
+                "CODE_OBJECT_HAS_ALIAS",
+                "CODE_OBJECT_REALIZED_BY",
+                "CODE_OBJECT_IMPLEMENTS",
+            ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
@@ -604,8 +613,8 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             description: "Move an existing declared code object to a new owned file path with placement validation.",
             required_input_fields: &["codeObject", "newFile", "reason"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
-            allowed_create_node_types: &["CodeObjectDeclaration", "CodeFile"],
-            allowed_create_edge_types: &["CODE_OBJECT_EXPECTS_FILE"],
+            allowed_create_node_types: &["CodeObjectDeclaration", "CodeObjectAlias", "CodeFile"],
+            allowed_create_edge_types: &["CODE_OBJECT_HAS_ALIAS", "CODE_OBJECT_EXPECTS_FILE"],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {

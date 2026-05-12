@@ -6036,6 +6036,14 @@ fn validate_code_object_lifecycle_semantic_preconditions(
                     "CodeObject.Rename must preserve the prior name in previousName.",
                 ));
             }
+            if code_object_has_lifecycle_references(graph, &updated.id)
+                && !lifecycle_has_alias(delta, &updated.id, "rename")
+            {
+                findings.push(semantic_finding(
+                    "semantic.code_object.rename_alias_required",
+                    "CodeObject.Rename for referenced objects requires CodeObjectAlias migration evidence.",
+                ));
+            }
             if lifecycle_touches_public_boundary(existing, updated)
                 && !lifecycle_has_compatibility_or_approval(updated)
             {
@@ -6058,6 +6066,14 @@ fn validate_code_object_lifecycle_semantic_preconditions(
                 findings.push(semantic_finding(
                     "semantic.code_object.move_previous_file_required",
                     "CodeObject.Move must preserve the prior file in previousFile.",
+                ));
+            }
+            if code_object_has_lifecycle_references(graph, &updated.id)
+                && !lifecycle_has_alias(delta, &updated.id, "move")
+            {
+                findings.push(semantic_finding(
+                    "semantic.code_object.move_alias_required",
+                    "CodeObject.Move for referenced objects requires CodeObjectAlias migration evidence.",
                 ));
             }
             if lifecycle_touches_public_boundary(existing, updated)
@@ -6133,6 +6149,40 @@ fn lifecycle_touches_public_boundary(existing: &Node, updated: &Node) -> bool {
 fn lifecycle_has_compatibility_or_approval(updated: &Node) -> bool {
     node_attr(updated, "compatibilityEvidence").is_some_and(|value| !value.trim().is_empty())
         || node_attr(updated, "approvalId").is_some_and(|value| !value.trim().is_empty())
+}
+
+fn lifecycle_has_alias(delta: &GraphDelta, target_id: &str, alias_type: &str) -> bool {
+    delta.create_edges.iter().any(|edge| {
+        edge.from == target_id
+            && edge.edge_type == "CODE_OBJECT_HAS_ALIAS"
+            && delta
+                .create_nodes
+                .iter()
+                .find(|node| node.id == edge.to)
+                .filter(|node| node.node_type == "CodeObjectAlias")
+                .and_then(|node| node_attr(node, "aliasType"))
+                .is_some_and(|value| value == alias_type)
+    })
+}
+
+fn code_object_has_lifecycle_references(graph: &Graph, declaration_id: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        (edge.from == declaration_id
+            && matches!(
+                edge.edge_type.as_str(),
+                "CODE_OBJECT_REALIZED_BY"
+                    | "CODE_OBJECT_FOR_ENDPOINT"
+                    | "CODE_OBJECT_FOR_USE_CASE"
+                    | "CODE_OBJECT_IMPLEMENTS"
+                    | "CODE_OBJECT_PARENT_SYMBOL"
+                    | "CODE_OBJECT_HAS_ALIAS"
+            ))
+            || (edge.to == declaration_id
+                && matches!(
+                    edge.edge_type.as_str(),
+                    "CODE_OBJECT_IMPLEMENTS" | "CODE_OBJECT_PARENT_OBJECT" | "IMPACTS"
+                ))
+    })
 }
 
 fn code_object_has_delete_blocking_references(graph: &Graph, declaration_id: &str) -> bool {
@@ -11490,6 +11540,78 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn code_object_rename_referenced_object_requires_alias_migration() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        add_realized_password_reset_symbol(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration
+            .attributes
+            .insert("name".to_string(), json!("requestPasswordResetV2"));
+        declaration
+            .attributes
+            .insert("previousName".to_string(), json!("requestPasswordReset"));
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Rename".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newName": "requestPasswordResetV2",
+                    "reason": "Rename referenced symbol",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration.clone()],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "CodeObject.Rename"
+        ));
+
+        let alias = code_object_alias_delta(
+            &declaration.id,
+            "AUTH-001/requestPasswordReset/rename-v2",
+            "rename",
+            "requestPasswordReset",
+            "requestPasswordResetV2",
+        );
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Rename".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newName": "requestPasswordResetV2",
+                    "reason": "Rename referenced symbol",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    create_nodes: alias.create_nodes,
+                    create_edges: alias.create_edges,
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        assert!(receipt.dry_run);
+    }
+
+    #[test]
     fn code_object_move_blocks_wrong_module_path() {
         let tmp = tempdir().unwrap();
         add_declared_password_reset_object(tmp.path());
@@ -11594,6 +11716,80 @@ acceptanceCriteria:
                 dry_run: true,
                 delta: GraphDelta {
                     update_nodes: vec![declaration],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        assert!(receipt.dry_run);
+    }
+
+    #[test]
+    fn code_object_move_referenced_object_requires_alias_migration() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        add_realized_password_reset_symbol(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration.attributes.insert(
+            "previousFile".to_string(),
+            json!("src/identity/password-reset.rs"),
+        );
+        declaration.attributes.insert(
+            "expectedFile".to_string(),
+            json!("src/identity/password-reset-v2.rs"),
+        );
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Move".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newFile": "src/identity/password-reset-v2.rs",
+                    "reason": "Move referenced symbol",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration.clone()],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "CodeObject.Move"
+        ));
+
+        let alias = code_object_alias_delta(
+            &declaration.id,
+            "AUTH-001/requestPasswordReset/move-v2",
+            "move",
+            "src/identity/password-reset.rs",
+            "src/identity/password-reset-v2.rs",
+        );
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Move".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newFile": "src/identity/password-reset-v2.rs",
+                    "reason": "Move referenced symbol",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    create_nodes: alias.create_nodes,
+                    create_edges: alias.create_edges,
                     ..GraphDelta::default()
                 },
             },
@@ -12840,6 +13036,77 @@ acceptanceCriteria:
         )
         .unwrap()
         .clone()
+    }
+
+    fn add_realized_password_reset_symbol(root: &Path) {
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "CodeGraph.Upsert".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeGraph": "symbol"}),
+                dry_run: false,
+                delta: code_symbol_delta(
+                    "src/identity/password-reset.rs",
+                    "function",
+                    "requestPasswordReset",
+                ),
+            },
+        )
+        .unwrap();
+        let declaration = current_password_reset_declaration(root);
+        let symbol_id = node_id(
+            "code_symbol",
+            "src/identity/password-reset.rs/function/requestPasswordReset",
+        );
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "CodeObject.LinkExisting".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": "requestPasswordReset", "existing": "symbol"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_edges: vec![edge(
+                        &declaration.id,
+                        "CODE_OBJECT_REALIZED_BY",
+                        &symbol_id,
+                    )],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+    }
+
+    fn code_object_alias_delta(
+        target_id: &str,
+        alias_id: &str,
+        alias_type: &str,
+        from_value: &str,
+        to_value: &str,
+    ) -> GraphDelta {
+        let alias_node_id = node_id("code_object_alias", alias_id);
+        GraphDelta {
+            create_nodes: vec![Node {
+                id: alias_node_id.clone(),
+                stable_key: format!("code-object-alias:{alias_id}"),
+                node_type: "CodeObjectAlias".to_string(),
+                attributes: BTreeMap::from([
+                    ("aliasType".to_string(), json!(alias_type)),
+                    ("from".to_string(), json!(from_value)),
+                    ("to".to_string(), json!(to_value)),
+                    (
+                        "migrationNote".to_string(),
+                        json!("Preserve graph references during lifecycle change"),
+                    ),
+                ]),
+            }],
+            create_edges: vec![edge(target_id, "CODE_OBJECT_HAS_ALIAS", &alias_node_id)],
+            ..GraphDelta::default()
+        }
     }
 
     fn add_action_graph_for_valid_spec(root: &Path) {

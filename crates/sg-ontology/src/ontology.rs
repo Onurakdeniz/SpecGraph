@@ -104,6 +104,7 @@ impl MvpOntology {
                 "ProviderCheckRun",
                 "CodeFile",
                 "CodeImport",
+                "CodeObjectAlias",
                 "CodeObjectDeclaration",
                 "CodeRoute",
                 "CodeSymbol",
@@ -263,6 +264,7 @@ impl MvpOntology {
                 "CODE_OBJECT_PARENT_OBJECT",
                 "CODE_OBJECT_FOR_ENDPOINT",
                 "CODE_OBJECT_FOR_USE_CASE",
+                "CODE_OBJECT_HAS_ALIAS",
                 "CODE_OBJECT_IMPLEMENTS",
                 "CODE_OBJECT_REALIZED_BY",
                 "HAS_REFACTOR_PLAN",
@@ -1424,6 +1426,7 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
         }
         "CODE_OBJECT_FOR_ENDPOINT" => Some((&["CodeObjectDeclaration"], &["Endpoint"])),
         "CODE_OBJECT_FOR_USE_CASE" => Some((&["CodeObjectDeclaration"], &["UseCase"])),
+        "CODE_OBJECT_HAS_ALIAS" => Some((&["CodeObjectDeclaration"], &["CodeObjectAlias"])),
         "CODE_OBJECT_IMPLEMENTS" => Some((
             &["CodeObjectDeclaration"],
             &["CodeObjectDeclaration", "CodeSymbol", "PublicInterface"],

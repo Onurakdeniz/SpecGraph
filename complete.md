@@ -125,8 +125,9 @@ Current completed slices:
 - **Phase 0.2C — Scope expansion, bugfix targeting, and failure/correction lifecycle** added action-scoped scope-expansion blockers requiring `Spec.Intent.Update` plus `Action.Replan`, bugfix permits gated on `RootCause -> CodeObjectDeclaration` evidence, `Action.Fail` failure/correction/escalation facts, and tests for replan blockers, root-cause targeting, and repeated-failure escalation.
 - **Phase 0.2D — Stale file-hash permit expiry** added `--expected-file-hash FILE=sha256:...` support to `sg workflow code-plan`, validates intended edit file hashes alongside graph state hashes, blocks stale file permits with `stale-work-permit`, and tests changed-file expiry.
 - **Phase 0.2E — Public lifecycle compatibility gates** hardened `CodeObject.Rename` and `CodeObject.Move` so public symbols require `compatibilityEvidence` or `approvalId`, with tests proving public rename/move blockers and approved/evidenced dry-runs.
+- **Phase 0.2F — Rename/move alias migration evidence** added `CodeObjectAlias` graph facts, `CODE_OBJECT_HAS_ALIAS` links, stable-key support, ABI/ontology coverage, and semantic gates requiring alias migration evidence when referenced code objects are renamed or moved.
 
-Next focus: **Phase 0.2F — Rename/move alias migration and broader delete safety**. Start from the latest `development`, finish stable alias/reference migration for rename/move and broaden delete blockers for specs, tests, public interfaces, endpoints, migrations, docs, and releases before marking Phase 0.2 complete.
+Next focus: **Phase 0.2G — Broader delete safety and Phase 0.2 closure audit**. Start from the latest `development`, broaden delete blockers for specs, tests, public interfaces, endpoints, migrations, docs, and releases before deciding whether Phase 0.2 can be marked complete.
 
 ---
 
@@ -357,7 +358,7 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [x] **Add update impact analysis.** Updating an existing function/type/method/route must identify all linked specs, tests, endpoints, modules, public interfaces, consumers, and releases that may be impacted.
 
-- [~] **Add rename/move safety checks.** Rename or move operations must update graph stable references or create migration/alias facts. Public symbols require compatibility evidence or approval.
+- [x] **Add rename/move safety checks.** Rename or move operations must update graph stable references or create migration/alias facts. Public symbols require compatibility evidence or approval.
 
 - [~] **Add delete safety checks.** Delete operations must be blocked if the object is referenced by specs, tests, public interfaces, endpoints, migrations, docs, or releases unless a deprecation/removal plan and approval exist.
 
