@@ -36,6 +36,30 @@ pub struct MigrationTestEvidence {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MigrationExecutionEvidence {
+    pub migration_id: String,
+    pub environment: String,
+    pub actor: String,
+    pub timestamp: String,
+    pub checksum: String,
+    pub result: String,
+    pub log_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationRollbackExecutionEvidence {
+    pub migration_id: String,
+    pub environment: String,
+    pub actor: String,
+    pub timestamp: String,
+    pub checksum: String,
+    pub result: String,
+    pub log_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MigrationObservation {
     pub id: String,
     pub file: String,
@@ -70,6 +94,73 @@ pub struct MigrationChangeObservation {
 impl MigrationObservation {
     pub fn to_delta(&self) -> GraphDelta {
         migration_observations_to_delta(std::slice::from_ref(self))
+    }
+}
+
+impl MigrationExecutionEvidence {
+    pub fn to_delta(&self) -> GraphDelta {
+        let migration_id = migration_node_id(&self.migration_id);
+        let execution_id = migration_execution_node_id(&self.migration_id, &self.environment);
+        GraphDelta {
+            create_nodes: vec![Node {
+                id: execution_id.clone(),
+                stable_key: format!(
+                    "migration-execution:{}/{}",
+                    stable_fragment(&self.migration_id),
+                    stable_fragment(&self.environment)
+                ),
+                node_type: "MigrationExecution".to_string(),
+                attributes: execution_attributes(
+                    &self.migration_id,
+                    &self.environment,
+                    &self.actor,
+                    &self.timestamp,
+                    &self.checksum,
+                    &self.result,
+                    &self.log_hash,
+                ),
+            }],
+            create_edges: vec![graph_edge(
+                &migration_id,
+                "HAS_MIGRATION_EXECUTION",
+                &execution_id,
+            )],
+            ..GraphDelta::default()
+        }
+    }
+}
+
+impl MigrationRollbackExecutionEvidence {
+    pub fn to_delta(&self) -> GraphDelta {
+        let migration_id = migration_node_id(&self.migration_id);
+        let execution_id =
+            migration_rollback_execution_node_id(&self.migration_id, &self.environment);
+        GraphDelta {
+            create_nodes: vec![Node {
+                id: execution_id.clone(),
+                stable_key: format!(
+                    "migration-rollback-execution:{}/{}",
+                    stable_fragment(&self.migration_id),
+                    stable_fragment(&self.environment)
+                ),
+                node_type: "MigrationRollbackExecution".to_string(),
+                attributes: execution_attributes(
+                    &self.migration_id,
+                    &self.environment,
+                    &self.actor,
+                    &self.timestamp,
+                    &self.checksum,
+                    &self.result,
+                    &self.log_hash,
+                ),
+            }],
+            create_edges: vec![graph_edge(
+                &migration_id,
+                "HAS_MIGRATION_ROLLBACK_EXECUTION",
+                &execution_id,
+            )],
+            ..GraphDelta::default()
+        }
     }
 }
 
@@ -307,6 +398,35 @@ pub fn validate_migration_runtime(graph: &Graph) -> Vec<Finding> {
         require_edge(graph, migration, "HAS_MIGRATION_TEST", &mut findings);
         require_edge(graph, migration, "AFFECTS_TABLE", &mut findings);
         require_impact_revalidation(graph, migration, &mut findings);
+    }
+    for execution in graph.nodes.values().filter(|node| {
+        matches!(
+            node.node_type.as_str(),
+            "MigrationExecution" | "MigrationRollbackExecution"
+        )
+    }) {
+        for attr in [
+            "migrationId",
+            "environment",
+            "actor",
+            "timestamp",
+            "checksum",
+            "result",
+            "logHash",
+        ] {
+            if node_attr(execution, attr).is_none() {
+                findings.push(
+                    finding(
+                        "migration_runtime.execution_metadata_required",
+                        format!(
+                            "{} `{}` requires `{attr}` metadata.",
+                            execution.node_type, execution.stable_key
+                        ),
+                    )
+                    .with_related_nodes([execution.id.clone()]),
+                );
+            }
+        }
     }
     findings
 }
@@ -621,6 +741,42 @@ pub fn migration_test_node_id(migration_id: &str, name: &str) -> String {
     )
 }
 
+pub fn migration_execution_node_id(migration_id: &str, environment: &str) -> String {
+    format!(
+        "node_migration_execution_{}_{}",
+        stable_fragment(migration_id),
+        stable_fragment(environment)
+    )
+}
+
+pub fn migration_rollback_execution_node_id(migration_id: &str, environment: &str) -> String {
+    format!(
+        "node_migration_rollback_execution_{}_{}",
+        stable_fragment(migration_id),
+        stable_fragment(environment)
+    )
+}
+
+fn execution_attributes(
+    migration_id: &str,
+    environment: &str,
+    actor: &str,
+    timestamp: &str,
+    checksum: &str,
+    result: &str,
+    log_hash: &str,
+) -> BTreeMap<String, serde_json::Value> {
+    BTreeMap::from([
+        ("migrationId".to_string(), json!(migration_id)),
+        ("environment".to_string(), json!(environment)),
+        ("actor".to_string(), json!(actor)),
+        ("timestamp".to_string(), json!(timestamp)),
+        ("checksum".to_string(), json!(checksum)),
+        ("result".to_string(), json!(result)),
+        ("logHash".to_string(), json!(log_hash)),
+    ])
+}
+
 fn module_node_id(name: &str) -> String {
     node_id("module", name)
 }
@@ -826,5 +982,42 @@ model User {
         let mut observed_graph = Graph::default();
         observed_graph.apply_delta(&observed.to_delta());
         assert!(validate_migration_runtime(&observed_graph).is_empty());
+    }
+
+    #[test]
+    fn migration_execution_evidence_records_required_metadata() {
+        let execution = MigrationExecutionEvidence {
+            migration_id: "migrations/001_users.sql".to_string(),
+            environment: "production".to_string(),
+            actor: "deploy-bot".to_string(),
+            timestamp: "2026-05-12T10:00:00Z".to_string(),
+            checksum: "sha256:abc".to_string(),
+            result: "Passed".to_string(),
+            log_hash: "sha256:log".to_string(),
+        };
+        let rollback = MigrationRollbackExecutionEvidence {
+            migration_id: execution.migration_id.clone(),
+            environment: execution.environment.clone(),
+            actor: execution.actor.clone(),
+            timestamp: execution.timestamp.clone(),
+            checksum: "sha256:rollback".to_string(),
+            result: "Ready".to_string(),
+            log_hash: "sha256:rollback-log".to_string(),
+        };
+
+        let mut graph = Graph::default();
+        graph.apply_delta(&execution.to_delta());
+        graph.apply_delta(&rollback.to_delta());
+
+        assert!(graph
+            .nodes
+            .values()
+            .any(|node| node.node_type == "MigrationExecution"
+                && node_attr(node, "environment") == Some("production")));
+        assert!(graph
+            .edges
+            .values()
+            .any(|edge| edge.edge_type == "HAS_MIGRATION_ROLLBACK_EXECUTION"));
+        assert!(validate_migration_runtime(&graph).is_empty());
     }
 }

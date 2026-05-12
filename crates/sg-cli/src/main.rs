@@ -5088,6 +5088,7 @@ fn release_validation_findings(graph: &Graph, version: &str, spec: Option<&str>)
             format!("Release `{version}` must link to a passed ValidationRun."),
         ));
     }
+    findings.extend(release_migration_evidence_findings(graph, release, version));
     if let Some(spec) = spec {
         match graph
             .nodes
@@ -5110,6 +5111,58 @@ fn release_validation_findings(graph: &Graph, version: &str, spec: Option<&str>)
                 "release.spec_missing",
                 format!("Spec `{spec}` is not present in the graph."),
             )),
+        }
+    }
+    findings
+}
+
+fn release_migration_evidence_findings(
+    graph: &Graph,
+    release: &Node,
+    version: &str,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for migration in graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == release.id && edge.edge_type == "RELEASE_INCLUDES_MIGRATION")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| node.node_type == "Migration")
+    {
+        if !graph_has_edge_to_type(
+            graph,
+            &migration.id,
+            "HAS_MIGRATION_EXECUTION",
+            "MigrationExecution",
+        ) {
+            findings.push(release_finding(
+                "release.migration_execution_missing",
+                format!(
+                    "Release `{version}` includes Migration `{}` without MigrationExecution evidence.",
+                    migration.stable_key
+                ),
+            ));
+        }
+        let destructive = graph_node_bool_attr(migration, "destructive")
+            || matches!(
+                graph_node_attr(migration, "riskClassification"),
+                Some("destructive" | "data-loss-risk" | "production-sensitive")
+            );
+        if destructive
+            && !graph_has_edge_to_type(
+                graph,
+                &migration.id,
+                "HAS_MIGRATION_ROLLBACK_EXECUTION",
+                "MigrationRollbackExecution",
+            )
+        {
+            findings.push(release_finding(
+                "release.migration_rollback_execution_missing",
+                format!(
+                    "Release `{version}` includes destructive Migration `{}` without MigrationRollbackExecution evidence.",
+                    migration.stable_key
+                ),
+            ));
         }
     }
     findings
@@ -5206,6 +5259,13 @@ fn release_finding(code: &str, message: String) -> Finding {
 
 fn graph_node_attr<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
     node.attributes.get(key).and_then(serde_json::Value::as_str)
+}
+
+fn graph_node_bool_attr(node: &Node, key: &str) -> bool {
+    node.attributes
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn graph_has_edge_to_type(graph: &Graph, from: &str, edge_type: &str, node_type: &str) -> bool {
@@ -7015,5 +7075,132 @@ mod tests {
         assert_eq!(blockers.policy.len(), 1);
         assert_eq!(blockers.impact.len(), 1);
         assert_eq!(blockers.expected_delta.len(), 1);
+    }
+
+    #[test]
+    fn release_validation_requires_migration_execution_evidence() {
+        let mut graph = Graph::default();
+        let release_id = release_node_id("1.0.0");
+        let migration_id = node_id("migration", "migrations/001_drop_users.sql");
+        let tag_id = node_id("git_tag", "v1.0.0");
+        let commit_id = node_id("git_commit", "abc123");
+        let validation_id = node_id("validation_run", "release");
+        let snapshot_id = node_id("graph_snapshot", "release");
+        let artifact_id = release_artifact_node_id("1.0.0", "dist/app.tar.gz");
+        let checksum_id = artifact_checksum_node_id("1.0.0", "dist/app.tar.gz", "sha256");
+
+        for node in [
+            Node {
+                id: release_id.clone(),
+                stable_key: "release:1.0.0".to_string(),
+                node_type: "Release".to_string(),
+                attributes: BTreeMap::from([("version".to_string(), json!("1.0.0"))]),
+            },
+            Node {
+                id: migration_id.clone(),
+                stable_key: "migration:migrations-001-drop-users-sql".to_string(),
+                node_type: "Migration".to_string(),
+                attributes: BTreeMap::from([
+                    ("riskClassification".to_string(), json!("destructive")),
+                    ("destructive".to_string(), json!(true)),
+                ]),
+            },
+            Node {
+                id: tag_id.clone(),
+                stable_key: "git-tag:v1.0.0".to_string(),
+                node_type: "GitTag".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: commit_id.clone(),
+                stable_key: "git-commit:abc123".to_string(),
+                node_type: "GitCommit".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: validation_id.clone(),
+                stable_key: "validation-run:release".to_string(),
+                node_type: "ValidationRun".to_string(),
+                attributes: BTreeMap::from([("status".to_string(), json!("Passed"))]),
+            },
+            Node {
+                id: snapshot_id.clone(),
+                stable_key: "graph-snapshot:release".to_string(),
+                node_type: "GraphSnapshot".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: artifact_id.clone(),
+                stable_key: "release-artifact:1.0.0/dist/app.tar.gz".to_string(),
+                node_type: "ReleaseArtifact".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: checksum_id.clone(),
+                stable_key: "artifact-checksum:1.0.0/dist/app.tar.gz/sha256".to_string(),
+                node_type: "ArtifactChecksum".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        ] {
+            graph.nodes.insert(node.id.clone(), node);
+        }
+
+        for edge_value in [
+            edge(&release_id, "RELEASES_TAG", &tag_id),
+            edge(&release_id, "RELEASES_COMMIT", &commit_id),
+            edge(&release_id, "RELEASE_HAS_VALIDATION_RUN", &validation_id),
+            edge(&release_id, "RELEASE_HAS_SNAPSHOT", &snapshot_id),
+            edge(&release_id, "RELEASE_HAS_ARTIFACT", &artifact_id),
+            edge(&artifact_id, "ARTIFACT_HAS_CHECKSUM", &checksum_id),
+            edge(&release_id, "RELEASE_INCLUDES_MIGRATION", &migration_id),
+        ] {
+            graph.edges.insert(edge_value.id.clone(), edge_value);
+        }
+
+        let findings = release_validation_findings(&graph, "1.0.0", None);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "release.migration_execution_missing"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "release.migration_rollback_execution_missing"));
+
+        let execution_id = node_id("migration_execution", "migrations/001_drop_users.sql/prod");
+        let rollback_id = node_id(
+            "migration_rollback_execution",
+            "migrations/001_drop_users.sql/prod",
+        );
+        for node in [
+            Node {
+                id: execution_id.clone(),
+                stable_key: "migration-execution:migrations-001-drop-users-sql/prod".to_string(),
+                node_type: "MigrationExecution".to_string(),
+                attributes: BTreeMap::new(),
+            },
+            Node {
+                id: rollback_id.clone(),
+                stable_key: "migration-rollback-execution:migrations-001-drop-users-sql/prod"
+                    .to_string(),
+                node_type: "MigrationRollbackExecution".to_string(),
+                attributes: BTreeMap::new(),
+            },
+        ] {
+            graph.nodes.insert(node.id.clone(), node);
+        }
+        for edge_value in [
+            edge(&migration_id, "HAS_MIGRATION_EXECUTION", &execution_id),
+            edge(
+                &migration_id,
+                "HAS_MIGRATION_ROLLBACK_EXECUTION",
+                &rollback_id,
+            ),
+        ] {
+            graph.edges.insert(edge_value.id.clone(), edge_value);
+        }
+
+        let findings = release_validation_findings(&graph, "1.0.0", None);
+        assert!(findings
+            .iter()
+            .all(|finding| !finding.code.starts_with("release.migration_")));
     }
 }

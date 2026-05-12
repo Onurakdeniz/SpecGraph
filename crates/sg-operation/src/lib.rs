@@ -179,6 +179,8 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
                 "RollbackPlan",
                 "MigrationTestEvidence",
                 "Table",
+                "MigrationExecution",
+                "MigrationRollbackExecution",
             ],
             allowed_create_edge_types: &[
                 "OWNED_BY_MODULE",
@@ -186,6 +188,8 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
                 "HAS_ROLLBACK_PLAN",
                 "HAS_MIGRATION_TEST",
                 "HAS_MIGRATION_APPROVAL",
+                "HAS_MIGRATION_EXECUTION",
+                "HAS_MIGRATION_ROLLBACK_EXECUTION",
             ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
@@ -467,7 +471,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             required_input_fields: &["version", "tag", "commit"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
             allowed_create_node_types: &["Release", "GitTag", "GitCommit", "GraphSnapshot", "ReleaseArtifact", "ArtifactChecksum", "ReleaseEvidence"],
-            allowed_create_edge_types: &["HAS_RELEASE", "SPEC_HAS_RELEASE", "RELEASES_TAG", "RELEASES_COMMIT", "RELEASE_HAS_VALIDATION_RUN", "SPEC_HAS_VALIDATION_RUN", "RELEASE_HAS_SNAPSHOT", "RELEASE_HAS_ARTIFACT", "RELEASE_HAS_CHECKSUM", "RELEASE_HAS_EVIDENCE", "ARTIFACT_HAS_CHECKSUM"],
+            allowed_create_edge_types: &["HAS_RELEASE", "SPEC_HAS_RELEASE", "RELEASES_TAG", "RELEASES_COMMIT", "RELEASE_HAS_VALIDATION_RUN", "SPEC_HAS_VALIDATION_RUN", "RELEASE_HAS_SNAPSHOT", "RELEASE_HAS_ARTIFACT", "RELEASE_HAS_CHECKSUM", "RELEASE_HAS_EVIDENCE", "ARTIFACT_HAS_CHECKSUM", "RELEASE_INCLUDES_MIGRATION"],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {

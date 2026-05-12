@@ -62,6 +62,8 @@ impl MvpOntology {
                 "Migration",
                 "RollbackPlan",
                 "MigrationTestEvidence",
+                "MigrationExecution",
+                "MigrationRollbackExecution",
                 "ReadModel",
                 "Query",
                 "Port",
@@ -1489,6 +1491,11 @@ fn endpoint_types(edge_type: &str) -> Option<(&'static [&'static str], &'static 
             &["MigrationTestEvidence", "TestCase", "ValidationRun"],
         )),
         "HAS_MIGRATION_APPROVAL" => Some((&["Migration"], &["Approval"])),
+        "HAS_MIGRATION_EXECUTION" => Some((&["Migration"], &["MigrationExecution"])),
+        "HAS_MIGRATION_ROLLBACK_EXECUTION" => {
+            Some((&["Migration"], &["MigrationRollbackExecution"]))
+        }
+        "RELEASE_INCLUDES_MIGRATION" => Some((&["Release"], &["Migration"])),
         "HAS_PORT" => Some((&["Project", "Module"], &["Port"])),
         "HAS_ADAPTER" => Some((&["Project", "Module"], &["Adapter"])),
         "USES_PORT" => Some((&["Module", "Adapter"], &["Port"])),

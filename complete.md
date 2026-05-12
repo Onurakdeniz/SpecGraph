@@ -152,8 +152,9 @@ Current completed slices:
 - **Phase 7A — Semantic indexer and cache foundations** added a versioned semantic indexer contract, deterministic Rust/TypeScript-JavaScript/Python indexers with provenance metadata, source visibility/location extraction, and `.specgraph/index/code` cache reuse with stable graph output.
 - **Phase 7B — Drift detection and trust promotion hardening** enforced observed-only `Code.Index` output, required accepted-observation evidence for observed CodeGraph promotion, expanded drift findings for missing/renamed symbols, route mismatch, stale trace links, missing use-case implementations, and unrepresented entities, and broadened language/framework fixture coverage.
 - **Phase 8A — Migration observation and risk policy foundations** added deterministic SQL/Prisma/Knex/TypeORM migration observers, `sg data observe --from`, observed-only migration/table facts, migration risk classification, and destructive/production-sensitive migration evidence policy checks.
+- **Phase 8B — Migration execution evidence and release gates** added `MigrationExecution` and `MigrationRollbackExecution` evidence facts, release-to-migration links, release validation blockers for missing migration execution/rollback evidence, and Phase 8 gate tests.
 
-Next focus after Phase 8A: **Phase 8B — Migration execution evidence and release gates**. Continue the five-checklist-item branch policy with execution/rollback evidence, release validation, broader migration tests, and the remaining Phase 8 gates.
+Next focus: **Phase 9 — LLM Proposal Provider Runtime**. Start from the latest `development` and continue the five-checklist-item branch policy with provider trait/config/schema, provider output validation, CLI generation, and unchanged proposal acceptance path.
 
 ---
 
@@ -787,17 +788,17 @@ Make database schema and migration governance usable for production changes.
 
 - [x] **Harden migration policy.** Destructive or production-sensitive migrations must require owner module, rollback plan, migration test evidence, approval, affected table links, and impacted action revalidation.
 
-- [ ] **Add execution evidence model.** Add `MigrationExecution` and `MigrationRollbackExecution` facts with environment, actor, timestamp, migration id, checksum, result, and log hash.
+- [x] **Add execution evidence model.** Add `MigrationExecution` and `MigrationRollbackExecution` facts with environment, actor, timestamp, migration id, checksum, result, and log hash.
 
-- [ ] **Link migrations to release.** Release validation must fail if release includes migration changes without required migration execution/rollback evidence where policy requires it.
+- [x] **Link migrations to release.** Release validation must fail if release includes migration changes without required migration execution/rollback evidence where policy requires it.
 
-- [ ] **Add tests.** Cover additive migration success, destructive migration blocked, missing owner blocked, missing rollback blocked, missing approval blocked, execution evidence accepted, and release blocked by incomplete migration evidence.
+- [x] **Add tests.** Cover additive migration success, destructive migration blocked, missing owner blocked, missing rollback blocked, missing approval blocked, execution evidence accepted, and release blocked by incomplete migration evidence.
 
 ## Phase Gate
 
-- [ ] Destructive migration without approval/rollback/test evidence fails.
-- [ ] Migration touching unknown table fails or remains observed/untrusted.
-- [ ] Release with migration changes requires migration evidence.
+- [x] Destructive migration without approval/rollback/test evidence fails.
+- [x] Migration touching unknown table fails or remains observed/untrusted.
+- [x] Release with migration changes requires migration evidence.
 
 ---
 
