@@ -311,7 +311,21 @@ pub struct WorkflowCodePlan {
     pub allowed_files: Vec<String>,
     pub allowed_symbols: Vec<String>,
     pub missing_graph_facts: Vec<String>,
+    pub user_choice_blockers: Vec<String>,
+    pub autonomy_audit_trail: Vec<AutonomyAuditEntry>,
     pub human_message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutonomyAuditEntry {
+    pub rule_id: String,
+    pub operation: String,
+    pub effect: String,
+    pub evidence: Vec<String>,
+    pub confidence: f32,
+    pub rollback_path: String,
+    pub replan_operation: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -345,6 +359,14 @@ const AGENT_AUTONOMY_RULES: &[AgentAutonomyRule] = &[
         operation: "CodeObject.LinkExisting",
         description: "Linking one obvious existing private code object is auto-allowed.",
         remediation_operation: "CodeObject.LinkExisting",
+    },
+    AgentAutonomyRule {
+        id: "autonomy.edit-declared-private",
+        effect: AgentAutonomyEffect::AutoAllowed,
+        operation: "Implementation.Authorize",
+        description:
+            "Editing a declared private code object inside its permit scope is auto-allowed.",
+        remediation_operation: "Action.Replan",
     },
     AgentAutonomyRule {
         id: "autonomy.module-creation-approval",
@@ -1433,6 +1455,8 @@ pub fn plan_code_workflow(
             allowed_files: Vec::new(),
             allowed_symbols: Vec::new(),
             missing_graph_facts: Vec::new(),
+            user_choice_blockers: Vec::new(),
+            autonomy_audit_trail: Vec::new(),
             human_message:
                 "Request appears documentation-only; do not issue an implementation edit permit."
                     .to_string(),
@@ -1479,6 +1503,8 @@ pub fn plan_code_workflow(
             allowed_files: Vec::new(),
             allowed_symbols: Vec::new(),
             missing_graph_facts: Vec::new(),
+            user_choice_blockers: Vec::new(),
+            autonomy_audit_trail: Vec::new(),
             human_message:
                 "The requested spec is already released; reference existing evidence instead of editing code."
                     .to_string(),
@@ -1548,13 +1574,54 @@ pub fn plan_code_workflow(
             allowed_files: Vec::new(),
             allowed_symbols: Vec::new(),
             missing_graph_facts: Vec::new(),
+            user_choice_blockers: vec!["ambiguous_existing_candidates".to_string()],
+            autonomy_audit_trail: Vec::new(),
             human_message:
                 "Multiple plausible existing objects were found; choose one before editing."
                     .to_string(),
         });
     }
 
+    let ambiguous_modules =
+        ambiguous_module_placement_candidates(&replay.graph, spec_node, module.as_deref());
+    if !ambiguous_modules.is_empty() && options.file.is_none() {
+        return Ok(WorkflowCodePlan {
+            schema_version: "specgraph.workflow-code-plan/v1".to_string(),
+            allowed: false,
+            blocked: true,
+            decision: "ambiguous-module-placement".to_string(),
+            change_type,
+            graph_branch: options.graph_branch,
+            action_id: action_binding.0,
+            commit_plan_id: action_binding.1,
+            file_hashes,
+            state_hash: replay.state_hash,
+            existing_candidates: resolution.existing_candidates,
+            selected_existing_object: None,
+            duplicate_risk: false,
+            create_allowed: false,
+            link_existing_allowed: false,
+            needs_user_choice: true,
+            required_operations: vec!["HumanDecision.Record".to_string()],
+            allowed_files: Vec::new(),
+            allowed_symbols: Vec::new(),
+            missing_graph_facts: ambiguous_modules
+                .iter()
+                .map(|module| format!("candidate-module:{module}"))
+                .collect(),
+            user_choice_blockers: vec!["ambiguous_module_placement".to_string()],
+            autonomy_audit_trail: Vec::new(),
+            human_message:
+                "Multiple valid module placements are possible; choose the owning module before editing."
+                    .to_string(),
+        });
+    }
+
     if let Some(selected) = resolution.selected_existing_object.clone() {
+        let audit = autonomy_audit_for_existing_candidate(
+            autonomy_rule("autonomy.link-existing-private"),
+            &selected,
+        );
         return Ok(WorkflowCodePlan {
             schema_version: "specgraph.workflow-code-plan/v1".to_string(),
             allowed: false,
@@ -1576,6 +1643,8 @@ pub fn plan_code_workflow(
             allowed_files: Vec::new(),
             allowed_symbols: Vec::new(),
             missing_graph_facts: Vec::new(),
+            user_choice_blockers: Vec::new(),
+            autonomy_audit_trail: vec![audit],
             human_message: format!(
                 "Matching private code already exists; `{}` allows automatically linking it instead of creating a duplicate.",
                 autonomy_rule("autonomy.link-existing-private").description
@@ -1687,6 +1756,11 @@ pub fn plan_code_workflow(
         allowed_files: allowed_file.into_iter().collect(),
         allowed_symbols: vec![name],
         missing_graph_facts: Vec::new(),
+        user_choice_blockers: Vec::new(),
+        autonomy_audit_trail: vec![autonomy_audit_for_edit_permit(
+            autonomy_rule("autonomy.edit-declared-private"),
+            declaration_node,
+        )],
         human_message: "Code object is declared and no existing duplicate candidate was found."
             .to_string(),
     })
@@ -1727,6 +1801,8 @@ fn blocked_code_plan(blocked: BlockedCodePlan) -> WorkflowCodePlan {
         allowed_files: Vec::new(),
         allowed_symbols: Vec::new(),
         missing_graph_facts: blocked.missing_graph_facts,
+        user_choice_blockers: Vec::new(),
+        autonomy_audit_trail: Vec::new(),
         human_message: blocked.human_message,
     }
 }
@@ -1737,6 +1813,107 @@ fn autonomy_rule(id: &str) -> AgentAutonomyRule {
         .copied()
         .find(|rule| rule.id == id)
         .expect("built-in autonomy rule id must exist")
+}
+
+fn ambiguous_module_placement_candidates(
+    graph: &Graph,
+    spec_node: &Node,
+    resolved_module: Option<&str>,
+) -> Vec<String> {
+    if resolved_module.is_some()
+        || graph
+            .edges
+            .values()
+            .any(|edge| edge.from == spec_node.id && edge.edge_type == "TOUCHES_MODULE")
+    {
+        return Vec::new();
+    }
+
+    let mut modules = graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "Module")
+        .filter_map(|node| {
+            node_attr(node, "name")
+                .or_else(|| node.stable_key.strip_prefix("module:"))
+                .map(ToString::to_string)
+        })
+        .collect::<Vec<_>>();
+    modules.sort();
+    modules.dedup();
+
+    if modules.len() > 1 {
+        modules
+    } else {
+        Vec::new()
+    }
+}
+
+fn autonomy_audit_for_existing_candidate(
+    rule: AgentAutonomyRule,
+    candidate: &ExistingCodeObjectCandidate,
+) -> AutonomyAuditEntry {
+    let mut evidence = vec![
+        format!("candidate:{}", candidate.stable_key),
+        format!("trustState:{}", candidate.trust_state),
+        format!("reason:{}", candidate.reason),
+    ];
+    if let Some(module) = candidate.module.as_deref() {
+        evidence.push(format!("module:{module}"));
+    }
+    if let Some(file) = candidate.file.as_deref() {
+        evidence.push(format!("file:{file}"));
+    }
+
+    AutonomyAuditEntry {
+        rule_id: rule.id.to_string(),
+        operation: rule.operation.to_string(),
+        effect: autonomy_effect_label(rule.effect).to_string(),
+        evidence,
+        confidence: candidate.confidence,
+        rollback_path: "Remove CODE_OBJECT_REALIZED_BY link and rerun sg workflow code-plan."
+            .to_string(),
+        replan_operation: "HumanDecision.Record".to_string(),
+    }
+}
+
+fn autonomy_audit_for_edit_permit(
+    rule: AgentAutonomyRule,
+    declaration: &Node,
+) -> AutonomyAuditEntry {
+    let mut evidence = vec![
+        format!("codeObject:{}", declaration.stable_key),
+        format!(
+            "visibility:{}",
+            node_attr(declaration, "visibility").unwrap_or("unknown")
+        ),
+        format!(
+            "status:{}",
+            node_attr(declaration, "status").unwrap_or("unknown")
+        ),
+    ];
+    if let Some(file) = node_attr(declaration, "expectedFile") {
+        evidence.push(format!("expectedFile:{file}"));
+    }
+
+    AutonomyAuditEntry {
+        rule_id: rule.id.to_string(),
+        operation: rule.operation.to_string(),
+        effect: autonomy_effect_label(rule.effect).to_string(),
+        evidence,
+        confidence: 1.0,
+        rollback_path: "Stop editing, discard local code changes, and rerun sg workflow code-plan."
+            .to_string(),
+        replan_operation: rule.remediation_operation.to_string(),
+    }
+}
+
+fn autonomy_effect_label(effect: AgentAutonomyEffect) -> &'static str {
+    match effect {
+        AgentAutonomyEffect::AutoAllowed => "auto-allowed",
+        AgentAutonomyEffect::ApprovalRequired => "approval-required",
+        AgentAutonomyEffect::Forbidden => "forbidden",
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -12998,6 +13175,133 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn human_decision_record_rejects_expired_scoped_approval() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_policy_approver(tmp.path(), "local:approver");
+        let approver_id = node_id("actor", "local:approver");
+        let approval_id = "AUTH-001/expired-human-decision";
+        let approval_node_id = node_id("approval", approval_id);
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Policy.RecordApproval".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "approval": "human-decision",
+                    "approvedBy": "local:approver",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: approval_node_id.clone(),
+                        stable_key: format!("approval:{approval_id}"),
+                        node_type: "Approval".to_string(),
+                        attributes: BTreeMap::from([
+                            ("approvalId".to_string(), json!(approval_id)),
+                            ("approval".to_string(), json!("human-decision")),
+                            ("approvedBy".to_string(), json!("local:approver")),
+                            (
+                                "scope".to_string(),
+                                json!("human-decision:AUTH-001/expired-approval"),
+                            ),
+                            ("expiresAt".to_string(), json!("2000-01-01T00:00:00Z")),
+                        ]),
+                    }],
+                    create_edges: vec![edge(&approver_id, "HAS_APPROVAL", &approval_node_id)],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+
+        let decision_id = "AUTH-001/expired-approval";
+        let decision_node_id = node_id("human_decision", decision_id);
+        let option_id = node_id("decision_option", &format!("{decision_id}/allow"));
+        let rationale_id = node_id("decision_rationale", decision_id);
+        let scope_id = node_id("decision_scope", &format!("{decision_id}/module/Identity"));
+        let spec_id = node_id("spec", "AUTH-001");
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "HumanDecision.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"decision": decision_id}),
+                dry_run: true,
+                delta: GraphDelta {
+                    create_nodes: vec![
+                        Node {
+                            id: decision_node_id.clone(),
+                            stable_key: format!("human-decision:{decision_id}"),
+                            node_type: "HumanDecision".to_string(),
+                            attributes: BTreeMap::from([
+                                ("decisionId".to_string(), json!(decision_id)),
+                                (
+                                    "authorizesOperation".to_string(),
+                                    json!("ModuleGraph.Upsert"),
+                                ),
+                                ("selectedOptionId".to_string(), json!("allow")),
+                                ("decidedBy".to_string(), json!("local:approver")),
+                            ]),
+                        },
+                        Node {
+                            id: option_id.clone(),
+                            stable_key: format!("decision-option:{decision_id}/allow"),
+                            node_type: "DecisionOption".to_string(),
+                            attributes: BTreeMap::from([
+                                ("optionId".to_string(), json!("allow")),
+                                ("label".to_string(), json!("Allow module update")),
+                            ]),
+                        },
+                        Node {
+                            id: rationale_id.clone(),
+                            stable_key: format!("decision-rationale:{decision_id}"),
+                            node_type: "DecisionRationale".to_string(),
+                            attributes: BTreeMap::from([(
+                                "rationale".to_string(),
+                                json!("Approver selected a scoped module update."),
+                            )]),
+                        },
+                        Node {
+                            id: scope_id.clone(),
+                            stable_key: format!("decision-scope:{decision_id}/module/Identity"),
+                            node_type: "DecisionScope".to_string(),
+                            attributes: BTreeMap::from([
+                                ("scopeType".to_string(), json!("module")),
+                                ("scopeValue".to_string(), json!("Identity")),
+                            ]),
+                        },
+                    ],
+                    create_edges: vec![
+                        edge(&spec_id, "HAS_HUMAN_DECISION", &decision_node_id),
+                        edge(&decision_node_id, "DECISION_HAS_OPTION", &option_id),
+                        edge(&decision_node_id, "DECISION_HAS_RATIONALE", &rationale_id),
+                        edge(&decision_node_id, "DECISION_HAS_SCOPE", &scope_id),
+                        edge(&decision_node_id, "DECISION_FOR_SPEC", &spec_id),
+                        edge(
+                            &decision_node_id,
+                            "DECISION_HAS_APPROVAL",
+                            &approval_node_id,
+                        ),
+                    ],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "HumanDecision.Record"
+        ));
+    }
+
+    #[test]
     fn action_fail_requires_escalation_after_repeated_failure() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -13454,6 +13758,12 @@ acceptanceCriteria:
         .unwrap();
         assert_eq!(ambiguous.decision, "ambiguous-existing-candidates");
         assert!(ambiguous.needs_user_choice);
+        assert!(ambiguous
+            .user_choice_blockers
+            .contains(&"ambiguous_existing_candidates".to_string()));
+        assert!(ambiguous
+            .required_operations
+            .contains(&"HumanDecision.Record".to_string()));
 
         append_operation(
             tmp.path(),
@@ -13690,6 +14000,12 @@ acceptanceCriteria:
             vec!["requestPasswordReset".to_string()]
         );
         assert_eq!(plan.change_type, "create");
+        assert_eq!(plan.autonomy_audit_trail.len(), 1);
+        assert_eq!(
+            plan.autonomy_audit_trail[0].rule_id,
+            "autonomy.edit-declared-private"
+        );
+        assert_eq!(plan.autonomy_audit_trail[0].effect, "auto-allowed");
     }
 
     #[test]
@@ -13960,6 +14276,15 @@ acceptanceCriteria:
         assert!(plan
             .required_operations
             .contains(&"CodeObject.LinkExisting".to_string()));
+        assert_eq!(plan.autonomy_audit_trail.len(), 1);
+        assert_eq!(
+            plan.autonomy_audit_trail[0].rule_id,
+            "autonomy.link-existing-private"
+        );
+        assert!(plan.autonomy_audit_trail[0]
+            .evidence
+            .iter()
+            .any(|evidence| evidence.contains("requestPasswordReset")));
     }
 
     #[test]
@@ -14047,6 +14372,98 @@ acceptanceCriteria:
         assert!(plan
             .missing_graph_facts
             .contains(&"autonomy.public-api-approval".to_string()));
+    }
+
+    #[test]
+    fn workflow_code_plan_requires_user_choice_for_ambiguous_module_placement() {
+        let tmp = tempdir().unwrap();
+        init_project(
+            tmp.path(),
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(tmp.path());
+        upsert_modules(
+            tmp.path(),
+            UpsertModuleGraphOptions {
+                modules: vec![
+                    ModuleDefinition {
+                        name: "Identity".to_string(),
+                        purpose: "Owns identity workflows".to_string(),
+                        layer: "application".to_string(),
+                        package: "src/identity".to_string(),
+                        capabilities: vec!["password-reset".to_string()],
+                        interfaces: Vec::new(),
+                    },
+                    ModuleDefinition {
+                        name: "Billing".to_string(),
+                        purpose: "Owns billing workflows".to_string(),
+                        layer: "application".to_string(),
+                        package: "src/billing".to_string(),
+                        capabilities: vec!["invoicing".to_string()],
+                        interfaces: Vec::new(),
+                    },
+                ],
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let projection = SpecProjection {
+            spec: "MULTI-001".to_string(),
+            title: "Ambiguous placement".to_string(),
+            requirements: vec![sg_spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "Add helper behavior".to_string(),
+            }],
+            acceptance_criteria: vec![sg_spec::TextItem {
+                id: "AC-001".to_string(),
+                text: "Helper behavior works".to_string(),
+            }],
+            ..SpecProjection::default()
+        };
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: projection.operation_input(),
+                dry_run: false,
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap();
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "MULTI-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:helper".to_string()],
+                file: None,
+                expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
+                actor: "agent:codex".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(plan.blocked);
+        assert!(plan.needs_user_choice);
+        assert_eq!(plan.decision, "ambiguous-module-placement");
+        assert!(plan
+            .user_choice_blockers
+            .contains(&"ambiguous_module_placement".to_string()));
+        assert!(plan
+            .required_operations
+            .contains(&"HumanDecision.Record".to_string()));
     }
 
     #[test]

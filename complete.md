@@ -130,8 +130,9 @@ Current completed slices:
 - **Phase 0.2H — Refactor closure and public API preservation** added semantic validation for `Refactor.Record`, requiring no behavior change, a refactor plan, preserved behavior, passed equivalence validation, target code objects, and public API preservation evidence for public targets.
 - **Phase 0.3A — Human decision graph facts** added `HumanDecision.Record`, `HumanDecision`, `DecisionOption`, `DecisionRationale`, and `DecisionScope` ontology/stable-key support, scoped target links, semantic checks for selected options/rationale/scopes/expiration, and tests for valid scoped choices plus expired broad unscoped blockers.
 - **Phase 0.3B — Agent autonomy policy and risky-operation gates** added a built-in autonomy policy table for auto-allowed, approval-required, and forbidden coding-agent operations; made obvious private `CodeObject.LinkExisting` non-blocking; and blocks module creation, public API edits, dependency/migration/release/security-sensitive intents, and direct secret edits unless scoped human approval exists where applicable.
+- **Phase 0.3C — Autonomous audit trails and user-choice blockers** added `userChoiceBlockers` and `autonomyAuditTrail` to workflow code-plan decisions, records rule/evidence/confidence/rollback/replan data for automatic link/edit choices, blocks ambiguous module placement with `HumanDecision.Record`, rejects expired scoped approvals, and completes the Phase 0.3 gate tests.
 
-Next focus: **Phase 0.3C — Autonomous audit trails and remaining user-choice blockers**. Start from the latest `development`, record the rule/evidence/confidence/rollback path for automatic choices, broaden user-choice blockers for ambiguous placement or competing strategies, and finish the remaining Phase 0.3 tests/gates.
+Next focus: **Phase 0.4 — Work Reservation and Multi-Agent Coordination**. Start from the latest `development`, add reservation graph facts and operations, wire reservations into strict/team edit permits, detect conflicts, handle expiry, expose status commands, and add tests.
 
 ---
 
@@ -399,21 +400,21 @@ Make it explicit which operations a coding agent may perform automatically and w
 
 - [x] **Add HumanDecision graph facts.** Model `HumanDecision`, `DecisionOption`, `DecisionRationale`, and `DecisionScope`. Decisions must link to the operation/spec/action they authorize.
 
-- [ ] **Add user-choice blockers.** When the system finds ambiguous candidates, risky assumptions, multiple valid module placements, or competing implementation strategies, return a blocker that requires user selection rather than guessing.
+- [x] **Add user-choice blockers.** When the system finds ambiguous candidates, risky assumptions, multiple valid module placements, or competing implementation strategies, return a blocker that requires user selection rather than guessing.
 
 - [x] **Add approval scopes.** Approval must be scoped to operation, spec, module, file path, public API, dependency, migration, release, or time window. Broad approvals must be explicit.
 
 - [x] **Add automatic operation limits.** Coding agents should be allowed to record observations, run dry-runs, link obvious existing private symbols, and propose declarations. They should not automatically approve risky graph changes.
 
-- [ ] **Add audit trail for autonomous choices.** Every automatic choice must record the rule that allowed it, the evidence used, confidence, and rollback/replan path.
+- [x] **Add audit trail for autonomous choices.** Every automatic choice must record the rule that allowed it, the evidence used, confidence, and rollback/replan path.
 
-- [ ] **Add tests.** Cover auto-allowed link existing, blocked module creation without approval, public API change requiring approval, ambiguous placement requiring user choice, expired approval rejection, and audit trail generation.
+- [x] **Add tests.** Cover auto-allowed link existing, blocked module creation without approval, public API change requiring approval, ambiguous placement requiring user choice, expired approval rejection, and audit trail generation.
 
 ## Phase Gate
 
-- [ ] Agent cannot make risky product/security/data/API/release decisions silently.
-- [ ] Ambiguity returns user-choice blockers.
-- [ ] Approvals are scoped and auditable.
+- [x] Agent cannot make risky product/security/data/API/release decisions silently.
+- [x] Ambiguity returns user-choice blockers.
+- [x] Approvals are scoped and auditable.
 
 ---
 
