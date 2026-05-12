@@ -5018,7 +5018,16 @@ fn spec_state_blockers(graph: &Graph, spec_node_id: &str, target_state: &str) ->
     }
 
     if target_state == "Released" {
+        for finding in review_gate_findings(graph) {
+            blockers.push(finding.message);
+        }
         for finding in validation_recipe_gate_findings(graph) {
+            blockers.push(finding.message);
+        }
+        for finding in release_governance_gate_findings(graph) {
+            blockers.push(finding.message);
+        }
+        for finding in post_release_gate_findings(graph) {
             blockers.push(finding.message);
         }
 
@@ -5200,6 +5209,9 @@ fn action_lifecycle_blockers(graph: &Graph, action_id: &str, target_state: &str)
     }
 
     if target_state == "Completed" {
+        for finding in review_gate_findings_for_action(graph, action_id) {
+            blockers.push(finding.message);
+        }
         let required_recipes = action_required_validation_recipes(graph, action_id);
         if required_recipes.is_empty() {
             let has_passed_validation = graph.nodes.values().any(|node| {
@@ -5312,6 +5324,220 @@ pub fn validation_recipe_gate_findings(graph: &Graph) -> Vec<Finding> {
             )
         })
         .collect()
+}
+
+pub fn review_gate_findings(graph: &Graph) -> Vec<Finding> {
+    unresolved_requested_changes(graph)
+        .into_iter()
+        .map(unresolved_requested_change_finding)
+        .collect()
+}
+
+fn review_gate_findings_for_action(graph: &Graph, action_id: &str) -> Vec<Finding> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == action_id && edge.edge_type == "ACTION_HAS_REVIEW")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .flat_map(|review| unresolved_requested_changes_for_review(graph, &review.id))
+        .map(unresolved_requested_change_finding)
+        .collect()
+}
+
+fn unresolved_requested_changes(graph: &Graph) -> Vec<&Node> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "RequestedChange")
+        .filter(|change| !requested_change_is_resolved(graph, &change.id))
+        .collect()
+}
+
+fn unresolved_requested_changes_for_review<'a>(graph: &'a Graph, review_id: &str) -> Vec<&'a Node> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == review_id && edge.edge_type == "REVIEW_REQUESTS_CHANGE")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| node.node_type == "RequestedChange")
+        .filter(|change| !requested_change_is_resolved(graph, &change.id))
+        .collect()
+}
+
+fn requested_change_is_resolved(graph: &Graph, requested_change_id: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.from == requested_change_id
+            && ((edge.edge_type == "REQUESTED_CHANGE_RESOLVED_BY"
+                && graph.nodes.get(&edge.to).is_some_and(|resolution| {
+                    resolution.node_type == "ReviewResolution"
+                        && matches!(
+                            node_attr(resolution, "status"),
+                            Some("Resolved" | "Accepted" | "Closed")
+                        )
+                }))
+                || (edge.edge_type == "REQUESTED_CHANGE_APPROVED_BY"
+                    && graph.nodes.get(&edge.to).is_some_and(|approval| {
+                        approval.node_type == "ReviewApproval"
+                            && matches!(
+                                node_attr(approval, "status"),
+                                Some("Approved" | "Accepted")
+                            )
+                    })))
+    })
+}
+
+fn unresolved_requested_change_finding(change: &Node) -> Finding {
+    semantic_finding(
+        "semantic.review.requested_change_unresolved",
+        format!(
+            "RequestedChange `{}` is unresolved. Record ReviewResolution or scoped ReviewApproval before action completion, PR validation, or release.",
+            change.stable_key
+        ),
+    )
+}
+
+pub fn release_governance_gate_findings(graph: &Graph) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for release in graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "Release" && release_requires_governance(node))
+    {
+        if !release_has_edge_to_type(graph, release, "RELEASE_HAS_ROLLOUT_PLAN", "RolloutPlan") {
+            findings.push(semantic_finding(
+                "semantic.release.rollout_plan_required",
+                format!(
+                    "Risky Release `{}` requires RolloutPlan evidence.",
+                    release.stable_key
+                ),
+            ));
+        }
+        if !release_has_edge_to_type(
+            graph,
+            release,
+            "RELEASE_HAS_ROLLBACK_STRATEGY",
+            "RollbackStrategy",
+        ) {
+            findings.push(semantic_finding(
+                "semantic.release.rollback_strategy_required",
+                format!(
+                    "Risky Release `{}` requires RollbackStrategy evidence.",
+                    release.stable_key
+                ),
+            ));
+        }
+        if !release_has_any_observability(graph, release) {
+            findings.push(semantic_finding(
+                "semantic.release.observability_required",
+                format!(
+                    "Risky Release `{}` requires metric/log/trace/audit/alert/SLO observability evidence.",
+                    release.stable_key
+                ),
+            ));
+        }
+        if release_is_security_sensitive(release) {
+            if !release_has_edge_to_type(graph, release, "RELEASE_OBSERVES_METRIC", "Metric") {
+                findings.push(semantic_finding(
+                    "semantic.release.security_metric_required",
+                    format!(
+                        "Security-sensitive Release `{}` requires Metric evidence.",
+                        release.stable_key
+                    ),
+                ));
+            }
+            if !release_has_edge_to_type(graph, release, "RELEASE_HAS_AUDIT_EVENT", "AuditEvent") {
+                findings.push(semantic_finding(
+                    "semantic.release.audit_event_required",
+                    format!(
+                        "Security-sensitive Release `{}` requires AuditEvent evidence.",
+                        release.stable_key
+                    ),
+                ));
+            }
+        }
+    }
+    findings
+}
+
+pub fn post_release_gate_findings(graph: &Graph) -> Vec<Finding> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| {
+            matches!(
+                node.node_type.as_str(),
+                "PostReleaseCheck" | "ReleaseHealthCheck"
+            ) && node_attr(node, "status") == Some("Failed")
+                && !post_release_failure_has_follow_up(graph, &node.id)
+        })
+        .map(|check| {
+            semantic_finding(
+                "semantic.release.post_release_follow_up_required",
+                format!(
+                    "{} `{}` failed and requires linked issue, rollback, or replan evidence.",
+                    check.node_type, check.stable_key
+                ),
+            )
+        })
+        .collect()
+}
+
+fn release_requires_governance(release: &Node) -> bool {
+    node_bool_attr(release, "risky")
+        || node_bool_attr(release, "securitySensitive")
+        || matches!(
+            node_attr(release, "riskLevel"),
+            Some("high" | "critical" | "security" | "operational")
+        )
+}
+
+fn release_is_security_sensitive(release: &Node) -> bool {
+    node_bool_attr(release, "securitySensitive")
+        || matches!(
+            node_attr(release, "riskLevel"),
+            Some("security" | "critical")
+        )
+}
+
+fn release_has_edge_to_type(
+    graph: &Graph,
+    release: &Node,
+    edge_type: &str,
+    node_type: &str,
+) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.from == release.id
+            && edge.edge_type == edge_type
+            && graph
+                .nodes
+                .get(&edge.to)
+                .is_some_and(|node| node.node_type == node_type)
+    })
+}
+
+fn release_has_any_observability(graph: &Graph, release: &Node) -> bool {
+    [
+        ("RELEASE_OBSERVES_METRIC", "Metric"),
+        ("RELEASE_OBSERVES_LOG_EVENT", "LogEvent"),
+        ("RELEASE_OBSERVES_TRACE_SPAN", "TraceSpan"),
+        ("RELEASE_HAS_AUDIT_EVENT", "AuditEvent"),
+        ("RELEASE_HAS_OPERATIONAL_ALERT", "OperationalAlert"),
+        ("RELEASE_HAS_SLO", "SLO"),
+    ]
+    .iter()
+    .any(|(edge_type, node_type)| release_has_edge_to_type(graph, release, edge_type, node_type))
+}
+
+fn post_release_failure_has_follow_up(graph: &Graph, check_id: &str) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.from == check_id
+            && matches!(
+                edge.edge_type.as_str(),
+                "POST_RELEASE_CHECK_CREATED_ISSUE"
+                    | "POST_RELEASE_CHECK_TRIGGERED_ROLLBACK"
+                    | "POST_RELEASE_CHECK_REQUIRES_REPLAN"
+            )
+    })
 }
 
 pub fn list_action_graph(root: &Path, spec: &str) -> Result<ActionGraphSummary> {
@@ -6521,6 +6747,10 @@ fn validate_operation_semantic_preconditions(
             validate_validation_recipe_semantic_preconditions(graph, request, delta)
         }
         "TestIntent.Record" => validate_test_intent_semantic_preconditions(graph, delta),
+        "Review.Record" => validate_review_record_semantic_preconditions(graph, delta),
+        "ReleaseGovernance.Record" => {
+            validate_release_governance_semantic_preconditions(graph, delta)
+        }
         "Intent.RecordDecision" => {
             validate_intent_record_decision_semantic_preconditions(graph, delta)
         }
@@ -7932,6 +8162,143 @@ fn acceptance_criterion_requires_positive_and_negative(criterion: &Node) -> bool
     text.contains("email")
         && text.contains("existing")
         && (text.contains("unknown") || text.contains("nonexistent") || text.contains("missing"))
+}
+
+fn validate_review_record_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let reviews = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "Review")
+        .collect::<Vec<_>>();
+    if reviews.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.review.review_required",
+            "Review.Record must create or update at least one Review.",
+        ));
+    }
+    for review in reviews {
+        let scoped = delta
+            .create_edges
+            .iter()
+            .chain(graph.edges.values())
+            .any(|edge| {
+                edge.to == review.id
+                    && matches!(
+                        edge.edge_type.as_str(),
+                        "SPEC_HAS_REVIEW" | "ACTION_HAS_REVIEW" | "PR_HAS_REVIEW"
+                    )
+            });
+        if !scoped {
+            findings.push(semantic_finding(
+                "semantic.review.scope_required",
+                "Review must be scoped to a Spec, ActionNode, or PullRequest.",
+            ));
+        }
+    }
+    for change in delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "RequestedChange")
+    {
+        if node_attr(change, "summary").is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.review.requested_change_summary_required",
+                "RequestedChange requires non-empty `summary`.",
+            ));
+        }
+    }
+    findings
+}
+
+fn validate_release_governance_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let has_governance_fact = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .any(|node| {
+            matches!(
+                node.node_type.as_str(),
+                "RolloutPlan"
+                    | "FeatureFlag"
+                    | "RollbackStrategy"
+                    | "PostReleaseCheck"
+                    | "ReleaseHealthCheck"
+                    | "Metric"
+                    | "LogEvent"
+                    | "TraceSpan"
+                    | "AuditEvent"
+                    | "OperationalAlert"
+                    | "SLO"
+            )
+        });
+    if !has_governance_fact {
+        findings.push(semantic_finding(
+            "semantic.release_governance.fact_required",
+            "ReleaseGovernance.Record must create or update rollout, rollback, observability, or post-release evidence.",
+        ));
+    }
+
+    for check in delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| {
+            matches!(
+                node.node_type.as_str(),
+                "PostReleaseCheck" | "ReleaseHealthCheck"
+            )
+        })
+    {
+        let linked_to_release = delta
+            .create_edges
+            .iter()
+            .chain(graph.edges.values())
+            .any(|edge| {
+                edge.to == check.id
+                    && matches!(
+                        edge.edge_type.as_str(),
+                        "RELEASE_HAS_POST_RELEASE_CHECK" | "RELEASE_HAS_HEALTH_CHECK"
+                    )
+                    && node_exists_with_type(graph, delta, &edge.from, "Release")
+            });
+        if !linked_to_release {
+            findings.push(semantic_finding(
+                "semantic.release_governance.post_release_link_required",
+                "Post-release and release-health checks must be linked to a Release.",
+            ));
+        }
+        if node_attr(check, "status") == Some("Failed")
+            && !delta
+                .create_edges
+                .iter()
+                .chain(graph.edges.values())
+                .any(|edge| {
+                    edge.from == check.id
+                        && matches!(
+                            edge.edge_type.as_str(),
+                            "POST_RELEASE_CHECK_CREATED_ISSUE"
+                                | "POST_RELEASE_CHECK_TRIGGERED_ROLLBACK"
+                                | "POST_RELEASE_CHECK_REQUIRES_REPLAN"
+                        )
+                })
+        {
+            findings.push(semantic_finding(
+                "semantic.release_governance.failed_check_follow_up_required",
+                "Failed post-release checks must link to issue, rollback, or replan follow-up evidence.",
+            ));
+        }
+    }
+    findings
 }
 
 fn validate_intent_record_decision_semantic_preconditions(
@@ -12553,6 +12920,152 @@ acceptanceCriteria:
                 input: json!({"testIntent": "AUTH-001/AC-EMAIL"}),
                 dry_run: true,
                 delta: test_intent_delta(true),
+            },
+        )
+        .unwrap();
+        assert!(accepted.dry_run);
+    }
+
+    #[test]
+    fn unresolved_requested_review_change_blocks_completion_and_validation_gates() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "action".to_string(),
+            Node {
+                id: "action".to_string(),
+                stable_key: "action-node:AUTH-001/implementation".to_string(),
+                node_type: "ActionNode".to_string(),
+                attributes: BTreeMap::from([("state".to_string(), json!("InProgress"))]),
+            },
+        );
+        graph.nodes.insert(
+            "review".to_string(),
+            Node {
+                id: "review".to_string(),
+                stable_key: "review:AUTH-001/pr-42".to_string(),
+                node_type: "Review".to_string(),
+                attributes: BTreeMap::from([("source".to_string(), json!("manual"))]),
+            },
+        );
+        graph.nodes.insert(
+            "change".to_string(),
+            Node {
+                id: "change".to_string(),
+                stable_key: "requested-change:AUTH-001/pr-42/change-1".to_string(),
+                node_type: "RequestedChange".to_string(),
+                attributes: BTreeMap::from([("summary".to_string(), json!("Handle error path"))]),
+            },
+        );
+        graph.edges.insert(
+            "action-review".to_string(),
+            edge("action", "ACTION_HAS_REVIEW", "review"),
+        );
+        graph.edges.insert(
+            "review-change".to_string(),
+            edge("review", "REVIEW_REQUESTS_CHANGE", "change"),
+        );
+
+        let action_blockers = action_lifecycle_blockers(&graph, "action", "Completed");
+        assert!(action_blockers
+            .iter()
+            .any(|blocker| blocker.contains("RequestedChange")));
+        assert!(review_gate_findings(&graph)
+            .iter()
+            .any(|finding| finding.code == "semantic.review.requested_change_unresolved"));
+
+        graph.nodes.insert(
+            "resolution".to_string(),
+            Node {
+                id: "resolution".to_string(),
+                stable_key: "review-resolution:AUTH-001/pr-42/change-1".to_string(),
+                node_type: "ReviewResolution".to_string(),
+                attributes: BTreeMap::from([("status".to_string(), json!("Resolved"))]),
+            },
+        );
+        graph.edges.insert(
+            "change-resolution".to_string(),
+            edge("change", "REQUESTED_CHANGE_RESOLVED_BY", "resolution"),
+        );
+        assert!(review_gate_findings(&graph).is_empty());
+    }
+
+    #[test]
+    fn risky_release_requires_rollout_rollback_observability_and_follow_up() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "release".to_string(),
+            Node {
+                id: "release".to_string(),
+                stable_key: "release:AUTH-001:1.0.0".to_string(),
+                node_type: "Release".to_string(),
+                attributes: BTreeMap::from([
+                    ("risky".to_string(), json!(true)),
+                    ("securitySensitive".to_string(), json!(true)),
+                ]),
+            },
+        );
+        let findings = release_governance_gate_findings(&graph);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "semantic.release.rollout_plan_required"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "semantic.release.rollback_strategy_required"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "semantic.release.audit_event_required"));
+
+        graph.nodes.insert(
+            "check".to_string(),
+            Node {
+                id: "check".to_string(),
+                stable_key: "post-release-check:AUTH-001/smoke".to_string(),
+                node_type: "PostReleaseCheck".to_string(),
+                attributes: BTreeMap::from([("status".to_string(), json!("Failed"))]),
+            },
+        );
+        graph.edges.insert(
+            "release-check".to_string(),
+            edge("release", "RELEASE_HAS_POST_RELEASE_CHECK", "check"),
+        );
+        assert!(post_release_gate_findings(&graph)
+            .iter()
+            .any(|finding| { finding.code == "semantic.release.post_release_follow_up_required" }));
+    }
+
+    #[test]
+    fn release_governance_record_requires_failed_check_follow_up() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        add_release_for_spec(tmp.path(), "AUTH-001");
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "ReleaseGovernance.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"releaseGovernance": "AUTH-001/1.0.0"}),
+                dry_run: true,
+                delta: release_governance_delta(false),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed { operation, .. }
+                if operation == "ReleaseGovernance.Record"
+        ));
+
+        let accepted = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "ReleaseGovernance.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"releaseGovernance": "AUTH-001/1.0.0"}),
+                dry_run: true,
+                delta: release_governance_delta(true),
             },
         )
         .unwrap();
@@ -18339,6 +18852,87 @@ acceptanceCriteria:
                 &intent_id,
                 "TEST_INTENT_HAS_NEGATIVE_CASE",
                 &negative_id,
+            ));
+        }
+        GraphDelta {
+            create_nodes,
+            create_edges,
+            ..GraphDelta::default()
+        }
+    }
+
+    fn release_governance_delta(include_follow_up: bool) -> GraphDelta {
+        let release_id = node_id("release", "AUTH-001/1.0.0");
+        let rollout_id = node_id("rollout_plan", "AUTH-001/1.0.0/phased");
+        let flag_id = node_id("feature_flag", "password-reset-v2");
+        let rollback_id = node_id("rollback_strategy", "AUTH-001/1.0.0/revert");
+        let metric_id = node_id("metric", "auth/password-reset-requests");
+        let audit_id = node_id("audit_event", "auth/password-reset-requested");
+        let check_id = node_id("post_release_check", "AUTH-001/1.0.0/smoke");
+        let issue_id = node_id("issue", "AUTH-001/post-release-smoke");
+        let mut create_nodes = vec![
+            Node {
+                id: rollout_id.clone(),
+                stable_key: "rollout-plan:AUTH-001/1.0.0/phased".to_string(),
+                node_type: "RolloutPlan".to_string(),
+                attributes: BTreeMap::from([("strategy".to_string(), json!("phased"))]),
+            },
+            Node {
+                id: flag_id.clone(),
+                stable_key: "feature-flag:password-reset-v2".to_string(),
+                node_type: "FeatureFlag".to_string(),
+                attributes: BTreeMap::from([("name".to_string(), json!("password-reset-v2"))]),
+            },
+            Node {
+                id: rollback_id.clone(),
+                stable_key: "rollback-strategy:AUTH-001/1.0.0/revert".to_string(),
+                node_type: "RollbackStrategy".to_string(),
+                attributes: BTreeMap::from([("strategy".to_string(), json!("revert"))]),
+            },
+            Node {
+                id: metric_id.clone(),
+                stable_key: "metric:auth/password-reset-requests".to_string(),
+                node_type: "Metric".to_string(),
+                attributes: BTreeMap::from([(
+                    "name".to_string(),
+                    json!("password_reset_requests"),
+                )]),
+            },
+            Node {
+                id: audit_id.clone(),
+                stable_key: "audit-event:auth/password-reset-requested".to_string(),
+                node_type: "AuditEvent".to_string(),
+                attributes: BTreeMap::from([(
+                    "event".to_string(),
+                    json!("password_reset_requested"),
+                )]),
+            },
+            Node {
+                id: check_id.clone(),
+                stable_key: "post-release-check:AUTH-001/1.0.0/smoke".to_string(),
+                node_type: "PostReleaseCheck".to_string(),
+                attributes: BTreeMap::from([("status".to_string(), json!("Failed"))]),
+            },
+        ];
+        let mut create_edges = vec![
+            edge(&release_id, "RELEASE_HAS_ROLLOUT_PLAN", &rollout_id),
+            edge(&rollout_id, "ROLLOUT_USES_FEATURE_FLAG", &flag_id),
+            edge(&release_id, "RELEASE_HAS_ROLLBACK_STRATEGY", &rollback_id),
+            edge(&release_id, "RELEASE_OBSERVES_METRIC", &metric_id),
+            edge(&release_id, "RELEASE_HAS_AUDIT_EVENT", &audit_id),
+            edge(&release_id, "RELEASE_HAS_POST_RELEASE_CHECK", &check_id),
+        ];
+        if include_follow_up {
+            create_nodes.push(Node {
+                id: issue_id.clone(),
+                stable_key: "issue:AUTH-001/post-release-smoke".to_string(),
+                node_type: "Issue".to_string(),
+                attributes: BTreeMap::from([("status".to_string(), json!("Open"))]),
+            });
+            create_edges.push(edge(
+                &check_id,
+                "POST_RELEASE_CHECK_CREATED_ISSUE",
+                &issue_id,
             ));
         }
         GraphDelta {

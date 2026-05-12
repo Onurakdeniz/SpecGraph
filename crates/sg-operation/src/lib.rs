@@ -1039,6 +1039,71 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Review.Record",
+            category: "review",
+            description: "Record manual/provider review comments, requested changes, resolutions, and scoped review approvals.",
+            required_input_fields: &["review"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "Review",
+                "ReviewComment",
+                "RequestedChange",
+                "ReviewResolution",
+                "ReviewApproval",
+            ],
+            allowed_create_edge_types: &[
+                "SPEC_HAS_REVIEW",
+                "ACTION_HAS_REVIEW",
+                "PR_HAS_REVIEW",
+                "REVIEW_HAS_COMMENT",
+                "REVIEW_REQUESTS_CHANGE",
+                "REQUESTED_CHANGE_RESOLVED_BY",
+                "REQUESTED_CHANGE_APPROVED_BY",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "ReleaseGovernance.Record",
+            category: "release",
+            description: "Record rollout, rollback, observability, and post-release validation evidence for risky releases.",
+            required_input_fields: &["releaseGovernance"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "RolloutPlan",
+                "FeatureFlag",
+                "RollbackStrategy",
+                "PostReleaseCheck",
+                "ReleaseHealthCheck",
+                "Metric",
+                "LogEvent",
+                "TraceSpan",
+                "AuditEvent",
+                "OperationalAlert",
+                "SLO",
+                "Issue",
+                "ActionNode",
+            ],
+            allowed_create_edge_types: &[
+                "RELEASE_HAS_ROLLOUT_PLAN",
+                "ROLLOUT_USES_FEATURE_FLAG",
+                "RELEASE_HAS_ROLLBACK_STRATEGY",
+                "RELEASE_HAS_POST_RELEASE_CHECK",
+                "RELEASE_HAS_HEALTH_CHECK",
+                "RELEASE_OBSERVES_METRIC",
+                "RELEASE_OBSERVES_LOG_EVENT",
+                "RELEASE_OBSERVES_TRACE_SPAN",
+                "RELEASE_HAS_AUDIT_EVENT",
+                "RELEASE_HAS_OPERATIONAL_ALERT",
+                "RELEASE_HAS_SLO",
+                "POST_RELEASE_CHECK_CREATED_ISSUE",
+                "POST_RELEASE_CHECK_TRIGGERED_ROLLBACK",
+                "POST_RELEASE_CHECK_REQUIRES_REPLAN",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "IssueGraph.Record",
             category: "issue",
             description: "Record IssueGraph lifecycle facts for bugs, reproduction, root cause, fix spec, regression, and closure evidence.",
@@ -1551,6 +1616,22 @@ mod tests {
         assert!(intent
             .allowed_create_edge_types
             .contains(&"TEST_INTENT_HAS_NEGATIVE_CASE"));
+
+        let review = find_operation("Review.Record").unwrap();
+        assert!(review
+            .allowed_create_node_types
+            .contains(&"RequestedChange"));
+        assert!(review
+            .allowed_create_edge_types
+            .contains(&"REQUESTED_CHANGE_RESOLVED_BY"));
+
+        let release_governance = find_operation("ReleaseGovernance.Record").unwrap();
+        assert!(release_governance
+            .allowed_create_node_types
+            .contains(&"RollbackStrategy"));
+        assert!(release_governance
+            .allowed_create_edge_types
+            .contains(&"RELEASE_HAS_POST_RELEASE_CHECK"));
     }
 
     #[test]

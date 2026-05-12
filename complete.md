@@ -137,8 +137,9 @@ Current completed slices:
 - **Phase 0.5B — Dependency graph facts and operations** added dependency/package-manifest/version/lockfile/license/advisory facts, stable-key/ontology/operation ABI support for `Dependency.Add/Update/Remove`, semantic gates for manifest, lockfile consistency, license, advisory, and risky-dependency approval evidence, plus tests.
 - **Phase 0.5C — Generated-code, public contract, docs, and projection governance** added generated-file/source/generator facts, public API contract/request/response/consumer/breaking-change facts, example/changelog evidence, `GeneratedCode.Record` and `PublicContract.Record` ABI/semantic gates, generated-file edit permit blockers, public compatibility/docs requirements, projection drift findings, and tests.
 - **Phase 0.6A — Validation recipes and test intent** added validation recipe/command/build/typecheck/lint/format evidence facts, action/commit-plan recipe requirements, adapter-execution guardrails, recipe gate findings for action/PR/release validation, test intent/assertion/scenario facts, existing/unknown email positive/negative scenario completeness checks, and tests.
+- **Phase 0.6B — Review, rollout, rollback, observability, and post-release gates** added review/requested-change/resolution/approval facts, unresolved review blockers for action/PR/release gates, rollout/feature-flag/rollback evidence, post-release and release-health checks with follow-up requirements, metric/log/trace/audit/alert/SLO facts, risky/security release gate findings, and tests.
 
-Next focus: **Phase 0.6B — Review, rollout, rollback, observability, and post-release gates**. Start from the latest `development`, add review/requested-change blockers, rollout/rollback/observability evidence, post-release checks, and complete the Phase 0.6 tests/gates.
+Next focus: **Phase 1 — Branch-aware event store and atomic runtime**. Start from the latest `development`, design the branch-aware event layout, and preserve legacy event replay/migration behavior.
 
 ---
 
@@ -511,25 +512,25 @@ Close the workflow after code is written: validation must be appropriate to the 
 
 - [x] **Validate test scenario completeness.** If an acceptance criterion requires existing/unknown email parity, both positive and negative cases must be represented in TestIntent even if test execution remains manually recorded.
 
-- [ ] **Add review graph facts.** Add `Review`, `ReviewComment`, `RequestedChange`, `ReviewResolution`, and scoped `ReviewApproval`. Review comments from provider/manual input should become graph facts.
+- [x] **Add review graph facts.** Add `Review`, `ReviewComment`, `RequestedChange`, `ReviewResolution`, and scoped `ReviewApproval`. Review comments from provider/manual input should become graph facts.
 
-- [ ] **Block unresolved requested changes.** Action completion, PR validation, and release validation must fail while unresolved requested changes exist for the relevant spec/action/PR.
+- [x] **Block unresolved requested changes.** Action completion, PR validation, and release validation must fail while unresolved requested changes exist for the relevant spec/action/PR.
 
-- [ ] **Add rollout and rollback model.** Add `RolloutPlan`, `FeatureFlag`, `RollbackStrategy`, `PostReleaseCheck`, and `ReleaseHealthCheck` facts. Risky releases should require rollout and rollback evidence.
+- [x] **Add rollout and rollback model.** Add `RolloutPlan`, `FeatureFlag`, `RollbackStrategy`, `PostReleaseCheck`, and `ReleaseHealthCheck` facts. Risky releases should require rollout and rollback evidence.
 
-- [ ] **Add observability model.** Add `Metric`, `LogEvent`, `TraceSpan`, `AuditEvent`, `OperationalAlert`, and `SLO` facts. Security-sensitive or operationally risky specs must declare required logs/metrics/audit events.
+- [x] **Add observability model.** Add `Metric`, `LogEvent`, `TraceSpan`, `AuditEvent`, `OperationalAlert`, and `SLO` facts. Security-sensitive or operationally risky specs must declare required logs/metrics/audit events.
 
-- [ ] **Add post-release validation.** Release workflow should support post-release checks and link results back to Release facts. Failed post-release checks should create issue/rollback/replan suggestions.
+- [x] **Add post-release validation.** Release workflow should support post-release checks and link results back to Release facts. Failed post-release checks should create issue/rollback/replan suggestions.
 
-- [ ] **Add tests.** Cover missing build/typecheck/lint evidence, missing required test scenario, unresolved review requested change, risky release without rollout plan, missing rollback strategy, missing audit metric for security-sensitive spec, and failed post-release check creating blocker/follow-up.
+- [x] **Add tests.** Cover missing build/typecheck/lint evidence, missing required test scenario, unresolved review requested change, risky release without rollout plan, missing rollback strategy, missing audit metric for security-sensitive spec, and failed post-release check creating blocker/follow-up.
 
 ## Phase Gate
 
-- [ ] Required validation recipes are enforced before action completion/PR/release.
-- [ ] No Phase 0.6 implementation path executes tool-specific test runners; it only validates declared recipes and recorded evidence.
-- [ ] Test links include scenario intent, not only test-case existence.
-- [ ] Unresolved review comments block completion.
-- [ ] Risky releases require rollout, rollback, and observability evidence.
+- [x] Required validation recipes are enforced before action completion/PR/release.
+- [x] No Phase 0.6 implementation path executes tool-specific test runners; it only validates declared recipes and recorded evidence.
+- [x] Test links include scenario intent, not only test-case existence.
+- [x] Unresolved review comments block completion.
+- [x] Risky releases require rollout, rollback, and observability evidence.
 
 ---
 
