@@ -7,7 +7,11 @@ use sg_adapter_hosting::{validate_provider_check_report, ProviderCheckReport};
 use sg_adoption::{
     adoption_report_delta, adoption_report_from_delta, scan_repository, AdoptionMode,
 };
-use sg_codegraph::{code_object_default_layer, CodeGraphProjection, CodeObjectDeclaration};
+use sg_codegraph::{
+    code_file_node_id, code_object_declaration_node_id, code_object_default_layer,
+    code_route_node_id, code_symbol_node_id, resolve_code_object, CodeGraphProjection,
+    CodeObjectDeclaration, CodeObjectQuery, SourceFallback,
+};
 use sg_gitgraph::{
     git_graph_stable, pull_request_node_id, validate_commit_binding, validate_pr_hosting_graph,
     validation_run_node_id, CommitValidationInput, GitGraphProjection, GitReleaseFact,
@@ -1013,8 +1017,12 @@ struct CodeArgs {
 enum CodeCommand {
     /// Index changed files as CodeFile graph facts.
     Index(CodeIndexArgs),
+    /// Resolve whether a requested code object already exists.
+    ResolveObject(CodeResolveObjectArgs),
     /// Declare a planned implementation object before editing code.
     DeclareObject(CodeDeclareObjectArgs),
+    /// Link a declaration to an existing code fact instead of duplicating it.
+    LinkExisting(CodeLinkExistingArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1063,6 +1071,53 @@ struct CodeDeclareObjectArgs {
     actor: String,
     #[arg(long, default_value = "main")]
     graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct CodeResolveObjectArgs {
+    #[arg(long)]
+    kind: String,
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    module: Option<String>,
+    #[arg(long)]
+    file: Option<String>,
+    #[arg(long = "source-file")]
+    source_files: Vec<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct CodeLinkExistingArgs {
+    #[arg(long)]
+    spec: String,
+    #[arg(long)]
+    module: String,
+    #[arg(long)]
+    kind: String,
+    #[arg(long)]
+    name: String,
+    #[arg(long, value_enum)]
+    existing_type: ExistingCodeTargetArg,
+    #[arg(long)]
+    existing_file: Option<String>,
+    #[arg(long)]
+    existing_kind: Option<String>,
+    #[arg(long)]
+    existing_name: String,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum ExistingCodeTargetArg {
+    File,
+    Symbol,
+    Route,
 }
 
 #[derive(Debug, Args)]
@@ -2671,6 +2726,34 @@ fn handle_code(store: &SpecGraphStore, root: &Path, args: CodeArgs) -> anyhow::R
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
         }
+        CodeCommand::ResolveObject(args) => {
+            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let source_fallbacks = args
+                .source_files
+                .iter()
+                .map(|path| {
+                    let resolved = resolve_path(root, path.clone());
+                    let source = fs::read_to_string(&resolved).with_context(|| {
+                        format!("failed to read source fallback {}", resolved.display())
+                    })?;
+                    Ok(SourceFallback {
+                        file: path.display().to_string(),
+                        source,
+                    })
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            let resolution = resolve_code_object(
+                &replay.graph,
+                &CodeObjectQuery {
+                    kind: args.kind,
+                    name: args.name,
+                    module: args.module,
+                    file: args.file,
+                },
+                &source_fallbacks,
+            );
+            print_json(&serde_json::to_value(&resolution)?)?;
+        }
         CodeCommand::DeclareObject(args) => {
             let object = CodeObjectDeclaration {
                 spec: args.spec.clone(),
@@ -2703,6 +2786,71 @@ fn handle_code(store: &SpecGraphStore, root: &Path, args: CodeArgs) -> anyhow::R
                 dry_run: args.dry_run,
             })?;
             println!("codeObjectDeclared: {}:{}", object.kind, object.name);
+            println!("dryRun: {}", receipt.dry_run);
+            println!("operationId: {}", receipt.operation_id);
+            println!("stateHash: {}", receipt.post_state_hash);
+        }
+        CodeCommand::LinkExisting(args) => {
+            let declaration_id =
+                code_object_declaration_node_id(&args.spec, &args.module, &args.kind, &args.name);
+            let existing_type = format!("{:?}", args.existing_type);
+            let target_id = match &args.existing_type {
+                ExistingCodeTargetArg::File => code_file_node_id(&args.existing_name),
+                ExistingCodeTargetArg::Symbol => code_symbol_node_id(
+                    args.existing_file
+                        .as_deref()
+                        .context("--existing-file is required for --existing-type symbol")?,
+                    args.existing_kind.as_deref().unwrap_or("function"),
+                    &args.existing_name,
+                ),
+                ExistingCodeTargetArg::Route => {
+                    let (method, path) = args
+                        .existing_name
+                        .split_once(' ')
+                        .context("--existing-name for routes must be 'METHOD /path'")?;
+                    code_route_node_id(method, path)
+                }
+            };
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "CodeObject.LinkExisting".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({
+                    "codeObject": {
+                        "spec": args.spec,
+                        "module": args.module,
+                        "kind": args.kind,
+                        "name": args.name
+                    },
+                    "existing": {
+                        "type": existing_type,
+                        "id": target_id
+                    }
+                }),
+                delta: GraphDelta {
+                    create_edges: vec![Edge {
+                        id: format!(
+                            "edge_{}_{}_{}",
+                            stable_fragment(&declaration_id),
+                            stable_fragment("CODE_OBJECT_REALIZED_BY"),
+                            stable_fragment(&target_id)
+                        ),
+                        stable_key: format!(
+                            "edge:{declaration_id}:CODE_OBJECT_REALIZED_BY:{target_id}"
+                        ),
+                        edge_type: "CODE_OBJECT_REALIZED_BY".to_string(),
+                        from: declaration_id,
+                        to: target_id,
+                        attributes: BTreeMap::from([(
+                            "relationshipType".to_string(),
+                            json!("REUSES_EXISTING_SYMBOL"),
+                        )]),
+                    }],
+                    ..GraphDelta::default()
+                },
+                dry_run: args.dry_run,
+            })?;
+            println!("codeObjectLinked: {}:{}", args.kind, args.name);
             println!("dryRun: {}", receipt.dry_run);
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);

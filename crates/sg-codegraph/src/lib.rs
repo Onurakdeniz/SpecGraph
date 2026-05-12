@@ -126,6 +126,53 @@ pub struct CodeRiskLink {
     pub risk: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeObjectQuery {
+    pub kind: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExistingCodeObjectCandidate {
+    pub node_id: String,
+    pub stable_key: String,
+    pub symbol: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    pub trust_state: String,
+    pub confidence: f32,
+    pub reason: String,
+    pub recommended_operation: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeObjectResolution {
+    pub existing_candidates: Vec<ExistingCodeObjectCandidate>,
+    pub duplicate_risk: bool,
+    pub needs_user_choice: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_existing_object: Option<ExistingCodeObjectCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceFallback {
+    pub file: String,
+    pub source: String,
+}
+
 impl CodeGraphProjection {
     pub fn to_delta(&self) -> GraphDelta {
         let mut nodes_by_id = BTreeMap::new();
@@ -301,6 +348,267 @@ impl CodeGraphProjection {
             ..GraphDelta::default()
         }
     }
+}
+
+pub fn extract_code_object_candidates(text: &str) -> Vec<CodeObjectQuery> {
+    let mut candidates = Vec::new();
+    for token in text
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
+        .map(str::trim)
+        .filter(|token| token.len() >= 3)
+    {
+        if token
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_uppercase())
+            || token.contains('_')
+            || token.contains('-')
+        {
+            let kind = if token.contains("DTO") || token.ends_with("Request") {
+                "dto"
+            } else if token.ends_with("Service") {
+                "service"
+            } else if token.ends_with("Handler") {
+                "routeHandler"
+            } else {
+                "function"
+            };
+            candidates.push(CodeObjectQuery {
+                kind: kind.to_string(),
+                name: token.to_string(),
+                module: None,
+                file: None,
+            });
+        }
+    }
+    candidates.sort_by(|left, right| left.name.cmp(&right.name).then(left.kind.cmp(&right.kind)));
+    candidates.dedup_by(|left, right| left.name == right.name && left.kind == right.kind);
+    candidates
+}
+
+pub fn resolve_code_object(
+    graph: &Graph,
+    query: &CodeObjectQuery,
+    source_fallbacks: &[SourceFallback],
+) -> CodeObjectResolution {
+    let mut candidates = Vec::new();
+    candidates.extend(resolve_declared_objects(graph, query));
+    candidates.extend(resolve_symbols(graph, query));
+    candidates.extend(resolve_routes(graph, query));
+    candidates.extend(resolve_source_fallbacks(query, source_fallbacks));
+    candidates.sort_by(|left, right| {
+        right
+            .confidence
+            .partial_cmp(&left.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(left.stable_key.cmp(&right.stable_key))
+    });
+    candidates.dedup_by(|left, right| left.node_id == right.node_id);
+    let duplicate_risk = !candidates.is_empty();
+    let needs_user_choice = candidates.len() > 1
+        && candidates
+            .first()
+            .zip(candidates.get(1))
+            .is_some_and(|(first, second)| (first.confidence - second.confidence).abs() < 0.15);
+    let selected_existing_object = if duplicate_risk && !needs_user_choice {
+        candidates.first().cloned()
+    } else {
+        None
+    };
+    CodeObjectResolution {
+        existing_candidates: candidates,
+        duplicate_risk,
+        needs_user_choice,
+        selected_existing_object,
+    }
+}
+
+fn resolve_declared_objects(
+    graph: &Graph,
+    query: &CodeObjectQuery,
+) -> Vec<ExistingCodeObjectCandidate> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "CodeObjectDeclaration")
+        .filter(|node| declaration_matches(node, query))
+        .map(|node| ExistingCodeObjectCandidate {
+            node_id: node.id.clone(),
+            stable_key: node.stable_key.clone(),
+            symbol: attr_str(node, "name").unwrap_or_default().to_string(),
+            kind: attr_str(node, "kind").unwrap_or("declaration").to_string(),
+            module: attr_str(node, "module").map(ToString::to_string),
+            file: attr_str(node, "expectedFile").map(ToString::to_string),
+            line: None,
+            trust_state: attr_str(node, "trustState")
+                .unwrap_or("Accepted")
+                .to_string(),
+            confidence: 1.0,
+            reason: "accepted CodeObjectDeclaration matches requested kind/name/module".to_string(),
+            recommended_operation: "CodeObject.LinkExisting".to_string(),
+        })
+        .collect()
+}
+
+fn resolve_symbols(graph: &Graph, query: &CodeObjectQuery) -> Vec<ExistingCodeObjectCandidate> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "CodeSymbol")
+        .filter_map(|node| {
+            let name = attr_str(node, "name")?;
+            let kind = attr_str(node, "kind").unwrap_or("symbol");
+            let file = attr_str(node, "file");
+            let confidence = symbol_confidence(name, kind, file, graph, query);
+            (confidence > 0.0).then(|| ExistingCodeObjectCandidate {
+                node_id: node.id.clone(),
+                stable_key: node.stable_key.clone(),
+                symbol: name.to_string(),
+                kind: kind.to_string(),
+                module: module_for_code_node(graph, node)
+                    .or_else(|| module_from_file(graph, file.unwrap_or_default())),
+                file: file.map(ToString::to_string),
+                line: attr_u32(node, "line").or_else(|| attr_u32(node, "startLine")),
+                trust_state: attr_str(node, "trustState")
+                    .unwrap_or("Accepted")
+                    .to_string(),
+                confidence,
+                reason: "CodeSymbol name/kind/file/module matches requested object".to_string(),
+                recommended_operation: "CodeObject.LinkExisting".to_string(),
+            })
+        })
+        .collect()
+}
+
+fn resolve_routes(graph: &Graph, query: &CodeObjectQuery) -> Vec<ExistingCodeObjectCandidate> {
+    if query.kind != "routeHandler" {
+        return Vec::new();
+    }
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "CodeRoute")
+        .filter_map(|node| {
+            let path = attr_str(node, "path")?;
+            let method = attr_str(node, "method").unwrap_or("GET");
+            let label = format!("{method} {path}");
+            let confidence = name_similarity(&label, &query.name);
+            (confidence >= 0.55).then(|| ExistingCodeObjectCandidate {
+                node_id: node.id.clone(),
+                stable_key: node.stable_key.clone(),
+                symbol: label,
+                kind: "routeHandler".to_string(),
+                module: module_for_code_node(graph, node),
+                file: attr_str(node, "file").map(ToString::to_string),
+                line: attr_u32(node, "line").or_else(|| attr_u32(node, "startLine")),
+                trust_state: attr_str(node, "trustState")
+                    .unwrap_or("Accepted")
+                    .to_string(),
+                confidence,
+                reason: "CodeRoute method/path resembles requested route handler".to_string(),
+                recommended_operation: "CodeObject.LinkExisting".to_string(),
+            })
+        })
+        .collect()
+}
+
+fn resolve_source_fallbacks(
+    query: &CodeObjectQuery,
+    source_fallbacks: &[SourceFallback],
+) -> Vec<ExistingCodeObjectCandidate> {
+    let needle = normalize_name(&query.name);
+    source_fallbacks
+        .iter()
+        .flat_map(|source| {
+            let needle = needle.clone();
+            source
+                .source
+                .lines()
+                .enumerate()
+                .filter_map(move |(index, line)| {
+                    let normalized_line = normalize_name(line);
+                    normalized_line
+                        .contains(&needle)
+                        .then(|| ExistingCodeObjectCandidate {
+                            node_id: format!("source:{}:{}", source.file, index + 1),
+                            stable_key: format!("source-candidate:{}:{}", source.file, index + 1),
+                            symbol: query.name.clone(),
+                            kind: query.kind.clone(),
+                            module: query.module.clone(),
+                            file: Some(source.file.clone()),
+                            line: Some((index + 1) as u32),
+                            trust_state: "Observed".to_string(),
+                            confidence: 0.45,
+                            reason: "source-text fallback contains requested object name"
+                                .to_string(),
+                            recommended_operation: "CodeObject.LinkExisting".to_string(),
+                        })
+                })
+        })
+        .collect()
+}
+
+fn declaration_matches(node: &Node, query: &CodeObjectQuery) -> bool {
+    attr_str(node, "name").is_some_and(|name| normalize_name(name) == normalize_name(&query.name))
+        && attr_str(node, "kind").is_some_and(|kind| kind == query.kind)
+        && query
+            .module
+            .as_deref()
+            .is_none_or(|module| attr_str(node, "module") == Some(module))
+}
+
+fn symbol_confidence(
+    name: &str,
+    kind: &str,
+    file: Option<&str>,
+    graph: &Graph,
+    query: &CodeObjectQuery,
+) -> f32 {
+    let mut confidence = name_similarity(name, &query.name);
+    if confidence == 0.0 {
+        return 0.0;
+    }
+    if kind == query.kind || (query.kind == "function" && kind == "method") {
+        confidence += 0.2;
+    }
+    if query
+        .file
+        .as_deref()
+        .zip(file)
+        .is_some_and(|(expected, actual)| expected == actual)
+    {
+        confidence += 0.2;
+    }
+    if query
+        .module
+        .as_deref()
+        .zip(file)
+        .and_then(|(module, file)| module_package(graph, module).map(|package| (package, file)))
+        .is_some_and(|(package, file)| path_is_inside_package(file, package))
+    {
+        confidence += 0.15;
+    }
+    confidence.min(1.0)
+}
+
+fn name_similarity(left: &str, right: &str) -> f32 {
+    let left = normalize_name(left);
+    let right = normalize_name(right);
+    if left == right {
+        0.75
+    } else if left.contains(&right) || right.contains(&left) {
+        0.55
+    } else {
+        0.0
+    }
+}
+
+fn normalize_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 pub fn validate_code_graph(graph: &Graph) -> Vec<Finding> {
@@ -711,6 +1019,56 @@ fn attr_str<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
     node.attributes.get(key).and_then(|value| value.as_str())
 }
 
+fn attr_u32(node: &Node, key: &str) -> Option<u32> {
+    node.attributes
+        .get(key)
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+fn module_for_code_node(graph: &Graph, node: &Node) -> Option<String> {
+    graph
+        .edges
+        .values()
+        .find(|edge| edge.from == node.id && edge.edge_type == "OWNED_BY_MODULE")
+        .and_then(|edge| graph.nodes.get(&edge.to))
+        .and_then(|module| attr_str(module, "name"))
+        .map(ToString::to_string)
+}
+
+fn module_from_file(graph: &Graph, file: &str) -> Option<String> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "Module")
+        .filter_map(|module| {
+            let name = attr_str(module, "name")?;
+            let package = attr_str(module, "package")?;
+            path_is_inside_package(file, package).then(|| name.to_string())
+        })
+        .next()
+}
+
+fn module_package<'a>(graph: &'a Graph, module_name: &str) -> Option<&'a str> {
+    graph
+        .nodes
+        .values()
+        .find(|node| node.node_type == "Module" && attr_str(node, "name") == Some(module_name))
+        .and_then(|node| attr_str(node, "package"))
+}
+
+fn path_is_inside_package(path: &str, package: &str) -> bool {
+    let path = path.trim_start_matches("./");
+    let package = package
+        .trim()
+        .trim_start_matches("./")
+        .trim_end_matches('/');
+    package.is_empty()
+        || package == "."
+        || path == package
+        || path.starts_with(&format!("{package}/"))
+}
+
 fn has_outgoing(graph: &Graph, node: &Node, edge_type: &str) -> bool {
     graph
         .edges
@@ -1105,5 +1463,75 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "code_object.missing_parent_type"));
+    }
+
+    #[test]
+    fn resolves_existing_symbol_and_source_fallback_candidates() {
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            module_node_id("Identity"),
+            Node {
+                id: module_node_id("Identity"),
+                stable_key: "module:identity".to_string(),
+                node_type: "Module".to_string(),
+                attributes: BTreeMap::from([
+                    ("name".to_string(), json!("Identity")),
+                    ("package".to_string(), json!("src/identity")),
+                ]),
+            },
+        );
+        let projection = CodeGraphProjection {
+            files: vec![CodeFileFact {
+                path: "src/identity/password-reset.rs".to_string(),
+                language: "rust".to_string(),
+                generated: false,
+            }],
+            symbols: vec![CodeSymbolFact {
+                file: "src/identity/password-reset.rs".to_string(),
+                name: "requestPasswordReset".to_string(),
+                kind: "function".to_string(),
+                location: None,
+            }],
+            ownership: vec![CodeOwnershipFact {
+                code: "symbol:src/identity/password-reset.rs/function/requestPasswordReset"
+                    .to_string(),
+                module: "Identity".to_string(),
+            }],
+            ..CodeGraphProjection::default()
+        };
+        graph.apply_delta(&projection.to_delta());
+
+        let resolution = resolve_code_object(
+            &graph,
+            &CodeObjectQuery {
+                kind: "function".to_string(),
+                name: "requestPasswordReset".to_string(),
+                module: Some("Identity".to_string()),
+                file: Some("src/identity/password-reset.rs".to_string()),
+            },
+            &[SourceFallback {
+                file: "src/identity/other.rs".to_string(),
+                source: "fn requestPasswordReset() {}".to_string(),
+            }],
+        );
+
+        assert!(resolution.duplicate_risk);
+        assert!(resolution.selected_existing_object.is_some());
+        let selected = resolution.selected_existing_object.unwrap();
+        assert_eq!(selected.recommended_operation, "CodeObject.LinkExisting");
+        assert_eq!(selected.module.as_deref(), Some("Identity"));
+    }
+
+    #[test]
+    fn extracts_candidate_terms_from_text() {
+        let candidates =
+            extract_code_object_candidates("Add PasswordResetRequest DTO and AuditService support");
+
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.name == "PasswordResetRequest"));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.kind == "service" && candidate.name == "AuditService"));
     }
 }

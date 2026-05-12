@@ -93,6 +93,30 @@ sg code declare-object \
 
 `CodeObject.Declare` creates a `CodeObjectDeclaration` owned by exactly one Spec and Module, with placement defaults and parent/link validation. Source indexing remains observational; declared objects are reconciled to observed symbols in later production phases.
 
+Before declaring a new object, resolve whether it already exists:
+
+```bash
+sg code resolve-object \
+  --kind function \
+  --name requestPasswordReset \
+  --module Identity \
+  --file src/identity/password-reset.ts
+```
+
+If the resolver identifies the intended existing code fact, link the declaration instead of duplicating code:
+
+```bash
+sg code link-existing \
+  --spec AUTH-001 \
+  --module Identity \
+  --kind function \
+  --name requestPasswordReset \
+  --existing-type symbol \
+  --existing-file src/identity/password-reset.ts \
+  --existing-kind function \
+  --existing-name requestPasswordReset
+```
+
 The built-in lightweight indexer recognizes common source declarations in Rust, TypeScript/JavaScript, Python, Go, Java/Kotlin, and Swift. It emits trusted graph deltas with `CodeFile` and observed `CodeSymbol` nodes; semantic ownership remains policy/validator-controlled instead of being accepted blindly from the parser.
 
 ## Impact Analysis

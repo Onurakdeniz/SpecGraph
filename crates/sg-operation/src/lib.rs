@@ -509,6 +509,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "CodeObject.LinkExisting",
+            category: "code",
+            description: "Link a declared planned code object to an existing CodeSymbol, CodeFile, or CodeRoute instead of creating a duplicate implementation.",
+            required_input_fields: &["codeObject", "existing"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[],
+            allowed_create_edge_types: &["CODE_OBJECT_REALIZED_BY"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Trace.Import",
             category: "trace",
             description: "Import manifest, annotation, and inferred traceability links.",

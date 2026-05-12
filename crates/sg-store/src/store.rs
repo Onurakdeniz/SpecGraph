@@ -3489,6 +3489,9 @@ fn validate_operation_semantic_preconditions(
             validate_action_graph_semantic_preconditions(graph, request, delta)
         }
         "CodeObject.Declare" => validate_code_object_declare_semantic_preconditions(graph, delta),
+        "CodeObject.LinkExisting" => {
+            validate_code_object_link_existing_semantic_preconditions(graph, delta)
+        }
         "GitCommit.Record" => validate_git_commit_semantic_preconditions(graph, request, delta),
         "Validation.Record" => {
             validate_validation_record_semantic_preconditions(graph, request, delta)
@@ -3848,6 +3851,57 @@ fn validate_code_object_declaration_semantics(
             "DTO/request/response declarations must link to an endpoint or use case.",
         ));
     }
+}
+
+fn validate_code_object_link_existing_semantic_preconditions(
+    graph: &Graph,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    let links = delta
+        .create_edges
+        .iter()
+        .chain(delta.update_edges.iter())
+        .filter(|edge| edge.edge_type == "CODE_OBJECT_REALIZED_BY")
+        .collect::<Vec<_>>();
+
+    if links.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.code_object.link_required",
+            "CodeObject.LinkExisting must create CODE_OBJECT_REALIZED_BY from a CodeObjectDeclaration to an existing code fact.",
+        ));
+        return findings;
+    }
+
+    for link in links {
+        let declaration = graph.nodes.get(&link.from);
+        if declaration.is_none_or(|node| node.node_type != "CodeObjectDeclaration") {
+            findings.push(semantic_finding(
+                "semantic.code_object.link_source_required",
+                format!(
+                    "CodeObject.LinkExisting source `{}` must be an existing CodeObjectDeclaration.",
+                    link.from
+                ),
+            ));
+        }
+        let existing = graph.nodes.get(&link.to);
+        if !existing.is_some_and(|node| {
+            matches!(
+                node.node_type.as_str(),
+                "CodeSymbol" | "CodeFile" | "CodeRoute"
+            )
+        }) {
+            findings.push(semantic_finding(
+                "semantic.code_object.link_target_required",
+                format!(
+                    "CodeObject.LinkExisting target `{}` must be an existing CodeSymbol, CodeFile, or CodeRoute.",
+                    link.to
+                ),
+            ));
+        }
+    }
+
+    findings
 }
 
 fn validate_git_commit_semantic_preconditions(
@@ -8070,6 +8124,78 @@ acceptanceCriteria:
         assert!(matches!(error, StoreError::SemanticValidationFailed { .. }));
     }
 
+    #[test]
+    fn code_object_link_existing_requires_declared_object_and_existing_symbol() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeGraph.Upsert".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeGraph": "symbol"}),
+                dry_run: false,
+                delta: code_symbol_delta(
+                    "src/identity/password-reset.rs",
+                    "function",
+                    "requestPasswordReset",
+                ),
+            },
+        )
+        .unwrap();
+
+        let declaration_id = node_id(
+            "code_object",
+            "AUTH-001/Identity/function/requestPasswordReset",
+        );
+        let symbol_id = node_id(
+            "code_symbol",
+            "src/identity/password-reset.rs/function/requestPasswordReset",
+        );
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.LinkExisting".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": "requestPasswordReset", "existing": "symbol"}),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_edges: vec![edge(
+                        &declaration_id,
+                        "CODE_OBJECT_REALIZED_BY",
+                        &symbol_id,
+                    )],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "CodeObject.LinkExisting");
+    }
+
     fn only_snapshot_path(root: &Path) -> PathBuf {
         let snapshots = root.join(".specgraph/snapshots");
         fs::read_dir(snapshots)
@@ -8211,6 +8337,25 @@ acceptanceCriteria:
         GraphDelta {
             create_nodes,
             create_edges,
+            ..GraphDelta::default()
+        }
+    }
+
+    fn code_symbol_delta(file: &str, kind: &str, name: &str) -> GraphDelta {
+        let file_id = node_id("code_file", file);
+        let symbol_id = node_id("code_symbol", &format!("{file}/{kind}/{name}"));
+        GraphDelta {
+            create_nodes: vec![Node {
+                id: symbol_id.clone(),
+                stable_key: format!("code-symbol:{file}/{kind}/{name}"),
+                node_type: "CodeSymbol".to_string(),
+                attributes: BTreeMap::from([
+                    ("file".to_string(), json!(file)),
+                    ("kind".to_string(), json!(kind)),
+                    ("name".to_string(), json!(name)),
+                ]),
+            }],
+            create_edges: vec![edge(&file_id, "DEFINES_SYMBOL", &symbol_id)],
             ..GraphDelta::default()
         }
     }

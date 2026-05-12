@@ -107,7 +107,7 @@ Status values:
 | `sg commit` | future `plan`, `validate`, `complete` | Planned | CommitPlan report/findings; mutations return receipts. Existing commit checks currently live under `sg git`. |
 | `sg git` | `install-hooks`, `validate-message`, `validate-bindings`, `record-commit`, future `branch`, `merge`, `rebase` | Partial | Hook install summary, validation report/findings, or receipts for accepted GitGraph facts. |
 | `sg pr` | `sync`, `validate`, `annotate`, `checks` | Planned | Hosting observations/report/findings; provider outputs remain untrusted until accepted. |
-| `sg code` | `index`, `declare-object`, future `query`, `validate-scope`, `drift` | Partial | Code observations/declarations/report/findings; accepted CodeGraph and CodeObject facts return receipts. |
+| `sg code` | `index`, `resolve-object`, `declare-object`, `link-existing`, future `query`, `validate-scope`, `drift` | Partial | Code observations/declarations/resolution report/findings; accepted CodeGraph and CodeObject facts return receipts. |
 | `sg trace` | `import`, `validate` | Partial | Trace validation report/findings; imports return receipts. |
 | `sg test` | `map`, `record-run`, `validate`, `required` | Planned | Test mapping/report/findings; accepted TestRun evidence returns receipts. |
 | `sg ci` | `validate`, future `report`, `annotations` | Partial | Machine-readable aggregate report; `--record` returns ValidationRun receipt. |
@@ -255,6 +255,20 @@ sg code declare-object \
 ```
 
 The Operation Runtime validates module ownership, type placement defaults, expected-file package placement, and parent-child requirements such as methods requiring a declared or existing parent type.
+
+## F.3b Implemented Code Object Discovery Foundation
+
+`sg code resolve-object` searches trusted graph facts, observed CodeGraph facts, and optional source-text fallbacks before a new object is declared. It returns duplicate risk, ambiguity status, candidates with confidence/reasons, and the recommended next operation.
+
+```bash
+sg code resolve-object \
+  --kind function \
+  --name requestPasswordReset \
+  --module Identity \
+  --file src/identity/password-reset.rs
+```
+
+When an existing symbol/file/route is the intended implementation, `sg code link-existing` records `CODE_OBJECT_REALIZED_BY` through `CodeObject.LinkExisting` instead of creating duplicate implementation.
 
 
 ## F.4 Implemented Operation Semantic Preconditions
