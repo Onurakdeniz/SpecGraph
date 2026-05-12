@@ -20,9 +20,9 @@ This checklist turns the core-to-edge implementation plan into trackable work. I
 
 Before any slice is considered complete:
 
-- [~] State-changing behavior goes through Operation Runtime.
+- [x] State-changing behavior goes through Operation Runtime.
 - [x] Operation receipt includes actor, operation id, pre-state hash, post-state hash, changed objects, and findings.
-- [~] New graph facts use stable keys.
+- [x] New graph facts use stable keys.
 - [x] New graph facts validate against the active ontology.
 - [x] Policy checks run before acceptance.
 - [~] Validation findings include severity, validator id, related graph/file location, and remediation.
@@ -154,7 +154,7 @@ Related areas:
 - [x] Stabilize `OperationDefinition` schema.
 - [x] Stabilize `OperationReceipt` schema.
 - [~] Add dry-run support for mutating operations.
-- [~] Route every mutating CLI command through operation runtime.
+- [x] Route every mutating CLI command through operation runtime.
 - [x] Add precondition checks.
 - [x] Add postcondition checks.
 - [x] Add ontology cardinality checks.
@@ -165,7 +165,7 @@ Related areas:
 - [x] Add policy append gate before event append.
 - [x] Add actor identity resolution for human, service, CI, and adapter actors.
 - [x] Add role/permission model foundation.
-- [~] Add graph-native `Approval` and `Waiver` nodes.
+- [x] Add graph-native `Approval` and `Waiver` nodes.
 - [x] Reject expired waiver creation and non-waivable waiver creation.
 - [x] Add non-waivable policy list.
 - [x] Add common `Finding` schema across validators.
@@ -175,7 +175,7 @@ Related areas:
 ### Gate Checks
 
 - [x] No graph mutation can happen without a receipt for Phase 2 runtime slices.
-- [~] Failed operations leave no partial graph events.
+- [x] Failed operations leave no partial graph events.
 - [x] Invalid ontology delta fails before event append.
 - [x] Denied policy blocks the operation.
 - [x] Approval-required policy cannot pass without valid authorized approval.
@@ -255,8 +255,8 @@ Related areas:
 
 ### Implementation Checklist
 
-- [~] Formalize adapter trait/capability model.
-- [~] Mark all adapter output as observations unless accepted by operation.
+- [x] Formalize adapter trait/capability model.
+- [x] Mark all adapter output as observations unless accepted by operation.
 - [x] Stabilize `CodeIndexObservation` schema with framework, import, route, generated-file, trust-label, and location fields.
 - [x] Add framework-aware code indexer foundation for Express, Axum, FastAPI, and Flask route observations.
 - [x] Add deterministic import extraction for JS/TS, Rust, and Python observations.
@@ -266,7 +266,7 @@ Related areas:
 - [x] Expand link manifest for route-to-endpoint links.
 - [x] Expand link manifest for behavior and risk test links.
 - [x] Validate annotation and inferred link records with trust-state rules.
-- [~] Add full code annotation parser after manifest schema is stable.
+- [x] Add full code annotation parser after manifest schema is stable.
 - [x] Add test runner result model.
 - [x] Add `sg test run --record`.
 - [x] Add `TestRun` evidence links to `ValidationRun`.
@@ -282,7 +282,7 @@ Related areas:
 
 ### Gate Checks
 
-- [~] Code indexer cannot directly create trusted semantic facts.
+- [x] Code indexer cannot directly create trusted semantic facts.
 - [x] Unknown links in manifest fail validation.
 - [x] Required AC without linked TestCase fails.
 - [x] Spec endpoint without linked route creates traceability finding.
@@ -308,7 +308,7 @@ Related areas:
 ### Implementation Checklist
 
 - [x] Define graph conflict report schema.
-- [~] Add graph branch metadata.
+- [x] Add graph branch metadata.
 - [x] Add graph branch base snapshot tracking.
 - [x] Implement three-way graph diff: base / ours / theirs.
 - [x] Implement dry-run graph merge.
@@ -319,7 +319,7 @@ Related areas:
 - [x] Add `RevalidationQueue` model.
 - [x] Add action replan trigger from impact analysis.
 - [x] Add policy/impact continuation blockers requiring replan before affected work continues.
-- [~] Finish `sg init --adopt` flow with report-backed scan output.
+- [x] Finish `sg init --adopt` flow with report-backed scan output.
 - [x] Add adoption module inference.
 - [x] Add adoption reports for observe/warn/enforce-new-work/strict.
 - [x] Add IssueGraph lifecycle.
@@ -473,16 +473,16 @@ The full project is complete when all of these are checked:
 - [~] A new repo can be initialized and governed by SpecGraph OS.
 - [~] An existing repo can be adopted in observe mode and gradually moved to strict mode.
 - [x] Specs import into typed graph facts with stable keys.
-- [ ] Spec state transitions are enforced by evidence.
+- [x] Spec state transitions are enforced by evidence.
 - [~] ActionGraphs and CommitPlans are generated and enforced.
-- [ ] Git branches, commits, PRs, merges, and releases are bound to graph facts.
-- [ ] Code, tests, data, and architecture observations are linked back to graph facts.
+- [~] Git branches, commits, PRs, merges, and releases are bound to graph facts.
+- [~] Code, tests, data, and architecture observations are linked back to graph facts.
 - [~] Missing traceability blocks completion/merge.
 - [x] Event replay is deterministic and protected by hash checks.
 - [~] Policies, waivers, approvals, and actors are auditable graph facts.
-- [ ] Graph merge/rebase detects semantic conflicts.
-- [ ] Impact analysis drives revalidation and replan.
-- [ ] Issues and ontology evolution close the learning loop.
+- [x] Graph merge/rebase detects semantic conflicts.
+- [~] Impact analysis drives revalidation and replan.
+- [~] Issues and ontology evolution close the learning loop.
 - [~] LLMs can propose but cannot create trusted facts directly.
 - [x] Studio, SDK, and server use the same operation runtime.
 - [x] Official examples, proof runner, and release artifacts validate the system end to end.

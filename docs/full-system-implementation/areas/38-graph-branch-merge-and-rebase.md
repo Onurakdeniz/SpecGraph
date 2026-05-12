@@ -47,7 +47,7 @@ Apply source delta only after conflict, ontology, branch base, and policy valida
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Preserve branch base metadata validation against canonical replay.
 - Implement or finish: Graph branch event layout.
-- Implement or finish: GraphMerge/Rebase acceptance operations beyond current dry-run evidence.
+- `GraphMerge.Accept` and `sg graph integrate` accept ready merge/rebase deltas through Operation Runtime after semantic dry-run checks.
 - Implement or finish: Affected action replan.
 - Implement or finish: Hosting integration.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.

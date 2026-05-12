@@ -22,6 +22,8 @@ pub struct GitGraphProjection {
     #[serde(default)]
     pub merges: Vec<GitMergeFact>,
     #[serde(default)]
+    pub releases: Vec<GitReleaseFact>,
+    #[serde(default)]
     pub pull_requests: Vec<PullRequestFact>,
 }
 
@@ -66,6 +68,22 @@ pub struct GitMergeFact {
     pub base: String,
     pub head: String,
     pub result: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitReleaseFact {
+    pub version: String,
+    pub tag: String,
+    pub commit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,6 +178,51 @@ impl GitGraphProjection {
                     &commit_node_id(&merge.result),
                 ),
             );
+        }
+        for release in &self.releases {
+            insert_node(&mut nodes, release_node(release));
+            let release_id = release_node_id(&release.version);
+            insert_edge(
+                &mut edges,
+                edge(&self.project_node_id, "HAS_RELEASE", &release_id),
+            );
+            insert_node(
+                &mut nodes,
+                tag_node(&GitTagFact {
+                    name: release.tag.clone(),
+                    target: release.commit.clone(),
+                }),
+            );
+            insert_node(
+                &mut nodes,
+                commit_node(&GitCommitFact {
+                    sha: release.commit.clone(),
+                    parent_shas: vec![],
+                    message: None,
+                }),
+            );
+            insert_edge(
+                &mut edges,
+                edge(&release_id, "RELEASES_TAG", &tag_node_id(&release.tag)),
+            );
+            insert_edge(
+                &mut edges,
+                edge(
+                    &release_id,
+                    "RELEASES_COMMIT",
+                    &commit_node_id(&release.commit),
+                ),
+            );
+            if let Some(run_id) = &release.validation_run_id {
+                insert_edge(
+                    &mut edges,
+                    edge(
+                        &release_id,
+                        "RELEASE_HAS_VALIDATION_RUN",
+                        &validation_run_node_id(run_id),
+                    ),
+                );
+            }
         }
         for pr in &self.pull_requests {
             insert_branch(
@@ -383,6 +446,23 @@ fn merge_node(merge: &GitMergeFact) -> Node {
         ]),
     }
 }
+fn release_node(release: &GitReleaseFact) -> Node {
+    Node {
+        id: release_node_id(&release.version),
+        stable_key: format!("release:{}", stable(&release.version)),
+        node_type: "Release".into(),
+        attributes: BTreeMap::from([
+            ("version".into(), json!(release.version)),
+            ("tag".into(), json!(release.tag)),
+            ("commit".into(), json!(release.commit)),
+            ("spec".into(), json!(release.spec)),
+            ("validationRunId".into(), json!(release.validation_run_id)),
+            ("url".into(), json!(release.url)),
+            ("evidencePath".into(), json!(release.evidence_path)),
+        ]),
+    }
+}
+
 fn pull_request_node(pr: &PullRequestFact) -> Node {
     Node {
         id: pull_request_node_id(&pr.provider, &pr.number),
@@ -501,6 +581,9 @@ pub fn merge_node_id(id: &str) -> String {
 pub fn pull_request_node_id(provider: &str, number: &str) -> String {
     format!("node_pull_request_{}_{}", stable(provider), stable(number))
 }
+pub fn release_node_id(version: &str) -> String {
+    format!("node_release_{}", stable(version))
+}
 pub fn validation_run_node_id(run_id: &str) -> String {
     format!("node_validation_run_{}", stable(run_id).replace('-', "_"))
 }
@@ -556,6 +639,15 @@ mod tests {
                 head: "abc123".into(),
                 result: "fed789".into(),
             }],
+            releases: vec![GitReleaseFact {
+                version: "v0.1.0".into(),
+                tag: "v0.1.0".into(),
+                commit: "abc123".into(),
+                spec: Some("AUTH-001".into()),
+                validation_run_id: Some("release-1".into()),
+                url: Some("https://example.test/releases/v0.1.0".into()),
+                evidence_path: Some("dist/specgraph-release-evidence.json".into()),
+            }],
             pull_requests: vec![PullRequestFact {
                 provider: "github".into(),
                 number: "1".into(),
@@ -581,6 +673,14 @@ mod tests {
             .create_nodes
             .iter()
             .any(|node| node.node_type == "PullRequest"));
+        assert!(delta
+            .create_nodes
+            .iter()
+            .any(|node| node.node_type == "Release"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "RELEASES_COMMIT"));
         assert!(delta
             .create_edges
             .iter()

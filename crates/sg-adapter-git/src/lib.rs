@@ -2,5 +2,5 @@
 
 pub use sg_gitgraph::{
     parse_commit_trailers, CommitTrailers, GitBranchFact, GitCommitFact, GitGraphProjection,
-    GitMergeFact, GitRemoteFact, GitTagFact, PullRequestFact,
+    GitMergeFact, GitReleaseFact, GitRemoteFact, GitTagFact, PullRequestFact,
 };

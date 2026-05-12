@@ -8,6 +8,7 @@ pub use test_runner::{
     TestRunRecord, TestStatus,
 };
 pub use trace::{
-    validate_trace_links, AnnotationLink, BehaviorTestLink, CodeUseCaseLink, InferredLink,
-    LinksManifest, PolicyTestLink, RegressionTestLink, RiskTestLink, RouteEndpointLink, TestLink,
+    parse_annotation_links, validate_trace_links, AnnotationLink, BehaviorTestLink,
+    CodeUseCaseLink, InferredLink, LinksManifest, PolicyTestLink, RegressionTestLink, RiskTestLink,
+    RouteEndpointLink, TestLink,
 };

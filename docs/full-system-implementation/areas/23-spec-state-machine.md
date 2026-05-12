@@ -47,10 +47,10 @@ Each transition requires exact evidence; invalid transitions fail before event a
 ### 4. Implementation Work Items
 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
-- Implement or finish: Transition operation definitions.
-- Implement or finish: Ontology state-machine enforcement.
-- Implement or finish: Invalid transition findings.
-- Implement or finish: Status command.
+- Transition operation definitions are registered and routed through Operation Runtime.
+- Ontology state-machine enforcement rejects invalid state jumps before append.
+- Store-level evidence gates now require requirements/acceptance criteria, ActionGraph/CommitPlan, branch, commit, validation, merged PR, and release evidence at the relevant lifecycle steps.
+- Status command reports next states and blockers.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.
 

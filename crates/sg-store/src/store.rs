@@ -2038,24 +2038,77 @@ pub fn spec_status(root: &Path, spec: &str) -> Result<SpecStatusSummary> {
 
 fn spec_state_blockers(graph: &Graph, spec_node_id: &str, target_state: &str) -> Vec<String> {
     let mut blockers = Vec::new();
-    if matches!(
-        target_state,
-        "BranchBound" | "Implementing" | "Review" | "Released"
-    ) && !graph
-        .edges
-        .values()
-        .any(|edge| edge.from == spec_node_id && edge.edge_type == "BOUND_TO_BRANCH")
-    {
-        blockers.push("spec must be bound to a Git branch".to_string());
+    let current_state = graph
+        .nodes
+        .get(spec_node_id)
+        .and_then(|node| node.attributes.get("state"))
+        .and_then(Value::as_str)
+        .unwrap_or("Draft");
+    if !next_spec_states(current_state).contains(&target_state) {
+        blockers.push(format!(
+            "invalid spec state transition `{current_state}` -> `{target_state}`"
+        ));
+        return blockers;
     }
+
+    let has_edge_from_spec = |edge_type: &str| {
+        graph
+            .edges
+            .values()
+            .any(|edge| edge.from == spec_node_id && edge.edge_type == edge_type)
+    };
+
+    if target_state == "Validated" {
+        if !has_edge_from_spec("HAS_REQUIREMENT") {
+            blockers.push("spec needs at least one Requirement before validation".to_string());
+        }
+        if !has_edge_from_spec("HAS_ACCEPTANCE_CRITERION") {
+            blockers
+                .push("spec needs at least one AcceptanceCriterion before validation".to_string());
+        }
+    }
+
     let action_graph_id = graph
         .edges
         .values()
         .find(|edge| edge.from == spec_node_id && edge.edge_type == "HAS_ACTION_GRAPH")
         .map(|edge| edge.to.clone());
-    if matches!(target_state, "Implementing" | "Review" | "Released") && action_graph_id.is_none() {
+
+    if matches!(
+        target_state,
+        "Planned" | "BranchBound" | "Implementing" | "Review" | "Released"
+    ) && action_graph_id.is_none()
+    {
         blockers.push("spec must have an ActionGraph".to_string());
     }
+
+    if matches!(
+        target_state,
+        "BranchBound" | "Implementing" | "Review" | "Released"
+    ) && !has_edge_from_spec("BOUND_TO_BRANCH")
+    {
+        blockers.push("spec must be bound to a Git branch".to_string());
+    }
+
+    if matches!(target_state, "Implementing" | "Review" | "Released") {
+        let has_commit_plan = action_graph_id.as_ref().is_some_and(|action_graph_id| {
+            let groups = graph
+                .edges
+                .values()
+                .filter(|edge| {
+                    edge.from == *action_graph_id && edge.edge_type == "HAS_ACTION_GROUP"
+                })
+                .map(|edge| edge.to.as_str())
+                .collect::<Vec<_>>();
+            graph.edges.values().any(|edge| {
+                edge.edge_type == "HAS_COMMIT_PLAN" && groups.contains(&edge.from.as_str())
+            })
+        });
+        if !has_commit_plan {
+            blockers.push("spec needs CommitPlan evidence before implementation".to_string());
+        }
+    }
+
     if matches!(target_state, "Review" | "Released") {
         let has_commit = graph.edges.values().any(|edge| {
             edge.edge_type == "IMPLEMENTS_ACTION_GROUP"
@@ -2068,6 +2121,7 @@ fn spec_state_blockers(graph: &Graph, spec_node_id: &str, target_state: &str) ->
             blockers.push("spec needs at least one bound GitCommit".to_string());
         }
     }
+
     if target_state == "Released" {
         let passed_validation = graph.nodes.values().any(|node| {
             node.node_type == "ValidationRun"
@@ -2079,6 +2133,36 @@ fn spec_state_blockers(graph: &Graph, spec_node_id: &str, target_state: &str) ->
         });
         if !passed_validation {
             blockers.push("spec needs passed ValidationRun evidence".to_string());
+        }
+
+        let spec_name = graph
+            .nodes
+            .get(spec_node_id)
+            .and_then(|node| node.attributes.get("spec"))
+            .and_then(Value::as_str);
+        let release_recorded = graph.nodes.values().any(|node| {
+            node.node_type == "Release"
+                && spec_name.is_none_or(|spec| {
+                    node.attributes
+                        .get("spec")
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| value == spec)
+                })
+        });
+        if !release_recorded {
+            blockers.push("spec needs graph-bound Release evidence".to_string());
+        }
+
+        let merged_pr = graph.nodes.values().any(|node| {
+            node.node_type == "PullRequest"
+                && node
+                    .attributes
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .is_some_and(|state| state == "merged")
+        });
+        if !merged_pr {
+            blockers.push("spec needs merged PullRequest evidence".to_string());
         }
     }
     blockers

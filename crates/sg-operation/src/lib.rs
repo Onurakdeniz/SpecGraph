@@ -339,7 +339,7 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             description: "Record branch, commit, tag, remote, merge, and PR placeholder facts.",
             required_input_fields: &["gitGraph"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
-            allowed_create_node_types: &["GitRemote", "GitBranch", "GitCommit", "GitTag", "GitMerge", "PullRequest", "ProviderCheckRun", "ProviderCheckAnnotation"],
+            allowed_create_node_types: &["GitRemote", "GitBranch", "GitCommit", "GitTag", "GitMerge", "Release", "PullRequest", "ProviderCheckRun", "ProviderCheckAnnotation"],
             allowed_create_edge_types: &[
                 "HAS_GIT_REMOTE", "HAS_GIT_BRANCH", "HAS_GIT_COMMIT", "HAS_GIT_TAG",
                 "TRACKS_REMOTE", "POINTS_TO_COMMIT", "PARENT_COMMIT", "TAGS_COMMIT",
@@ -362,6 +362,18 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
                 "PR_HAS_VALIDATION_RUN", "PR_HAS_CHECK_RUN", "CHECK_FOR_VALIDATION_RUN",
                 "CHECK_HAS_ANNOTATION", "VALIDATED_BY", "HAS_VALIDATOR_EXECUTION", "HAS_FINDING",
             ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Release.Record",
+            category: "release",
+            description: "Record graph-bound release evidence linked to tag, commit, and validation run facts.",
+            required_input_fields: &["version", "tag", "commit"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["Release", "GitTag", "GitCommit"],
+            allowed_create_edge_types: &["HAS_RELEASE", "RELEASES_TAG", "RELEASES_COMMIT", "RELEASE_HAS_VALIDATION_RUN"],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
@@ -559,6 +571,17 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
             allowed_create_node_types: &["ImpactAnalysis", "RevalidationQueue"],
             allowed_create_edge_types: &["HAS_IMPACT_ANALYSIS", "IMPACTS"],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "GraphMerge.Accept",
+            category: "graph",
+            description: "Accept a ready semantic graph merge or rebase after dry-run conflict detection and post-merge validation.",
+            required_input_fields: &["mode", "sourceBranch", "targetBranch"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["*"],
+            allowed_create_edge_types: &["*"],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
@@ -868,9 +891,10 @@ fn validate_delta_node_types(
     findings: &mut Vec<Finding>,
 ) {
     for node in delta.create_nodes.iter().chain(delta.update_nodes.iter()) {
-        if !definition
-            .allowed_create_node_types
-            .contains(&node.node_type.as_str())
+        if !definition.allowed_create_node_types.contains(&"*")
+            && !definition
+                .allowed_create_node_types
+                .contains(&node.node_type.as_str())
         {
             findings.push(finding(
                 "operation.node_type_not_allowed",
@@ -889,9 +913,10 @@ fn validate_delta_edge_types(
     findings: &mut Vec<Finding>,
 ) {
     for edge in delta.create_edges.iter().chain(delta.update_edges.iter()) {
-        if !definition
-            .allowed_create_edge_types
-            .contains(&edge.edge_type.as_str())
+        if !definition.allowed_create_edge_types.contains(&"*")
+            && !definition
+                .allowed_create_edge_types
+                .contains(&edge.edge_type.as_str())
         {
             findings.push(finding(
                 "operation.edge_type_not_allowed",

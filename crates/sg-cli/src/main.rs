@@ -4,13 +4,19 @@ use serde_json::json;
 use sg_adapter_api::{built_in_adapter_catalog, validate_adapter_catalog};
 use sg_adapter_code::{index_source_file, observations_to_delta, CodeIndexObservation};
 use sg_adapter_hosting::{validate_provider_check_report, ProviderCheckReport};
-use sg_adoption::{scan_repository, AdoptionMode};
+use sg_adoption::{
+    adoption_report_delta, adoption_report_from_delta, scan_repository, AdoptionMode,
+};
 use sg_gitgraph::{
     git_graph_stable, pull_request_node_id, validate_commit_binding, validate_pr_hosting_graph,
-    validation_run_node_id, CommitValidationInput, GitGraphProjection, PullRequestFact,
+    validation_run_node_id, CommitValidationInput, GitGraphProjection, GitReleaseFact,
+    PullRequestFact,
 };
 use sg_impact::analyze_impact;
-use sg_merge::{detect_merge_conflicts, diff_graphs};
+use sg_merge::{
+    detect_merge_conflicts, diff_graphs, dry_run_graph_merge, dry_run_graph_rebase,
+    GraphIntegrationMode, GraphIntegrationStatus,
+};
 use sg_model::{
     Edge, Finding, FindingSeverity, Graph, GraphDelta, Node, OperationReceipt, Snapshot,
 };
@@ -44,10 +50,10 @@ use sg_testgraph::{
     TestRunRecord, TestStatus,
 };
 use sg_validation::{
-    built_in_validators, CORE_VALIDATOR_VERSION, VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING,
-    VALIDATOR_ONTOLOGY, VALIDATOR_OPERATION_ABI, VALIDATOR_PATCH_SANDBOX, VALIDATOR_POLICY,
-    VALIDATOR_PR_HOSTING, VALIDATOR_SECURITY_BOUNDARY, VALIDATOR_SNAPSHOT, VALIDATOR_TEST_RUNNER,
-    VALIDATOR_TRACE_LINKS,
+    built_in_validators, validate_cross_domain_traceability, CORE_VALIDATOR_VERSION,
+    VALIDATOR_CODE_SCOPE, VALIDATOR_GIT_BINDING, VALIDATOR_ONTOLOGY, VALIDATOR_OPERATION_ABI,
+    VALIDATOR_PATCH_SANDBOX, VALIDATOR_POLICY, VALIDATOR_PR_HOSTING, VALIDATOR_SECURITY_BOUNDARY,
+    VALIDATOR_SNAPSHOT, VALIDATOR_TEST_RUNNER, VALIDATOR_TRACE_LINKS,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -171,6 +177,12 @@ struct InitArgs {
     actor: String,
     #[arg(long, default_value = "main")]
     graph_branch: String,
+    /// After initialization, scan existing source files into observed adoption facts.
+    #[arg(long)]
+    adopt: bool,
+    /// Adoption mode used with --adopt.
+    #[arg(long, default_value = "observe")]
+    adopt_mode: String,
 }
 
 #[derive(Debug, Args)]
@@ -1160,6 +1172,30 @@ enum ReleaseCommand {
         #[arg(long)]
         allow_dirty: bool,
     },
+    /// Record release evidence as graph facts through Operation Runtime.
+    Record(ReleaseRecordArgs),
+}
+
+#[derive(Debug, Args)]
+struct ReleaseRecordArgs {
+    #[arg(long)]
+    version: String,
+    #[arg(long)]
+    tag: String,
+    #[arg(long)]
+    commit: String,
+    #[arg(long)]
+    spec: Option<String>,
+    #[arg(long)]
+    validation_run_id: Option<String>,
+    #[arg(long)]
+    url: Option<String>,
+    #[arg(long)]
+    evidence_path: Option<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
 }
 
 #[derive(Debug, Args)]
@@ -1207,6 +1243,8 @@ enum GraphCommand {
     Diff(GraphDiffArgs),
     /// Detect semantic conflicts between base, current graph, and another snapshot.
     Conflicts(GraphConflictsArgs),
+    /// Accept a ready semantic merge/rebase from snapshot inputs through Operation Runtime.
+    Integrate(GraphIntegrateArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1224,6 +1262,32 @@ struct GraphConflictsArgs {
     /// Exit non-zero when conflicts are found.
     #[arg(long)]
     check: bool,
+}
+
+#[derive(Debug, Args)]
+struct GraphIntegrateArgs {
+    #[arg(long, value_enum, default_value = "merge")]
+    mode: GraphIntegrateModeArg,
+    #[arg(long)]
+    base: PathBuf,
+    #[arg(long)]
+    source: PathBuf,
+    #[arg(long)]
+    source_branch: String,
+    #[arg(long)]
+    target_branch: String,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum GraphIntegrateModeArg {
+    Merge,
+    Rebase,
 }
 
 #[derive(Debug, Args)]
@@ -1294,6 +1358,8 @@ fn handle_init(store: &SpecGraphStore, root: &Path, args: InitArgs) -> anyhow::R
         Some(value) => value,
         None => default_project_name(root)?,
     };
+    let actor = args.actor.clone();
+    let graph_branch = args.graph_branch.clone();
     let receipt = store.init(InitOptions {
         project_name,
         actor: args.actor,
@@ -1302,6 +1368,16 @@ fn handle_init(store: &SpecGraphStore, root: &Path, args: InitArgs) -> anyhow::R
     println!("initialized: {}", store.specgraph_dir().display());
     println!("operationId: {}", receipt.operation_id);
     println!("stateHash: {}", receipt.post_state_hash);
+    if args.adopt {
+        let mode = parse_adoption_mode(&args.adopt_mode)?;
+        let (adoption_receipt, report) =
+            record_adoption_scan(store, root, mode, actor, graph_branch)?;
+        println!("adoptionMode: {mode:?}");
+        println!("codeFilesAdopted: {}", report.observed_files.len());
+        println!("adoptionBlocked: {}", report.blocked);
+        println!("adoptionOperationId: {}", adoption_receipt.operation_id);
+        println!("adoptionStateHash: {}", adoption_receipt.post_state_hash);
+    }
     Ok(())
 }
 
@@ -1837,23 +1913,47 @@ fn handle_adopt(store: &SpecGraphStore, root: &Path, args: AdoptArgs) -> anyhow:
     match args.command {
         AdoptCommand::Scan(args) => {
             let mode = parse_adoption_mode(&args.mode)?;
-            let delta = scan_repository(root, mode)?;
-            let count = delta.create_nodes.len();
-            let receipt = store.append_operation(AppendOperationOptions {
-                operation: "ExistingRepo.Adopt".to_string(),
-                actor: args.actor,
-                graph_branch: args.graph_branch,
-                input: json!({"mode": args.mode}),
-                delta,
-                dry_run: false,
-            })?;
+            let (receipt, report) =
+                record_adoption_scan(store, root, mode, args.actor, args.graph_branch)?;
             println!("adoptionMode: {mode:?}");
-            println!("codeFilesAdopted: {count}");
+            println!("codeFilesAdopted: {}", report.observed_files.len());
+            println!("languages: {}", report.languages.join(","));
+            println!("tools: {}", report.tools.join(","));
+            println!("inferredModules: {}", report.inferred_modules.join(","));
+            println!("findings: {}", report.findings.len());
+            println!("blocked: {}", report.blocked);
             println!("operationId: {}", receipt.operation_id);
             println!("stateHash: {}", receipt.post_state_hash);
         }
     }
     Ok(())
+}
+
+fn record_adoption_scan(
+    store: &SpecGraphStore,
+    root: &Path,
+    mode: AdoptionMode,
+    actor: String,
+    graph_branch: String,
+) -> anyhow::Result<(OperationReceipt, sg_adoption::AdoptionReport)> {
+    let mut delta = scan_repository(root, mode)?;
+    let report = adoption_report_from_delta(&delta, mode, &[]);
+    let report_delta = adoption_report_delta(&report);
+    delta.create_nodes.extend(report_delta.create_nodes);
+    delta.create_edges.extend(report_delta.create_edges);
+    let receipt = store.append_operation(AppendOperationOptions {
+        operation: "ExistingRepo.Adopt".to_string(),
+        actor,
+        graph_branch,
+        input: json!({
+            "mode": format!("{mode:?}").to_ascii_lowercase(),
+            "observedFiles": report.observed_files.len(),
+            "blocked": report.blocked,
+        }),
+        delta,
+        dry_run: false,
+    })?;
+    Ok((receipt, report))
 }
 
 fn handle_workflow(
@@ -2168,6 +2268,8 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
             }
 
             findings.extend(validate_required_tests_pass(&replay.graph));
+            findings.extend(validate_cross_domain_traceability(&replay.graph));
+            checks.push("cross-domain-trace".to_string());
 
             if !args.skip_git && root.join(".git").exists() {
                 findings.extend(collect_git_range_findings(
@@ -3347,6 +3449,48 @@ fn handle_release(
                 print_json(&evidence)?;
             }
         }
+        ReleaseCommand::Record(args) => {
+            let replay = store.replay(ReplayOptions { check_hashes: true })?;
+            let project_node_id = find_project_node_id(&replay.graph)?;
+            let release = GitReleaseFact {
+                version: args.version.clone(),
+                tag: args.tag.clone(),
+                commit: args.commit.clone(),
+                spec: args.spec.clone(),
+                validation_run_id: args.validation_run_id.clone(),
+                url: args.url.clone(),
+                evidence_path: args.evidence_path.clone(),
+            };
+            let projection = GitGraphProjection {
+                project_node_id,
+                releases: vec![release.clone()],
+                ..GitGraphProjection::default()
+            };
+            let delta = projection.to_upsert_delta(&replay.graph);
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "Release.Record".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({
+                    "version": args.version,
+                    "tag": args.tag,
+                    "commit": args.commit,
+                    "spec": args.spec,
+                    "validationRunId": args.validation_run_id,
+                    "url": args.url,
+                    "evidencePath": args.evidence_path,
+                }),
+                delta,
+                dry_run: false,
+            })?;
+            if output.json() {
+                print_json(&serde_json::to_value(&receipt)?)?;
+            } else if !output.quiet {
+                println!("releaseRecorded: {}", release.version);
+                println!("operationId: {}", receipt.operation_id);
+                println!("stateHash: {}", receipt.post_state_hash);
+            }
+        }
     }
     Ok(())
 }
@@ -3999,6 +4143,57 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
                     conflicts.len()
                 );
             }
+        }
+        GraphCommand::Integrate(args) => {
+            let report = store.replay(ReplayOptions { check_hashes: true })?;
+            let base = read_snapshot_graph(&resolve_path(root, args.base))?;
+            let source = read_snapshot_graph(&resolve_path(root, args.source))?;
+            let integration = match args.mode {
+                GraphIntegrateModeArg::Merge => dry_run_graph_merge(
+                    &base,
+                    &report.graph,
+                    &source,
+                    args.source_branch.clone(),
+                    args.target_branch.clone(),
+                ),
+                GraphIntegrateModeArg::Rebase => dry_run_graph_rebase(
+                    &base,
+                    &source,
+                    &report.graph,
+                    args.source_branch.clone(),
+                    args.target_branch.clone(),
+                ),
+            };
+            println!("status: {:?}", integration.status);
+            println!("conflicts: {}", integration.conflict_report.conflicts.len());
+            println!("blockers: {}", integration.blockers.len());
+            for finding in &integration.blockers {
+                eprintln!("{}: {}", finding.code, finding.message);
+            }
+            if integration.status != GraphIntegrationStatus::Ready {
+                bail!("graph integration is blocked; resolve conflicts before accepting");
+            }
+            let mode = match integration.mode {
+                GraphIntegrationMode::Merge => "merge",
+                GraphIntegrationMode::Rebase => "rebase",
+            };
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "GraphMerge.Accept".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({
+                    "mode": mode,
+                    "sourceBranch": integration.source_branch,
+                    "targetBranch": integration.target_branch,
+                    "conflictCount": integration.conflict_report.conflicts.len(),
+                    "postMergeValidationFindings": integration.post_merge_validation.len(),
+                }),
+                delta: integration.planned_delta,
+                dry_run: args.dry_run,
+            })?;
+            println!("operationId: {}", receipt.operation_id);
+            println!("dryRun: {}", receipt.dry_run);
+            println!("stateHash: {}", receipt.post_state_hash);
         }
     }
     Ok(())

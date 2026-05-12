@@ -99,6 +99,40 @@ pub struct InferredLink {
     pub trust_state: String,
 }
 
+pub fn parse_annotation_links(file: &str, source: &str) -> Vec<AnnotationLink> {
+    source
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| parse_annotation_line(file, (index + 1) as u32, line))
+        .collect()
+}
+
+fn parse_annotation_line(file: &str, line_number: u32, line: &str) -> Option<AnnotationLink> {
+    let marker = line
+        .find("@specgraph")
+        .map(|idx| idx + "@specgraph".len())
+        .or_else(|| line.find("specgraph:").map(|idx| idx + "specgraph:".len()))?;
+    let body = line[marker..]
+        .trim()
+        .trim_start_matches(|ch: char| ch == '-' || ch == ':' || ch.is_whitespace())
+        .trim();
+    let (relation, rest) = body.split_once(char::is_whitespace)?;
+    let (source, target) = rest.trim().split_once("->")?;
+    let relation = relation.trim();
+    let source = source.trim();
+    let target = target.trim();
+    if relation.is_empty() || source.is_empty() || target.is_empty() {
+        return None;
+    }
+    Some(AnnotationLink {
+        file: file.to_string(),
+        line: line_number,
+        relation: relation.to_string(),
+        source: source.to_string(),
+        target: target.to_string(),
+    })
+}
+
 pub fn validate_trace_links(graph: &Graph, manifest: &LinksManifest) -> Vec<Finding> {
     let keys = GraphKeys::from_graph(graph);
     let acceptance_keys = keys.acceptance_criteria.clone();
@@ -595,6 +629,20 @@ mod tests {
         };
 
         assert!(validate_trace_links(&graph, &manifest).is_empty());
+    }
+
+    #[test]
+    fn parses_source_annotation_links() {
+        let source = r#"
+            // @specgraph implements-use-case src/auth.ts/function/resetPassword -> AUTH-001/UC-001
+            fn reset_password() {} // specgraph: tests-risk tests/auth.rs::reset -> AUTH-001/RISK-001
+        "#;
+        let links = parse_annotation_links("src/auth.rs", source);
+
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].line, 2);
+        assert_eq!(links[0].relation, "implements-use-case");
+        assert_eq!(links[1].relation, "tests-risk");
     }
 
     #[test]

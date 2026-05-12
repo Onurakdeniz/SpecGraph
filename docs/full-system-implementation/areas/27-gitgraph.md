@@ -51,7 +51,7 @@ Branch binds spec/snapshot; commit binds action group/plan; PR and tag bindings 
 - Preserve and regression-test the currently documented MVP/foundation behavior.
 - Implement or finish: PullRequest model.
 - Implement or finish: Merge commit GraphMerge binding.
-- Implement or finish: Tag release binding.
+- Release facts can be recorded and linked to tag, commit, and validation evidence with `sg release record`.
 - Implement or finish: Remote/provider metadata.
 - Route state changes through the Operation Runtime and produce receipts where graph state changes.
 - Add focused tests, CLI examples, and documentation updates for this area.

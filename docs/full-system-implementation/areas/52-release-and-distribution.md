@@ -16,7 +16,7 @@ Ship SpecGraph OS as reliable open-source binaries, hooks, GitHub Action, packs,
 - `.github/workflows/release.yml` validates, builds the CLI, packages archives, writes checksums, prepares release evidence, optionally signs checksums, uploads artifacts, and drafts GitHub releases on tags.
 - `action.yml` provides the official composite GitHub Action validation surface.
 - `scripts/prepare_release_evidence.py` emits release evidence JSON.
-- `sg release check` and `sg release evidence` expose release validation/evidence locally.
+- `sg release check`, `sg release evidence`, and `sg release record` expose release validation, evidence generation, and graph binding locally.
 - Release evidence includes source commit, graph state when `.specgraph` exists, validation commands, artifact checksums, and signing option metadata.
 
 ### Partly Implemented
@@ -41,6 +41,7 @@ Release, Tag, GraphSnapshot, PackVersion, ValidationRun, Signature, release evid
 
 - `sg release check`
 - `sg release evidence`
+- `sg release record`
 - `scripts/prepare_release_evidence.py`
 - `.github/workflows/release.yml`
 - `action.yml`
@@ -56,6 +57,7 @@ Release requires tests, proof, architecture checks, docs checks, example checks,
 - [x] Add pack/docs/examples/SDK/Studio artifact evidence checksums.
 - [x] Add signed artifact option.
 - [x] Bind release evidence to source commit and graph snapshot/state hash when present.
+- [x] Record release graph fact linked to tag/commit/validation evidence through Operation Runtime.
 - [ ] Add multi-platform binary matrix.
 - [ ] Add Cargo/package registry publishing.
 - [ ] Add installer channels.
