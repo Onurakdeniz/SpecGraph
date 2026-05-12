@@ -136,8 +136,9 @@ Current completed slices:
 - **Phase 0.5A — Config and secret declaration governance** added config/secret/runtime environment graph facts, stable-key/ontology/operation ABI support, config access detection in the code indexer, `Config.Declare` semantic gates for docs and approval evidence, strict index blockers for undeclared config/secret usage, and tests.
 - **Phase 0.5B — Dependency graph facts and operations** added dependency/package-manifest/version/lockfile/license/advisory facts, stable-key/ontology/operation ABI support for `Dependency.Add/Update/Remove`, semantic gates for manifest, lockfile consistency, license, advisory, and risky-dependency approval evidence, plus tests.
 - **Phase 0.5C — Generated-code, public contract, docs, and projection governance** added generated-file/source/generator facts, public API contract/request/response/consumer/breaking-change facts, example/changelog evidence, `GeneratedCode.Record` and `PublicContract.Record` ABI/semantic gates, generated-file edit permit blockers, public compatibility/docs requirements, projection drift findings, and tests.
+- **Phase 0.6A — Validation recipes and test intent** added validation recipe/command/build/typecheck/lint/format evidence facts, action/commit-plan recipe requirements, adapter-execution guardrails, recipe gate findings for action/PR/release validation, test intent/assertion/scenario facts, existing/unknown email positive/negative scenario completeness checks, and tests.
 
-Next focus: **Phase 0.6 — Review, validation recipes, test intent, rollout, observability, and post-release gates**. Start from the latest `development` after the Phase 0.5 gate passes.
+Next focus: **Phase 0.6B — Review, rollout, rollback, observability, and post-release gates**. Start from the latest `development`, add review/requested-change blockers, rollout/rollback/observability evidence, post-release checks, and complete the Phase 0.6 tests/gates.
 
 ---
 
@@ -500,15 +501,15 @@ Close the workflow after code is written: validation must be appropriate to the 
 
 ## Checklist
 
-- [ ] **Add validation recipe model.** Add `ValidationRecipe`, `ValidationCommand`, `BuildRun`, `TypecheckRun`, `LintRun`, and `FormatCheck` facts. These record required commands and outcomes without requiring real test-runner adapters.
+- [x] **Add validation recipe model.** Add `ValidationRecipe`, `ValidationCommand`, `BuildRun`, `TypecheckRun`, `LintRun`, and `FormatCheck` facts. These record required commands and outcomes without requiring real test-runner adapters.
 
-- [ ] **Add validation adapter guardrail.** Validation recipes may declare required commands, expected evidence, manual/normalized outcomes, and failure reasons, but Phase 0.6 must not implement Cargo/npm/pytest/etc. command execution adapters. If automatic execution is requested, return an excluded-scope follow-up item instead of hiding it inside this phase.
+- [x] **Add validation adapter guardrail.** Validation recipes may declare required commands, expected evidence, manual/normalized outcomes, and failure reasons, but Phase 0.6 must not implement Cargo/npm/pytest/etc. command execution adapters. If automatic execution is requested, return an excluded-scope follow-up item instead of hiding it inside this phase.
 
-- [ ] **Tie validation recipes to actions.** Each ActionGraph/CommitPlan must declare required validation recipe items. Action completion and PR/release validation must fail if required build/typecheck/lint/format evidence is missing or failed.
+- [x] **Tie validation recipes to actions.** Each ActionGraph/CommitPlan must declare required validation recipe items. Action completion and PR/release validation must fail if required build/typecheck/lint/format evidence is missing or failed.
 
-- [ ] **Add test intent model.** Add `TestIntent`, `TestAssertion`, `PositiveCase`, `NegativeCase`, `RegressionCase`, and `SecurityCase` facts. Acceptance criteria should map to required test scenarios, not only a generic `VERIFIES` edge.
+- [x] **Add test intent model.** Add `TestIntent`, `TestAssertion`, `PositiveCase`, `NegativeCase`, `RegressionCase`, and `SecurityCase` facts. Acceptance criteria should map to required test scenarios, not only a generic `VERIFIES` edge.
 
-- [ ] **Validate test scenario completeness.** If an acceptance criterion requires existing/unknown email parity, both positive and negative cases must be represented in TestIntent even if test execution remains manually recorded.
+- [x] **Validate test scenario completeness.** If an acceptance criterion requires existing/unknown email parity, both positive and negative cases must be represented in TestIntent even if test execution remains manually recorded.
 
 - [ ] **Add review graph facts.** Add `Review`, `ReviewComment`, `RequestedChange`, `ReviewResolution`, and scoped `ReviewApproval`. Review comments from provider/manual input should become graph facts.
 

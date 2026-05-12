@@ -44,12 +44,13 @@ use sg_server::{
 use sg_spec::{ModuleChange, ModuleChangeAction, PlannedObject, SpecProjection, TextItem};
 use sg_store::{
     code_index_reconciliation_delta, code_index_strict_findings, mark_code_index_delta_as_baseline,
-    ActionLifecycleOptions, AppendOperationOptions, BindBranchOptions, CreateWaiverOptions,
-    GenerateActionGraphOptions, GrantRoleOptions, InitOptions, InterfaceVisibility,
-    LinkModuleCapabilityOptions, ModuleDefinition, ModuleInterface, ModuleLifecycleOptions,
-    ModuleLifecycleState, ProjectProfileInput, RecordApprovalOptions, RecordCommitOptions,
-    RecordPolicyReportOptions, ReleaseWorkReservationOptions, ReplayOptions, ReplayReport,
-    SpecGraphStore, TransitionSpecOptions, UpsertActorOptions, UpsertModuleGraphOptions,
+    validation_recipe_gate_findings, ActionLifecycleOptions, AppendOperationOptions,
+    BindBranchOptions, CreateWaiverOptions, GenerateActionGraphOptions, GrantRoleOptions,
+    InitOptions, InterfaceVisibility, LinkModuleCapabilityOptions, ModuleDefinition,
+    ModuleInterface, ModuleLifecycleOptions, ModuleLifecycleState, ProjectProfileInput,
+    RecordApprovalOptions, RecordCommitOptions, RecordPolicyReportOptions,
+    ReleaseWorkReservationOptions, ReplayOptions, ReplayReport, SpecGraphStore,
+    TransitionSpecOptions, UpsertActorOptions, UpsertModuleGraphOptions,
     UpsertProjectProfileOptions, WorkflowCodePlanOptions, WorkflowExpectedFileHash,
     WorkflowPlanOptions,
 };
@@ -2666,6 +2667,7 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
             }
 
             findings.extend(validate_pr_hosting_graph(&replay.graph));
+            findings.extend(validation_recipe_gate_findings(&replay.graph));
             let pr_id = pull_request_node_id(&args.provider, &args.number);
             if !replay.graph.nodes.contains_key(&pr_id) {
                 findings.push(

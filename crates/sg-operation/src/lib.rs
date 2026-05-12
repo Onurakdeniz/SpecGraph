@@ -335,12 +335,22 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             description: "Generate the deterministic MVP ActionGraph template.",
             required_input_fields: &["spec"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
-            allowed_create_node_types: &["ActionGraph", "ActionGroup", "ActionNode", "CommitPlan"],
+            allowed_create_node_types: &[
+                "ActionGraph",
+                "ActionGroup",
+                "ActionNode",
+                "CommitPlan",
+                "ValidationRecipe",
+                "ValidationCommand",
+            ],
             allowed_create_edge_types: &[
                 "HAS_ACTION_GRAPH",
                 "HAS_ACTION_GROUP",
                 "HAS_ACTION",
                 "HAS_COMMIT_PLAN",
+                "ACTION_REQUIRES_VALIDATION_RECIPE",
+                "COMMIT_PLAN_REQUIRES_VALIDATION_RECIPE",
+                "VALIDATION_RECIPE_HAS_COMMAND",
             ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
@@ -964,8 +974,67 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
             description: "Record validation run evidence and findings.",
             required_input_fields: &["runId", "status", "checks"],
             preconditions: GENERIC_MUTATION_PRECONDITIONS,
-            allowed_create_node_types: &["ValidationRun", "ValidatorExecution", "Finding"],
-            allowed_create_edge_types: &["VALIDATED_BY", "HAS_VALIDATOR_EXECUTION", "HAS_FINDING"],
+            allowed_create_node_types: &[
+                "ValidationRun",
+                "ValidatorExecution",
+                "Finding",
+                "BuildRun",
+                "TypecheckRun",
+                "LintRun",
+                "FormatCheck",
+            ],
+            allowed_create_edge_types: &[
+                "VALIDATED_BY",
+                "HAS_VALIDATOR_EXECUTION",
+                "HAS_FINDING",
+                "VALIDATION_RUN_SATISFIES_RECIPE",
+                "VALIDATION_RUN_HAS_BUILD",
+                "VALIDATION_RUN_HAS_TYPECHECK",
+                "VALIDATION_RUN_HAS_LINT",
+                "VALIDATION_RUN_HAS_FORMAT_CHECK",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "ValidationRecipe.Record",
+            category: "validation",
+            description: "Record required validation recipes and declared commands without executing tool-specific adapters.",
+            required_input_fields: &["recipe"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &["ValidationRecipe", "ValidationCommand"],
+            allowed_create_edge_types: &[
+                "ACTION_REQUIRES_VALIDATION_RECIPE",
+                "COMMIT_PLAN_REQUIRES_VALIDATION_RECIPE",
+                "VALIDATION_RECIPE_HAS_COMMAND",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "TestIntent.Record",
+            category: "test",
+            description: "Record acceptance-criterion test intent, assertions, and positive/negative/regression/security scenario cases.",
+            required_input_fields: &["testIntent"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "TestIntent",
+                "TestAssertion",
+                "PositiveCase",
+                "NegativeCase",
+                "RegressionCase",
+                "SecurityCase",
+            ],
+            allowed_create_edge_types: &[
+                "SPEC_HAS_TEST_INTENT",
+                "ACCEPTANCE_CRITERION_HAS_TEST_INTENT",
+                "TEST_INTENT_HAS_ASSERTION",
+                "TEST_INTENT_HAS_POSITIVE_CASE",
+                "TEST_INTENT_HAS_NEGATIVE_CASE",
+                "TEST_INTENT_HAS_REGRESSION_CASE",
+                "TEST_INTENT_HAS_SECURITY_CASE",
+                "TEST_INTENT_VALIDATED_BY",
+            ],
             postconditions: GENERIC_MUTATION_POSTCONDITIONS,
         },
         OperationDefinition {
@@ -1451,6 +1520,37 @@ mod tests {
         assert!(contract
             .allowed_create_edge_types
             .contains(&"CONTRACT_DOCUMENTED_BY"));
+    }
+
+    #[test]
+    fn validation_recipe_and_test_intent_operations_cover_phase_0_6_models() {
+        let action_graph = find_operation("ActionGraph.Generate").unwrap();
+        assert!(action_graph
+            .allowed_create_node_types
+            .contains(&"ValidationRecipe"));
+        assert!(action_graph
+            .allowed_create_edge_types
+            .contains(&"ACTION_REQUIRES_VALIDATION_RECIPE"));
+
+        let validation = find_operation("Validation.Record").unwrap();
+        assert!(validation.allowed_create_node_types.contains(&"BuildRun"));
+        assert!(validation
+            .allowed_create_edge_types
+            .contains(&"VALIDATION_RUN_SATISFIES_RECIPE"));
+
+        let recipe = find_operation("ValidationRecipe.Record").unwrap();
+        assert!(recipe
+            .allowed_create_node_types
+            .contains(&"ValidationCommand"));
+        assert!(recipe
+            .allowed_create_edge_types
+            .contains(&"VALIDATION_RECIPE_HAS_COMMAND"));
+
+        let intent = find_operation("TestIntent.Record").unwrap();
+        assert!(intent.allowed_create_node_types.contains(&"TestIntent"));
+        assert!(intent
+            .allowed_create_edge_types
+            .contains(&"TEST_INTENT_HAS_NEGATIVE_CASE"));
     }
 
     #[test]

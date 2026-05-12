@@ -5018,6 +5018,10 @@ fn spec_state_blockers(graph: &Graph, spec_node_id: &str, target_state: &str) ->
     }
 
     if target_state == "Released" {
+        for finding in validation_recipe_gate_findings(graph) {
+            blockers.push(finding.message);
+        }
+
         let passed_validation = graph.nodes.values().any(|node| {
             node.node_type == "ValidationRun"
                 && node
@@ -5196,20 +5200,118 @@ fn action_lifecycle_blockers(graph: &Graph, action_id: &str, target_state: &str)
     }
 
     if target_state == "Completed" {
-        let has_passed_validation = graph.nodes.values().any(|node| {
-            node.node_type == "ValidationRun"
-                && node
-                    .attributes
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .is_some_and(|status| status == "Passed")
-        });
-        if !has_passed_validation {
-            blockers
-                .push("action cannot complete without passed ValidationRun evidence".to_string());
+        let required_recipes = action_required_validation_recipes(graph, action_id);
+        if required_recipes.is_empty() {
+            let has_passed_validation = graph.nodes.values().any(|node| {
+                node.node_type == "ValidationRun"
+                    && node
+                        .attributes
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .is_some_and(|status| status == "Passed")
+            });
+            if !has_passed_validation {
+                blockers.push(
+                    "action cannot complete without passed ValidationRun evidence".to_string(),
+                );
+            }
+        } else {
+            for recipe in required_recipes {
+                if !validation_recipe_satisfied(graph, recipe) {
+                    blockers.push(format!(
+                        "action cannot complete until ValidationRecipe `{}` has passed recorded evidence",
+                        recipe.stable_key
+                    ));
+                }
+            }
         }
     }
     blockers
+}
+
+fn action_required_validation_recipes<'a>(graph: &'a Graph, action_id: &str) -> Vec<&'a Node> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| {
+            edge.from == action_id && edge.edge_type == "ACTION_REQUIRES_VALIDATION_RECIPE"
+        })
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| node.node_type == "ValidationRecipe")
+        .collect()
+}
+
+fn validation_recipe_satisfied(graph: &Graph, recipe: &Node) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.edge_type == "VALIDATION_RUN_SATISFIES_RECIPE"
+            && edge.to == recipe.id
+            && graph.nodes.get(&edge.from).is_some_and(|run| {
+                run.node_type == "ValidationRun"
+                    && node_attr_eq(run, "status", "Passed")
+                    && validation_run_has_required_evidence(graph, &run.id, recipe)
+            })
+    })
+}
+
+fn validation_run_has_required_evidence(graph: &Graph, run_id: &str, recipe: &Node) -> bool {
+    match node_attr(recipe, "evidenceKind").unwrap_or_default() {
+        "build" => validation_run_has_passed_evidence(
+            graph,
+            run_id,
+            "VALIDATION_RUN_HAS_BUILD",
+            "BuildRun",
+        ),
+        "typecheck" => validation_run_has_passed_evidence(
+            graph,
+            run_id,
+            "VALIDATION_RUN_HAS_TYPECHECK",
+            "TypecheckRun",
+        ),
+        "lint" => {
+            validation_run_has_passed_evidence(graph, run_id, "VALIDATION_RUN_HAS_LINT", "LintRun")
+        }
+        "format" => validation_run_has_passed_evidence(
+            graph,
+            run_id,
+            "VALIDATION_RUN_HAS_FORMAT_CHECK",
+            "FormatCheck",
+        ),
+        _ => true,
+    }
+}
+
+fn validation_run_has_passed_evidence(
+    graph: &Graph,
+    run_id: &str,
+    edge_type: &str,
+    node_type: &str,
+) -> bool {
+    graph.edges.values().any(|edge| {
+        edge.from == run_id
+            && edge.edge_type == edge_type
+            && graph.nodes.get(&edge.to).is_some_and(|node| {
+                node.node_type == node_type && node_attr_eq(node, "status", "Passed")
+            })
+    })
+}
+
+pub fn validation_recipe_gate_findings(graph: &Graph) -> Vec<Finding> {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "ValidationRecipe")
+        .filter(|recipe| !validation_recipe_satisfied(graph, recipe))
+        .map(|recipe| {
+            semantic_finding(
+                "semantic.validation_recipe.unsatisfied",
+                format!(
+                    "ValidationRecipe `{}` requires passed recorded `{}` evidence before action/PR/release gates can pass.",
+                    recipe.stable_key,
+                    node_attr(recipe, "evidenceKind").unwrap_or("validation")
+                ),
+            )
+        })
+        .collect()
 }
 
 pub fn list_action_graph(root: &Path, spec: &str) -> Result<ActionGraphSummary> {
@@ -6415,6 +6517,10 @@ fn validate_operation_semantic_preconditions(
         "Validation.Record" => {
             validate_validation_record_semantic_preconditions(graph, request, delta)
         }
+        "ValidationRecipe.Record" => {
+            validate_validation_recipe_semantic_preconditions(graph, request, delta)
+        }
+        "TestIntent.Record" => validate_test_intent_semantic_preconditions(graph, delta),
         "Intent.RecordDecision" => {
             validate_intent_record_decision_semantic_preconditions(graph, delta)
         }
@@ -7502,7 +7608,330 @@ fn validate_validation_record_semantic_preconditions(
         }
     }
 
+    let run_node = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .find(|node| {
+            node.node_type == "ValidationRun"
+                && run_id
+                    .as_deref()
+                    .is_none_or(|run_id| node_attr_eq(node, "runId", run_id))
+        });
+    if status.as_deref() == Some("Passed") {
+        for recipe in delta
+            .create_edges
+            .iter()
+            .filter(|edge| edge.edge_type == "VALIDATION_RUN_SATISFIES_RECIPE")
+            .filter_map(|edge| graph.nodes.get(&edge.to))
+            .filter(|node| node.node_type == "ValidationRecipe")
+        {
+            let Some(run_node) = run_node else {
+                continue;
+            };
+            if !validation_delta_has_required_evidence(delta, &run_node.id, recipe) {
+                findings.push(semantic_finding(
+                    "semantic.validation_record.recipe_evidence_required",
+                    format!(
+                        "ValidationRun `{}` cannot satisfy ValidationRecipe `{}` without passed `{}` evidence.",
+                        node_attr(run_node, "runId").unwrap_or(run_node.id.as_str()),
+                        recipe.stable_key,
+                        node_attr(recipe, "evidenceKind").unwrap_or("validation")
+                    ),
+                ));
+            }
+        }
+    }
+
     findings
+}
+
+fn validation_delta_has_required_evidence(delta: &GraphDelta, run_id: &str, recipe: &Node) -> bool {
+    match node_attr(recipe, "evidenceKind").unwrap_or_default() {
+        "build" => validation_delta_has_passed_evidence(
+            delta,
+            run_id,
+            "VALIDATION_RUN_HAS_BUILD",
+            "BuildRun",
+        ),
+        "typecheck" => validation_delta_has_passed_evidence(
+            delta,
+            run_id,
+            "VALIDATION_RUN_HAS_TYPECHECK",
+            "TypecheckRun",
+        ),
+        "lint" => validation_delta_has_passed_evidence(
+            delta,
+            run_id,
+            "VALIDATION_RUN_HAS_LINT",
+            "LintRun",
+        ),
+        "format" => validation_delta_has_passed_evidence(
+            delta,
+            run_id,
+            "VALIDATION_RUN_HAS_FORMAT_CHECK",
+            "FormatCheck",
+        ),
+        _ => true,
+    }
+}
+
+fn validation_delta_has_passed_evidence(
+    delta: &GraphDelta,
+    run_id: &str,
+    edge_type: &str,
+    node_type: &str,
+) -> bool {
+    delta.create_edges.iter().any(|edge| {
+        edge.from == run_id
+            && edge.edge_type == edge_type
+            && delta
+                .create_nodes
+                .iter()
+                .chain(delta.update_nodes.iter())
+                .any(|node| {
+                    node.id == edge.to
+                        && node.node_type == node_type
+                        && node_attr_eq(node, "status", "Passed")
+                })
+    })
+}
+
+fn validate_validation_recipe_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    if request
+        .input
+        .get("execute")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || request
+            .input
+            .get("automaticExecution")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        findings.push(semantic_finding(
+            "semantic.validation_recipe.execution_adapter_excluded",
+            "Phase 0.6 validation recipes record required commands and evidence only; automatic tool-specific execution adapters are excluded-scope follow-up work.",
+        ));
+    }
+
+    let recipes = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "ValidationRecipe")
+        .collect::<Vec<_>>();
+    if recipes.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.validation_recipe.recipe_required",
+            "ValidationRecipe.Record must create or update at least one ValidationRecipe.",
+        ));
+    }
+    for recipe in recipes {
+        if node_attr(recipe, "name").is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.validation_recipe.name_required",
+                "ValidationRecipe requires non-empty `name`.",
+            ));
+        }
+        if node_bool_attr(recipe, "adapterExecutionAllowed") {
+            findings.push(semantic_finding(
+                "semantic.validation_recipe.adapter_execution_forbidden",
+                "ValidationRecipe must not enable tool-specific adapter execution in Phase 0.6.",
+            ));
+        }
+        let linked_to_action_or_plan =
+            delta
+                .create_edges
+                .iter()
+                .chain(graph.edges.values())
+                .any(|edge| {
+                    edge.to == recipe.id
+                        && matches!(
+                            edge.edge_type.as_str(),
+                            "ACTION_REQUIRES_VALIDATION_RECIPE"
+                                | "COMMIT_PLAN_REQUIRES_VALIDATION_RECIPE"
+                        )
+                });
+        if !linked_to_action_or_plan {
+            findings.push(semantic_finding(
+                "semantic.validation_recipe.scope_required",
+                "ValidationRecipe must be linked from an ActionNode or CommitPlan.",
+            ));
+        }
+        let has_command = delta
+            .create_edges
+            .iter()
+            .chain(graph.edges.values())
+            .any(|edge| {
+                edge.from == recipe.id
+                    && edge.edge_type == "VALIDATION_RECIPE_HAS_COMMAND"
+                    && node_exists_with_type(graph, delta, &edge.to, "ValidationCommand")
+            });
+        if !has_command {
+            findings.push(semantic_finding(
+                "semantic.validation_recipe.command_required",
+                "ValidationRecipe must declare at least one ValidationCommand.",
+            ));
+        }
+    }
+    for command in delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "ValidationCommand")
+    {
+        if node_attr(command, "command").is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.validation_recipe.command_text_required",
+                "ValidationCommand requires non-empty `command` text.",
+            ));
+        }
+        if node_bool_attr(command, "adapterExecutionAllowed") {
+            findings.push(semantic_finding(
+                "semantic.validation_recipe.command_adapter_execution_forbidden",
+                "ValidationCommand must not enable automatic Cargo/npm/pytest/etc. execution adapters in Phase 0.6.",
+            ));
+        }
+    }
+    findings
+}
+
+fn validate_test_intent_semantic_preconditions(graph: &Graph, delta: &GraphDelta) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let intents = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "TestIntent")
+        .collect::<Vec<_>>();
+    if intents.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.test_intent.intent_required",
+            "TestIntent.Record must create or update at least one TestIntent.",
+        ));
+    }
+    for intent in intents {
+        if node_attr(intent, "scenario").is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.test_intent.scenario_required",
+                "TestIntent requires non-empty `scenario`.",
+            ));
+        }
+        if !test_intent_has_edge_to_type(
+            graph,
+            delta,
+            intent,
+            "TEST_INTENT_HAS_ASSERTION",
+            "TestAssertion",
+        ) {
+            findings.push(semantic_finding(
+                "semantic.test_intent.assertion_required",
+                "TestIntent requires at least one TestAssertion.",
+            ));
+        }
+
+        let linked_criteria = linked_acceptance_criteria_for_test_intent(graph, delta, &intent.id);
+        if linked_criteria.is_empty()
+            && !delta
+                .create_edges
+                .iter()
+                .chain(graph.edges.values())
+                .any(|edge| {
+                    edge.to == intent.id
+                        && edge.edge_type == "SPEC_HAS_TEST_INTENT"
+                        && node_exists_with_type(graph, delta, &edge.from, "Spec")
+                })
+        {
+            findings.push(semantic_finding(
+                "semantic.test_intent.acceptance_scope_required",
+                "TestIntent must link to a Spec or AcceptanceCriterion.",
+            ));
+        }
+
+        if linked_criteria
+            .iter()
+            .any(|criterion| acceptance_criterion_requires_positive_and_negative(criterion))
+        {
+            let has_positive = test_intent_has_edge_to_type(
+                graph,
+                delta,
+                intent,
+                "TEST_INTENT_HAS_POSITIVE_CASE",
+                "PositiveCase",
+            );
+            let has_negative = test_intent_has_edge_to_type(
+                graph,
+                delta,
+                intent,
+                "TEST_INTENT_HAS_NEGATIVE_CASE",
+                "NegativeCase",
+            );
+            if !has_positive || !has_negative {
+                findings.push(semantic_finding(
+                    "semantic.test_intent.positive_negative_required",
+                    "Acceptance criteria covering existing/unknown email parity require both PositiveCase and NegativeCase scenario facts.",
+                ));
+            }
+        }
+    }
+    findings
+}
+
+fn test_intent_has_edge_to_type(
+    graph: &Graph,
+    delta: &GraphDelta,
+    intent: &Node,
+    edge_type: &str,
+    node_type: &str,
+) -> bool {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .any(|edge| {
+            edge.from == intent.id
+                && edge.edge_type == edge_type
+                && node_exists_with_type(graph, delta, &edge.to, node_type)
+        })
+}
+
+fn linked_acceptance_criteria_for_test_intent<'a>(
+    graph: &'a Graph,
+    delta: &'a GraphDelta,
+    intent_id: &str,
+) -> Vec<&'a Node> {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .filter(|edge| {
+            edge.to == intent_id && edge.edge_type == "ACCEPTANCE_CRITERION_HAS_TEST_INTENT"
+        })
+        .filter_map(|edge| {
+            graph
+                .nodes
+                .get(&edge.from)
+                .or_else(|| delta.create_nodes.iter().find(|node| node.id == edge.from))
+                .or_else(|| delta.update_nodes.iter().find(|node| node.id == edge.from))
+        })
+        .filter(|node| node.node_type == "AcceptanceCriterion")
+        .collect()
+}
+
+fn acceptance_criterion_requires_positive_and_negative(criterion: &Node) -> bool {
+    let text = node_attr(criterion, "text")
+        .or_else(|| node_attr(criterion, "description"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    text.contains("email")
+        && text.contains("existing")
+        && (text.contains("unknown") || text.contains("nonexistent") || text.contains("missing"))
 }
 
 fn validate_intent_record_decision_semantic_preconditions(
@@ -9513,6 +9942,15 @@ fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDel
                 ),
             ]),
         });
+        append_validation_recipe_nodes(
+            spec,
+            template.name,
+            &action_id,
+            &commit_plan_id,
+            template.required_recipes,
+            &mut create_nodes,
+            &mut create_edges,
+        );
 
         create_edges.push(edge(&action_graph_id, "HAS_ACTION_GROUP", &group_id));
         create_edges.push(edge(&group_id, "HAS_ACTION", &action_id));
@@ -9568,6 +10006,104 @@ fn action_group_for_code_object(declaration: &Node) -> &'static str {
     }
 }
 
+fn append_validation_recipe_nodes(
+    spec: &str,
+    group: &str,
+    action_id: &str,
+    commit_plan_id: &str,
+    recipe_names: &[&str],
+    create_nodes: &mut Vec<Node>,
+    create_edges: &mut Vec<Edge>,
+) {
+    for recipe_name in recipe_names {
+        let recipe_key = format!("{spec}/{group}/{recipe_name}");
+        let recipe_id = node_id("validation_recipe", &recipe_key);
+        let command_id = node_id("validation_command", &recipe_key);
+        create_nodes.push(Node {
+            id: recipe_id.clone(),
+            stable_key: format!("validation-recipe:{recipe_key}"),
+            node_type: "ValidationRecipe".to_string(),
+            attributes: BTreeMap::from([
+                ("recipeId".to_string(), json!(recipe_key)),
+                ("name".to_string(), json!(recipe_name)),
+                (
+                    "evidenceKind".to_string(),
+                    json!(validation_recipe_evidence_kind(recipe_name)),
+                ),
+                ("manualOutcomeAllowed".to_string(), json!(true)),
+                ("adapterExecutionAllowed".to_string(), json!(false)),
+                (
+                    "excludedScopeFollowUp".to_string(),
+                    json!("real test-runner adapter execution is outside Phase 0.6"),
+                ),
+            ]),
+        });
+        create_nodes.push(Node {
+            id: command_id.clone(),
+            stable_key: format!("validation-command:{recipe_key}/record-evidence"),
+            node_type: "ValidationCommand".to_string(),
+            attributes: BTreeMap::from([
+                (
+                    "commandId".to_string(),
+                    json!(format!("{recipe_key}/record-evidence")),
+                ),
+                (
+                    "command".to_string(),
+                    json!(validation_recipe_declared_command(recipe_name)),
+                ),
+                (
+                    "expectedEvidenceKind".to_string(),
+                    json!(validation_recipe_evidence_kind(recipe_name)),
+                ),
+                ("manualOutcomeAllowed".to_string(), json!(true)),
+                ("adapterExecutionAllowed".to_string(), json!(false)),
+            ]),
+        });
+        create_edges.push(edge(
+            action_id,
+            "ACTION_REQUIRES_VALIDATION_RECIPE",
+            &recipe_id,
+        ));
+        create_edges.push(edge(
+            commit_plan_id,
+            "COMMIT_PLAN_REQUIRES_VALIDATION_RECIPE",
+            &recipe_id,
+        ));
+        create_edges.push(edge(
+            &recipe_id,
+            "VALIDATION_RECIPE_HAS_COMMAND",
+            &command_id,
+        ));
+    }
+}
+
+fn validation_recipe_evidence_kind(recipe_name: &str) -> &'static str {
+    match recipe_name {
+        "build" => "build",
+        "typecheck" => "typecheck",
+        "lint" => "lint",
+        "format" => "format",
+        "test-intent" | "trace" => "test-intent",
+        _ => "validation",
+    }
+}
+
+fn validation_recipe_declared_command(recipe_name: &str) -> &'static str {
+    match recipe_name {
+        "build" => "record build evidence",
+        "typecheck" => "record typecheck evidence",
+        "lint" => "record lint evidence",
+        "format" => "record format-check evidence",
+        "replay" => "record graph replay evidence",
+        "spec" => "record spec validation evidence",
+        "trace" => "record trace validation evidence",
+        "commit" => "record commit validation evidence",
+        "test-intent" => "record required test-intent scenario evidence",
+        "public-contract" => "record public-contract compatibility evidence",
+        _ => "record validation evidence",
+    }
+}
+
 fn push_unique(values: &mut Vec<String>, value: String) {
     if !values.contains(&value) {
         values.push(value);
@@ -9582,6 +10118,7 @@ struct ActionGroupTemplate {
     commit_plan: &'static str,
     allowed_paths: &'static [&'static str],
     required_validation: &'static [&'static str],
+    required_recipes: &'static [&'static str],
 }
 
 const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
@@ -9592,6 +10129,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         commit_plan: "Commit graph metadata changes",
         allowed_paths: &[".specgraph/**", "specs/**", "docs/**"],
         required_validation: &["replay", "spec"],
+        required_recipes: &["replay", "spec"],
     },
     ActionGroupTemplate {
         name: "tests",
@@ -9600,6 +10138,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         commit_plan: "Commit tests for acceptance criteria",
         allowed_paths: &["tests/**", "**/*test*", "**/*spec*"],
         required_validation: &["trace"],
+        required_recipes: &["test-intent", "trace"],
     },
     ActionGroupTemplate {
         name: "implementation",
@@ -9608,6 +10147,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         commit_plan: "Commit implementation changes",
         allowed_paths: &["src/**", "crates/**", "packages/**", "apps/**"],
         required_validation: &[],
+        required_recipes: &["build", "typecheck", "lint", "format"],
     },
     ActionGroupTemplate {
         name: "interface",
@@ -9622,6 +10162,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
             "docs/**",
         ],
         required_validation: &[],
+        required_recipes: &["build", "typecheck", "lint", "format", "public-contract"],
     },
     ActionGroupTemplate {
         name: "validation",
@@ -9630,6 +10171,7 @@ const ACTION_GROUP_TEMPLATES: &[ActionGroupTemplate] = &[
         commit_plan: "Commit validation evidence",
         allowed_paths: &[".github/**", ".specgraph/validation/**", "docs/**"],
         required_validation: &["replay", "spec", "trace", "commit"],
+        required_recipes: &["replay", "spec", "trace", "commit"],
     },
 ];
 
@@ -11850,6 +12392,171 @@ acceptanceCriteria:
         assert!(blockers
             .iter()
             .any(|blocker| blocker.contains("ValidationRun")));
+    }
+
+    #[test]
+    fn action_completion_requires_declared_validation_recipe_evidence() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        bind_spec_branch(
+            tmp.path(),
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "spec/auth-001-validation-recipes".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        generate_action_graph(
+            tmp.path(),
+            GenerateActionGraphOptions {
+                spec: "AUTH-001".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let action_id = node_id("action_node", "AUTH-001/implementation");
+        let blockers = action_lifecycle_blockers(&replay.graph, &action_id, "Completed");
+        assert!(blockers
+            .iter()
+            .any(|blocker| blocker.contains("ValidationRecipe")));
+
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Validation.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "runId": "implementation-validation",
+                    "status": "Passed",
+                    "checks": ["replay", "build", "typecheck", "lint", "format"],
+                    "stateHash": replay.state_hash,
+                }),
+                dry_run: false,
+                delta: validation_run_for_action_recipes_delta(
+                    &replay.graph,
+                    &action_id,
+                    "implementation-validation",
+                    true,
+                    true,
+                    true,
+                    true,
+                ),
+            },
+        )
+        .unwrap();
+
+        transition_action(
+            tmp.path(),
+            ActionLifecycleOptions {
+                action: action_id.clone(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                reason: Some("Start implementation".to_string()),
+            },
+            "Action.Start",
+            "InProgress",
+        )
+        .unwrap();
+
+        let completed = transition_action(
+            tmp.path(),
+            ActionLifecycleOptions {
+                action: action_id,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                reason: Some("All required validation recipe evidence recorded".to_string()),
+            },
+            "Action.Complete",
+            "Completed",
+        )
+        .unwrap();
+        assert_eq!(completed.operation, "Action.Complete");
+    }
+
+    #[test]
+    fn validation_recipe_record_rejects_automatic_execution_adapter_requests() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        bind_spec_branch(
+            tmp.path(),
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "spec/auth-001-validation-recipe-guardrail".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        generate_action_graph(
+            tmp.path(),
+            GenerateActionGraphOptions {
+                spec: "AUTH-001".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "ValidationRecipe.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"recipe": "AUTH-001/implementation/cargo-test", "execute": true}),
+                dry_run: true,
+                delta: validation_recipe_record_delta(),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed { operation, .. }
+                if operation == "ValidationRecipe.Record"
+        ));
+    }
+
+    #[test]
+    fn test_intent_requires_positive_and_negative_email_scenarios() {
+        let tmp = tempdir().unwrap();
+        add_email_parity_spec(tmp.path());
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "TestIntent.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"testIntent": "AUTH-001/AC-EMAIL"}),
+                dry_run: true,
+                delta: test_intent_delta(false),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed { operation, .. }
+                if operation == "TestIntent.Record"
+        ));
+
+        let accepted = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "TestIntent.Record".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"testIntent": "AUTH-001/AC-EMAIL"}),
+                dry_run: true,
+                delta: test_intent_delta(true),
+            },
+        )
+        .unwrap();
+        assert!(accepted.dry_run);
     }
 
     #[test]
@@ -16633,6 +17340,47 @@ acceptanceCriteria:
         .unwrap();
     }
 
+    fn add_email_parity_spec(root: &Path) {
+        init_project(
+            root,
+            InitOptions {
+                project_name: "demo".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        add_project_profile(root);
+        add_module_baseline(root);
+        let projection = SpecProjection {
+            spec: "AUTH-001".to_string(),
+            title: "Password reset".to_string(),
+            module: Some("Identity".to_string()),
+            requirements: vec![sg_spec::TextItem {
+                id: "REQ-001".to_string(),
+                text: "User can request reset".to_string(),
+            }],
+            acceptance_criteria: vec![sg_spec::TextItem {
+                id: "AC-EMAIL".to_string(),
+                text: "Existing email and unknown email requests return response parity"
+                    .to_string(),
+            }],
+            ..SpecProjection::default()
+        };
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "Spec.Create".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: projection.operation_input(),
+                dry_run: false,
+                delta: projection.to_delta(),
+            },
+        )
+        .unwrap();
+    }
+
     fn add_declared_password_reset_object(root: &Path) {
         add_valid_spec(root);
         append_operation(
@@ -17397,6 +18145,201 @@ acceptanceCriteria:
                 attributes: BTreeMap::from([("name".to_string(), json!("openapi-typescript"))]),
             });
             create_edges.push(edge(&generated_id, "GENERATED_BY", &generator_id));
+        }
+        GraphDelta {
+            create_nodes,
+            create_edges,
+            ..GraphDelta::default()
+        }
+    }
+
+    fn validation_run_for_action_recipes_delta(
+        graph: &Graph,
+        action_id: &str,
+        run_id: &str,
+        include_build: bool,
+        include_typecheck: bool,
+        include_lint: bool,
+        include_format: bool,
+    ) -> GraphDelta {
+        let run_node_id = node_id("validation_run", run_id);
+        let mut create_nodes = vec![Node {
+            id: run_node_id.clone(),
+            stable_key: format!("validation-run:{run_id}"),
+            node_type: "ValidationRun".to_string(),
+            attributes: BTreeMap::from([
+                ("runId".to_string(), json!(run_id)),
+                ("status".to_string(), json!("Passed")),
+            ]),
+        }];
+        let project_id = graph
+            .nodes
+            .values()
+            .find(|node| node.node_type == "Project")
+            .map(|node| node.id.clone())
+            .unwrap();
+        let mut create_edges = vec![edge(&project_id, "VALIDATED_BY", &run_node_id)];
+        for recipe in action_required_validation_recipes(graph, action_id) {
+            create_edges.push(edge(
+                &run_node_id,
+                "VALIDATION_RUN_SATISFIES_RECIPE",
+                &recipe.id,
+            ));
+            match node_attr(recipe, "evidenceKind").unwrap_or_default() {
+                "build" if include_build => {
+                    let evidence_id = node_id("build_run", run_id);
+                    create_nodes.push(validation_evidence_node(
+                        &evidence_id,
+                        &format!("build-run:{run_id}/cargo-build"),
+                        "BuildRun",
+                    ));
+                    create_edges.push(edge(&run_node_id, "VALIDATION_RUN_HAS_BUILD", &evidence_id));
+                }
+                "typecheck" if include_typecheck => {
+                    let evidence_id = node_id("typecheck_run", run_id);
+                    create_nodes.push(validation_evidence_node(
+                        &evidence_id,
+                        &format!("typecheck-run:{run_id}/cargo-check"),
+                        "TypecheckRun",
+                    ));
+                    create_edges.push(edge(
+                        &run_node_id,
+                        "VALIDATION_RUN_HAS_TYPECHECK",
+                        &evidence_id,
+                    ));
+                }
+                "lint" if include_lint => {
+                    let evidence_id = node_id("lint_run", run_id);
+                    create_nodes.push(validation_evidence_node(
+                        &evidence_id,
+                        &format!("lint-run:{run_id}/cargo-clippy"),
+                        "LintRun",
+                    ));
+                    create_edges.push(edge(&run_node_id, "VALIDATION_RUN_HAS_LINT", &evidence_id));
+                }
+                "format" if include_format => {
+                    let evidence_id = node_id("format_check", run_id);
+                    create_nodes.push(validation_evidence_node(
+                        &evidence_id,
+                        &format!("format-check:{run_id}/cargo-fmt"),
+                        "FormatCheck",
+                    ));
+                    create_edges.push(edge(
+                        &run_node_id,
+                        "VALIDATION_RUN_HAS_FORMAT_CHECK",
+                        &evidence_id,
+                    ));
+                }
+                _ => {}
+            }
+        }
+        GraphDelta {
+            create_nodes,
+            create_edges,
+            ..GraphDelta::default()
+        }
+    }
+
+    fn validation_evidence_node(id: &str, stable_key: &str, node_type: &str) -> Node {
+        Node {
+            id: id.to_string(),
+            stable_key: stable_key.to_string(),
+            node_type: node_type.to_string(),
+            attributes: BTreeMap::from([("status".to_string(), json!("Passed"))]),
+        }
+    }
+
+    fn validation_recipe_record_delta() -> GraphDelta {
+        let action_id = node_id("action_node", "AUTH-001/implementation");
+        let recipe_id = node_id("validation_recipe", "AUTH-001/implementation/cargo-test");
+        let command_id = node_id("validation_command", "AUTH-001/implementation/cargo-test");
+        GraphDelta {
+            create_nodes: vec![
+                Node {
+                    id: recipe_id.clone(),
+                    stable_key: "validation-recipe:AUTH-001/implementation/cargo-test".to_string(),
+                    node_type: "ValidationRecipe".to_string(),
+                    attributes: BTreeMap::from([
+                        ("name".to_string(), json!("cargo-test")),
+                        ("evidenceKind".to_string(), json!("validation")),
+                        ("adapterExecutionAllowed".to_string(), json!(false)),
+                    ]),
+                },
+                Node {
+                    id: command_id.clone(),
+                    stable_key:
+                        "validation-command:AUTH-001/implementation/cargo-test/record-evidence"
+                            .to_string(),
+                    node_type: "ValidationCommand".to_string(),
+                    attributes: BTreeMap::from([
+                        ("command".to_string(), json!("record cargo test evidence")),
+                        ("adapterExecutionAllowed".to_string(), json!(false)),
+                    ]),
+                },
+            ],
+            create_edges: vec![
+                edge(&action_id, "ACTION_REQUIRES_VALIDATION_RECIPE", &recipe_id),
+                edge(&recipe_id, "VALIDATION_RECIPE_HAS_COMMAND", &command_id),
+            ],
+            ..GraphDelta::default()
+        }
+    }
+
+    fn test_intent_delta(include_negative: bool) -> GraphDelta {
+        let spec_id = node_id("spec", "AUTH-001");
+        let criterion_id = node_id("acceptance_criterion", "AUTH-001/AC-EMAIL");
+        let intent_id = node_id("test_intent", "AUTH-001/AC-EMAIL");
+        let assertion_id = node_id("test_assertion", "AUTH-001/AC-EMAIL/parity");
+        let positive_id = node_id("positive_case", "AUTH-001/AC-EMAIL/existing");
+        let negative_id = node_id("negative_case", "AUTH-001/AC-EMAIL/unknown");
+        let mut create_nodes = vec![
+            Node {
+                id: intent_id.clone(),
+                stable_key: "test-intent:AUTH-001/AC-EMAIL".to_string(),
+                node_type: "TestIntent".to_string(),
+                attributes: BTreeMap::from([(
+                    "scenario".to_string(),
+                    json!("Password reset response parity for existing and unknown emails"),
+                )]),
+            },
+            Node {
+                id: assertion_id.clone(),
+                stable_key: "test-assertion:AUTH-001/AC-EMAIL/parity".to_string(),
+                node_type: "TestAssertion".to_string(),
+                attributes: BTreeMap::from([(
+                    "assertion".to_string(),
+                    json!("Existing and unknown emails produce the same outward response"),
+                )]),
+            },
+            Node {
+                id: positive_id.clone(),
+                stable_key: "positive-case:AUTH-001/AC-EMAIL/existing".to_string(),
+                node_type: "PositiveCase".to_string(),
+                attributes: BTreeMap::from([("description".to_string(), json!("existing email"))]),
+            },
+        ];
+        let mut create_edges = vec![
+            edge(&spec_id, "SPEC_HAS_TEST_INTENT", &intent_id),
+            edge(
+                &criterion_id,
+                "ACCEPTANCE_CRITERION_HAS_TEST_INTENT",
+                &intent_id,
+            ),
+            edge(&intent_id, "TEST_INTENT_HAS_ASSERTION", &assertion_id),
+            edge(&intent_id, "TEST_INTENT_HAS_POSITIVE_CASE", &positive_id),
+        ];
+        if include_negative {
+            create_nodes.push(Node {
+                id: negative_id.clone(),
+                stable_key: "negative-case:AUTH-001/AC-EMAIL/unknown".to_string(),
+                node_type: "NegativeCase".to_string(),
+                attributes: BTreeMap::from([("description".to_string(), json!("unknown email"))]),
+            });
+            create_edges.push(edge(
+                &intent_id,
+                "TEST_INTENT_HAS_NEGATIVE_CASE",
+                &negative_id,
+            ));
         }
         GraphDelta {
             create_nodes,
