@@ -38,7 +38,7 @@ use sg_spec::{
 };
 use sg_validation::{CORE_VALIDATOR_VERSION, VALIDATOR_BRANCH_METADATA, VALIDATOR_SNAPSHOT};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -7435,6 +7435,10 @@ fn validate_operation_semantic_preconditions(
         }
         "Action.Fail" => validate_action_fail_semantic_preconditions(graph, delta),
         "CodeObject.Declare" => validate_code_object_declare_semantic_preconditions(graph, delta),
+        "Code.Index" => validate_code_index_semantic_preconditions(delta),
+        "CodeGraph.Upsert" => {
+            validate_code_graph_upsert_semantic_preconditions(graph, request, delta)
+        }
         "CodeObject.LinkExisting" | "CodeObject.Reconcile" => {
             validate_code_object_link_existing_semantic_preconditions(graph, delta)
         }
@@ -7489,6 +7493,103 @@ fn validate_operation_semantic_preconditions(
         "GraphMerge.Accept" => validate_graph_merge_accept_semantic_preconditions(graph, delta),
         _ => Vec::new(),
     }
+}
+
+fn validate_code_index_semantic_preconditions(delta: &GraphDelta) -> Vec<Finding> {
+    code_graph_delta_nodes(delta)
+        .filter(|node| {
+            if node_bool_attr(node, "acceptedBaseline") {
+                return false;
+            }
+            let trust_state = node_attr(node, "trustState");
+            let source_trust = node_attr(node, "sourceTrust");
+            (trust_state.is_some() || source_trust.is_some())
+                && (trust_state != Some("Observed") || source_trust != Some("Observation"))
+        })
+        .map(|node| {
+            semantic_finding(
+                "semantic.code_index.observed_only",
+                format!(
+                    "Code.Index can only record observed CodeGraph facts; `{}` attempted trustState=`{}` sourceTrust=`{}`. Remediation: keep indexer output Observed/Observation and promote selected facts through CodeGraph.Upsert or CodeObject.Reconcile.",
+                    node.stable_key,
+                    node_attr(node, "trustState").unwrap_or("<missing>"),
+                    node_attr(node, "sourceTrust").unwrap_or("<missing>")
+                ),
+            )
+        })
+        .collect()
+}
+
+fn validate_code_graph_upsert_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let accepted_observations = code_graph_accepted_observations(&request.input, delta);
+
+    for node in code_graph_delta_nodes(delta) {
+        let trust_state = node_attr(node, "trustState");
+        let source_trust = node_attr(node, "sourceTrust");
+
+        if source_trust == Some("Observation") && trust_state != Some("Observed") {
+            findings.push(semantic_finding(
+                "semantic.code_graph.observation_cannot_claim_trust",
+                format!(
+                    "CodeGraph.Upsert cannot accept `{}` while it still has sourceTrust=Observation and trustState=`{}`. Remediation: promote the selected observation with sourceTrust=OperationRuntime and acceptedFromObservation evidence.",
+                    node.stable_key,
+                    trust_state.unwrap_or("<missing>")
+                ),
+            ));
+        }
+
+        let promotes_observed_existing = graph.nodes.get(&node.id).is_some_and(|existing| {
+            node_attr(existing, "trustState") == Some("Observed")
+                && node_attr(existing, "sourceTrust") == Some("Observation")
+                && matches!(trust_state, Some("Accepted" | "Trusted"))
+        });
+        if promotes_observed_existing && !accepted_observations.contains(&node.id) {
+            findings.push(semantic_finding(
+                "semantic.code_graph.accepted_observation_required",
+                format!(
+                    "Observed CodeGraph fact `{}` cannot become `{}` without accepted observation evidence. Remediation: include acceptedFromObservation on the promoted node or an acceptedObservationIds input entry.",
+                    node.stable_key,
+                    trust_state.unwrap_or("<missing>")
+                ),
+            ));
+        }
+    }
+
+    findings
+}
+
+fn code_graph_delta_nodes(delta: &GraphDelta) -> impl Iterator<Item = &Node> {
+    delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| {
+            matches!(
+                node.node_type.as_str(),
+                "CodeFile" | "CodeSymbol" | "CodeImport" | "CodeRoute" | "ConfigUsage"
+            )
+        })
+}
+
+fn code_graph_accepted_observations(input: &Value, delta: &GraphDelta) -> BTreeSet<String> {
+    let mut accepted = input
+        .get("acceptedObservationIds")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(ToString::to_string)
+        .collect::<BTreeSet<_>>();
+    accepted
+        .extend(code_graph_delta_nodes(delta).filter_map(|node| {
+            node_attr(node, "acceptedFromObservation").map(ToString::to_string)
+        }));
+    accepted
 }
 
 fn validate_bind_branch_semantic_preconditions(
@@ -18669,6 +18770,119 @@ acceptanceCriteria:
         assert!(!findings
             .iter()
             .any(|finding| finding.code == "code_object.unplanned_symbol"));
+    }
+
+    #[test]
+    fn code_index_observations_require_operation_promotion_for_trust() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let mut trusted_index_delta = code_file_symbol_delta(
+            "src/identity/password-reset.rs",
+            "function",
+            "requestPasswordReset",
+        );
+        for node in &mut trusted_index_delta.create_nodes {
+            node.attributes
+                .insert("trustState".to_string(), json!("Accepted"));
+            node.attributes
+                .insert("sourceTrust".to_string(), json!("OperationRuntime"));
+        }
+
+        let rejected_index = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Code.Index".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"changedFiles": ["src/identity/password-reset.rs"]}),
+                dry_run: true,
+                delta: trusted_index_delta,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            rejected_index,
+            StoreError::SemanticValidationFailed { operation, .. }
+                if operation == "Code.Index"
+        ));
+
+        let mut observed_delta = code_file_symbol_delta(
+            "src/identity/password-reset.rs",
+            "function",
+            "requestPasswordReset",
+        );
+        for node in &mut observed_delta.create_nodes {
+            node.attributes
+                .insert("trustState".to_string(), json!("Observed"));
+            node.attributes
+                .insert("sourceTrust".to_string(), json!("Observation"));
+        }
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Code.Index".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"changedFiles": ["src/identity/password-reset.rs"]}),
+                dry_run: false,
+                delta: observed_delta,
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions::checking()).unwrap();
+        let symbol_id = node_id(
+            "code_symbol",
+            "src/identity/password-reset.rs/function/requestPasswordReset",
+        );
+        let mut promoted = replay.graph.nodes.get(&symbol_id).unwrap().clone();
+        promoted
+            .attributes
+            .insert("trustState".to_string(), json!("Accepted"));
+        promoted
+            .attributes
+            .insert("sourceTrust".to_string(), json!("OperationRuntime"));
+
+        let rejected_promotion = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeGraph.Upsert".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeGraph": "promote"}),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![promoted.clone()],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            rejected_promotion,
+            StoreError::SemanticValidationFailed { operation, .. }
+                if operation == "CodeGraph.Upsert"
+        ));
+
+        promoted.attributes.insert(
+            "acceptedFromObservation".to_string(),
+            json!(symbol_id.clone()),
+        );
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeGraph.Upsert".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeGraph": "promote", "acceptedObservationIds": [symbol_id]}),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![promoted],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
     }
 
     #[test]

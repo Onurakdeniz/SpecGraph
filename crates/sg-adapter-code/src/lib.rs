@@ -861,6 +861,25 @@ fn extract_routes(
             }
         }
     }
+    if framework == Some("nextjs") {
+        if let Some(route_path) = nextjs_route_path(path) {
+            if seen.insert(("GET".to_string(), route_path.clone())) {
+                routes.push(CodeRouteObservation {
+                    method: "GET".to_string(),
+                    path: route_path,
+                    handler_symbol: None,
+                    framework: framework.map(str::to_string),
+                    location: Some(SourceLocation {
+                        file: path.to_string(),
+                        start_line: Some(1),
+                        end_line: Some(1),
+                        start_column: None,
+                        end_column: None,
+                    }),
+                });
+            }
+        }
+    }
     routes
 }
 
@@ -1143,6 +1162,21 @@ fn axum_routes_from_line(line: &str) -> Vec<(String, String, Option<String>)> {
         .split_once(&format!("{}(", method.to_ascii_lowercase()))
         .and_then(|(_, value)| clean_identifier(value));
     vec![(method, path, handler)]
+}
+
+fn nextjs_route_path(path: &str) -> Option<String> {
+    let without_ext = path
+        .strip_suffix(".ts")
+        .or_else(|| path.strip_suffix(".tsx"))
+        .or_else(|| path.strip_suffix(".js"))
+        .or_else(|| path.strip_suffix(".jsx"))
+        .unwrap_or(path);
+    if let Some((_, route)) = without_ext.split_once("/pages/api/") {
+        return Some(format!("/api/{}", route.trim_end_matches("/index")));
+    }
+    without_ext
+        .split_once("/app/")
+        .map(|(_, route)| format!("/{}", route.trim_end_matches("/route")))
 }
 
 fn is_generated_source(path: &str, source: &str) -> bool {
@@ -1629,6 +1663,39 @@ def list_users():
             .routes
             .iter()
             .any(|route| route.method == "GET" && route.path == "/users"));
+
+        let next = TypeScriptSemanticIndexer.index_file_semantic(
+            "apps/web/pages/api/users.ts",
+            r#"
+export default function handler(req, res) {
+  res.status(200).json([]);
+}
+"#,
+        );
+        assert_eq!(next.framework.as_deref(), Some("nextjs"));
+        assert!(next.routes.iter().any(|route| route.path == "/api/users"));
+
+        let flask = PythonSemanticIndexer.index_file_semantic(
+            "app/routes.py",
+            r#"
+from flask import Flask
+app = Flask(__name__)
+@app.post("/sessions")
+def create_session():
+    pass
+"#,
+        );
+        assert_eq!(flask.framework.as_deref(), Some("flask"));
+        assert!(flask
+            .routes
+            .iter()
+            .any(|route| route.method == "POST" && route.path == "/sessions"));
+
+        let generated = TypeScriptSemanticIndexer.index_file_semantic(
+            "apps/api/src/client.generated.ts",
+            "// @generated\nexport function generatedClient() {}\n",
+        );
+        assert!(generated.generated);
     }
 
     #[test]

@@ -150,8 +150,9 @@ Current completed slices:
 - **Phase 6B — Pack templates and action blocker CLI** added architecture-pack-provided action templates, pack selection from the project architecture profile, `sg action status`, `sg action blockers`, blocker-category JSON output, and tests proving pack-generated ActionGraphs differ from the built-in default.
 - **Phase 6C — Impact queue replan closure** wired impact queue input into `sg action replan`, records `RevalidationQueue` evidence through `Impact.Revalidate`, replans invalidated actions with replacement ActionNodes, and tests impact-driven stale action blockers.
 - **Phase 7A — Semantic indexer and cache foundations** added a versioned semantic indexer contract, deterministic Rust/TypeScript-JavaScript/Python indexers with provenance metadata, source visibility/location extraction, and `.specgraph/index/code` cache reuse with stable graph output.
+- **Phase 7B — Drift detection and trust promotion hardening** enforced observed-only `Code.Index` output, required accepted-observation evidence for observed CodeGraph promotion, expanded drift findings for missing/renamed symbols, route mismatch, stale trace links, missing use-case implementations, and unrepresented entities, and broadened language/framework fixture coverage.
 
-Next focus after Phase 7A: **Phase 7B — Drift detection and trust promotion hardening**. Continue the five-checklist-item branch policy with route/symbol drift blockers, accepted-fact promotion gates, and broader fixture coverage.
+Next focus: **Phase 8 — DataGraph and Migration Runtime Productionization**. Start from the latest `development` and continue the five-checklist-item branch policy with migration parsers, framework parsers, schema observation, risk classification, and migration policy hardening.
 
 ---
 
@@ -753,17 +754,17 @@ Replace lightweight source scanning with deterministic semantic indexing and str
 
 - [x] **Add incremental index cache.** Store cache under `.specgraph/index/code/` keyed by file path, content hash, indexer version, ontology version, and selected language pack.
 
-- [ ] **Separate observations from accepted CodeGraph facts.** Ensure indexer output remains observed. Add/strengthen `CodeGraph.Upsert` flow to accept selected observations as trusted graph facts through Operation Runtime.
+- [x] **Separate observations from accepted CodeGraph facts.** Ensure indexer output remains observed. Add/strengthen `CodeGraph.Upsert` flow to accept selected observations as trusted graph facts through Operation Runtime.
 
-- [ ] **Expand drift detection.** Detect missing symbol, renamed symbol, missing route, route method/path mismatch, stale trace link, entity not represented, and use-case not implemented.
+- [x] **Expand drift detection.** Detect missing symbol, renamed symbol, missing route, route method/path mismatch, stale trace link, entity not represented, and use-case not implemented.
 
-- [~] **Add tests and fixtures.** Include Rust, TypeScript/Express, TypeScript/Next-like, Python/FastAPI, Python/Flask, generated-code, and renamed-symbol fixtures.
+- [x] **Add tests and fixtures.** Include Rust, TypeScript/Express, TypeScript/Next-like, Python/FastAPI, Python/Flask, generated-code, and renamed-symbol fixtures.
 
 ## Phase Gate
 
 - [x] Re-indexing unchanged files uses cache and produces same graph output.
-- [ ] Renamed or missing route/symbol produces blocking drift finding.
-- [ ] Observed CodeGraph facts cannot become trusted without accepted operation.
+- [x] Renamed or missing route/symbol produces blocking drift finding.
+- [x] Observed CodeGraph facts cannot become trusted without accepted operation.
 
 ---
 

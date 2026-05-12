@@ -19,6 +19,7 @@ impl DriftReport {
 pub fn detect_drift(graph: &Graph) -> DriftReport {
     let mut findings = Vec::new();
     detect_spec_code_drift(graph, &mut findings);
+    detect_code_symbol_drift(graph, &mut findings);
     detect_spec_test_drift(graph, &mut findings);
     detect_data_code_drift(graph, &mut findings);
     detect_architecture_code_drift(graph, &mut findings);
@@ -51,6 +52,54 @@ fn detect_spec_code_drift(graph: &Graph, findings: &mut Vec<Finding>) {
                 .with_location(FindingLocation::graph_node(endpoint.id.clone()))
                 .with_related_nodes([endpoint.id.clone()]),
             );
+            continue;
+        }
+
+        if let Some((expected_method, expected_path)) = endpoint_method_path(endpoint) {
+            for route_edge in linked_routes {
+                let Some(route) = graph.nodes.get(&route_edge.from) else {
+                    findings.push(
+                        finding(
+                            "drift.stale_trace_link",
+                            format!(
+                                "Trace edge `{}` references missing CodeRoute `{}`.",
+                                route_edge.stable_key, route_edge.from
+                            ),
+                        )
+                        .with_remediation(
+                            "Re-index code and replace or remove the stale route trace link.",
+                        )
+                        .with_location(FindingLocation::graph_edge(route_edge.id.clone()))
+                        .with_related_edges([route_edge.id.clone()]),
+                    );
+                    continue;
+                };
+                let route_method = attr_str(route, "method").unwrap_or_default();
+                let route_path = attr_str(route, "path").unwrap_or_default();
+                if !route_method.eq_ignore_ascii_case(&expected_method)
+                    || route_path != expected_path
+                {
+                    findings.push(
+                        finding(
+                            "drift.route_method_path_mismatch",
+                            format!(
+                                "Endpoint `{}` expects `{}` `{}` but linked CodeRoute is `{}` `{}`.",
+                                key_without_prefix(&endpoint.stable_key),
+                                expected_method,
+                                expected_path,
+                                route_method,
+                                route_path
+                            ),
+                        )
+                        .with_remediation(
+                            "Update the route implementation, endpoint spec, or trace link so method and path agree.",
+                        )
+                        .with_location(FindingLocation::graph_edge(route_edge.id.clone()))
+                        .with_related_nodes([endpoint.id.clone(), route.id.clone()])
+                        .with_related_edges([route_edge.id.clone()]),
+                    );
+                }
+            }
         }
     }
 
@@ -72,6 +121,142 @@ fn detect_spec_code_drift(graph: &Graph, findings: &mut Vec<Finding>) {
                 .with_related_nodes([behavior.id.clone()]),
             );
         }
+    }
+
+    for use_case in nodes_of_type(graph, "UseCase") {
+        let linked_code = incoming_edges(graph, &use_case.id, "IMPLEMENTS_USE_CASE");
+        let declared_code = incoming_edges(graph, &use_case.id, "CODE_OBJECT_FOR_USE_CASE");
+        if linked_code.is_empty() && declared_code.is_empty() {
+            findings.push(
+                finding(
+                    "drift.use_case_not_implemented",
+                    format!(
+                        "UseCase `{}` has no implementing CodeGraph fact or CodeObjectDeclaration.",
+                        key_without_prefix(&use_case.stable_key)
+                    ),
+                )
+                .with_remediation(
+                    "Link an implementing CodeSymbol/CodeRoute or declare the planned code object for this use case.",
+                )
+                .with_location(FindingLocation::graph_node(use_case.id.clone()))
+                .with_related_nodes([use_case.id.clone()]),
+            );
+        }
+    }
+
+    for entity in nodes_of_type(graph, "DomainEntity") {
+        if entity_represented(graph, entity) {
+            continue;
+        }
+        findings.push(
+            finding(
+                "drift.entity_not_represented",
+                format!(
+                    "DomainEntity `{}` has no represented CodeObjectDeclaration or CodeSymbol.",
+                    key_without_prefix(&entity.stable_key)
+                ),
+            )
+            .with_remediation(
+                "Declare/link the entity implementation or update the spec if the entity is no longer required.",
+            )
+            .with_location(FindingLocation::graph_node(entity.id.clone()))
+            .with_related_nodes([entity.id.clone()]),
+        );
+    }
+}
+
+fn detect_code_symbol_drift(graph: &Graph, findings: &mut Vec<Finding>) {
+    for declaration in nodes_of_type(graph, "CodeObjectDeclaration") {
+        if !matches!(
+            attr_str(declaration, "status"),
+            Some("Implemented" | "Accepted")
+        ) {
+            continue;
+        }
+        if realization_edges(graph, declaration)
+            .iter()
+            .any(|edge| graph.nodes.contains_key(&edge.to))
+        {
+            continue;
+        }
+
+        let expected_file = attr_str(declaration, "expectedFile").unwrap_or_default();
+        let expected_name = attr_str(declaration, "name").unwrap_or_default();
+        let expected_kind = attr_str(declaration, "kind").unwrap_or_default();
+
+        if let Some(renamed) = nodes_of_type(graph, "CodeSymbol")
+            .into_iter()
+            .find(|symbol| {
+                attr_str(symbol, "file") == Some(expected_file)
+                    && declaration_kind_matches_symbol(
+                        expected_kind,
+                        attr_str(symbol, "kind").unwrap_or_default(),
+                    )
+                    && attr_str(symbol, "name") != Some(expected_name)
+            })
+        {
+            findings.push(
+                finding(
+                    "drift.symbol_renamed",
+                    format!(
+                        "CodeObjectDeclaration `{}` expected `{}` in `{}` but indexed `{}` instead.",
+                        declaration.stable_key,
+                        expected_name,
+                        expected_file,
+                        attr_str(renamed, "name").unwrap_or("<unknown>")
+                    ),
+                )
+                .with_remediation(
+                    "Record a CodeObject.Rename operation, update the declaration, or restore the expected symbol name.",
+                )
+                .with_location(FindingLocation::graph_node(declaration.id.clone()))
+                .with_related_nodes([declaration.id.clone(), renamed.id.clone()]),
+            );
+        } else {
+            findings.push(
+                finding(
+                    "drift.symbol_missing",
+                    format!(
+                        "CodeObjectDeclaration `{}` is marked implemented but no matching CodeSymbol exists in `{}`.",
+                        declaration.stable_key,
+                        if expected_file.is_empty() { "<unknown>" } else { expected_file }
+                    ),
+                )
+                .with_remediation(
+                    "Re-index the expected file, restore the implementation, or mark the declaration no longer implemented.",
+                )
+                .with_location(FindingLocation::graph_node(declaration.id.clone()))
+                .with_related_nodes([declaration.id.clone()]),
+            );
+        }
+    }
+
+    for edge in graph.edges.values().filter(|edge| {
+        matches!(
+            edge.edge_type.as_str(),
+            "IMPLEMENTS_BEHAVIOR"
+                | "IMPLEMENTS_USE_CASE"
+                | "ROUTES_TO_ENDPOINT"
+                | "CODE_OBJECT_REALIZED_BY"
+        )
+    }) {
+        if graph.nodes.contains_key(&edge.from) && graph.nodes.contains_key(&edge.to) {
+            continue;
+        }
+        findings.push(
+            finding(
+                "drift.stale_trace_link",
+                format!(
+                    "Trace edge `{}` points from `{}` to `{}` but one endpoint is missing.",
+                    edge.stable_key, edge.from, edge.to
+                ),
+            )
+            .with_remediation(
+                "Remove or replace the stale trace link after re-indexing/reconciliation.",
+            )
+            .with_location(FindingLocation::graph_edge(edge.id.clone()))
+            .with_related_edges([edge.id.clone()]),
+        );
     }
 }
 
@@ -231,11 +416,94 @@ fn incoming_edges<'a>(graph: &'a Graph, node_id: &str, edge_type: &str) -> Vec<&
         .collect()
 }
 
+fn realization_edges<'a>(graph: &'a Graph, declaration: &Node) -> Vec<&'a sg_model::Edge> {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == declaration.id && edge.edge_type == "CODE_OBJECT_REALIZED_BY")
+        .collect()
+}
+
 fn has_edge(graph: &Graph, from: &str, edge_type: &str, to: &str) -> bool {
     graph
         .edges
         .values()
         .any(|edge| edge.from == from && edge.to == to && edge.edge_type == edge_type)
+}
+
+fn endpoint_method_path(endpoint: &Node) -> Option<(String, String)> {
+    let method = attr_str(endpoint, "method").map(|value| value.to_ascii_uppercase());
+    let path = attr_str(endpoint, "path").map(ToString::to_string);
+    method.zip(path).or_else(|| {
+        attr_str(endpoint, "route")
+            .or_else(|| attr_str(endpoint, "name"))
+            .or_else(|| attr_str(endpoint, "title"))
+            .and_then(parse_method_path)
+            .or_else(|| parse_method_path(&key_without_prefix(&endpoint.stable_key)))
+    })
+}
+
+fn parse_method_path(value: &str) -> Option<(String, String)> {
+    let normalized = value.replace('_', " ");
+    let mut parts = normalized.split_whitespace();
+    let method = parts.next()?.trim_matches([':', '-']).to_ascii_uppercase();
+    if !matches!(
+        method.as_str(),
+        "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD"
+    ) {
+        return None;
+    }
+    let path = parts
+        .find(|part| part.starts_with('/'))
+        .map(|part| part.trim_matches(['`', '"', '\'']).to_string())?;
+    Some((method, path))
+}
+
+fn entity_represented(graph: &Graph, entity: &Node) -> bool {
+    let entity_name = attr_str(entity, "name")
+        .or_else(|| attr_str(entity, "title"))
+        .or_else(|| attr_str(entity, "text"));
+    let fallback_name = key_without_prefix(&entity.stable_key);
+    let normalized = entity_name
+        .map(normalize_name)
+        .unwrap_or_else(|| normalize_name(&fallback_name));
+    graph.edges.values().any(|edge| {
+        edge.to == entity.id
+            && matches!(
+                edge.edge_type.as_str(),
+                "CODE_OBJECT_FOR_ENTITY" | "REPRESENTS_ENTITY" | "CODE_OBJECT_IMPLEMENTS"
+            )
+    }) || graph.nodes.values().any(|node| {
+        matches!(
+            node.node_type.as_str(),
+            "CodeObjectDeclaration" | "CodeSymbol"
+        ) && attr_str(node, "name")
+            .map(normalize_name)
+            .is_some_and(|name| name == normalized)
+    })
+}
+
+fn declaration_kind_matches_symbol(declaration_kind: &str, symbol_kind: &str) -> bool {
+    declaration_kind == symbol_kind
+        || matches!(
+            (declaration_kind, symbol_kind),
+            (
+                "domainEntity" | "dto" | "requestType" | "responseType" | "valueObject",
+                "type"
+            ) | ("routeHandler" | "service", "function")
+        )
+}
+
+fn attr_str<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
+    node.attributes.get(key).and_then(|value| value.as_str())
+}
+
+fn normalize_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
 }
 
 fn looks_like_migration_file(path: &str) -> bool {
@@ -419,14 +687,126 @@ mod tests {
         assert!(report.findings.is_empty());
     }
 
+    #[test]
+    fn reports_phase_seven_code_drift_cases() {
+        let mut graph = Graph::default();
+        insert_node_attrs(
+            &mut graph,
+            "endpoint",
+            "Endpoint",
+            "endpoint:AUTH-001/POST-/password-reset",
+            BTreeMap::from([
+                ("method".to_string(), json!("POST")),
+                ("path".to_string(), json!("/password-reset")),
+            ]),
+        );
+        insert_node_attrs(
+            &mut graph,
+            "route",
+            "CodeRoute",
+            "code-route:GET-/password-reset",
+            BTreeMap::from([
+                ("method".to_string(), json!("GET")),
+                ("path".to_string(), json!("/password-reset")),
+            ]),
+        );
+        insert_edge(
+            &mut graph,
+            "route_endpoint",
+            "route",
+            "ROUTES_TO_ENDPOINT",
+            "endpoint",
+        );
+
+        insert_node_attrs(
+            &mut graph,
+            "declaration",
+            "CodeObjectDeclaration",
+            "code-object:AUTH-001/Identity/function/requestPasswordReset",
+            BTreeMap::from([
+                ("status".to_string(), json!("Implemented")),
+                ("expectedFile".to_string(), json!("src/identity/reset.rs")),
+                ("kind".to_string(), json!("function")),
+                ("name".to_string(), json!("requestPasswordReset")),
+            ]),
+        );
+        insert_node_attrs(
+            &mut graph,
+            "renamed_symbol",
+            "CodeSymbol",
+            "code-symbol:src/identity/reset.rs/function/sendPasswordReset",
+            BTreeMap::from([
+                ("file".to_string(), json!("src/identity/reset.rs")),
+                ("kind".to_string(), json!("function")),
+                ("name".to_string(), json!("sendPasswordReset")),
+            ]),
+        );
+
+        insert_node(
+            &mut graph,
+            "use_case",
+            "UseCase",
+            "use-case:AUTH-001/UC-RESET",
+        );
+        insert_node_attrs(
+            &mut graph,
+            "entity",
+            "DomainEntity",
+            "domain-entity:AUTH-001/PasswordResetToken",
+            BTreeMap::from([("name".to_string(), json!("PasswordResetToken"))]),
+        );
+        insert_node(
+            &mut graph,
+            "behavior",
+            "Behavior",
+            "behavior:AUTH-001/BEH-RESET",
+        );
+        insert_edge(
+            &mut graph,
+            "stale_behavior_link",
+            "missing_symbol",
+            "IMPLEMENTS_BEHAVIOR",
+            "behavior",
+        );
+
+        let report = detect_drift(&graph);
+
+        for expected in [
+            "drift.route_method_path_mismatch",
+            "drift.symbol_renamed",
+            "drift.use_case_not_implemented",
+            "drift.entity_not_represented",
+            "drift.stale_trace_link",
+        ] {
+            assert!(
+                report
+                    .findings
+                    .iter()
+                    .any(|finding| finding.code == expected),
+                "missing expected finding {expected}: {:?}",
+                report.findings
+            );
+        }
+    }
+
     fn insert_node(graph: &mut Graph, id: &str, node_type: &str, stable_key: &str) {
+        insert_node_attrs(graph, id, node_type, stable_key, BTreeMap::new());
+    }
+
+    fn insert_node_attrs(
+        graph: &mut Graph,
+        id: &str,
+        node_type: &str,
+        stable_key: &str,
+        attributes: BTreeMap<String, serde_json::Value>,
+    ) {
         graph.nodes.insert(
             id.to_string(),
             Node {
                 id: id.to_string(),
                 stable_key: stable_key.to_string(),
                 node_type: node_type.to_string(),
-                attributes: BTreeMap::new(),
+                attributes,
             },
         );
     }
