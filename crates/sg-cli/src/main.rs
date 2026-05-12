@@ -2210,6 +2210,7 @@ fn handle_workflow(
                 println!("allowed: {}", plan.allowed);
                 println!("blocked: {}", plan.blocked);
                 println!("decision: {}", plan.decision);
+                println!("changeType: {}", plan.change_type);
                 println!("duplicateRisk: {}", plan.duplicate_risk);
                 println!("needsUserChoice: {}", plan.needs_user_choice);
                 println!("requiredOperations: {}", plan.required_operations.join(","));

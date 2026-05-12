@@ -286,6 +286,7 @@ pub struct WorkflowCodePlan {
     pub allowed: bool,
     pub blocked: bool,
     pub decision: String,
+    pub change_type: String,
     pub state_hash: String,
     pub existing_candidates: Vec<ExistingCodeObjectCandidate>,
     pub selected_existing_object: Option<ExistingCodeObjectCandidate>,
@@ -1270,12 +1271,14 @@ pub fn plan_code_workflow(
     options: WorkflowCodePlanOptions,
 ) -> Result<WorkflowCodePlan> {
     let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
+    let change_type = classify_code_change_type(&options);
     if docs_only_code_intent(&options) {
         return Ok(WorkflowCodePlan {
             schema_version: "specgraph.workflow-code-plan/v1".to_string(),
             allowed: false,
             blocked: false,
             decision: "docs-only".to_string(),
+            change_type,
             state_hash: replay.state_hash,
             existing_candidates: Vec::new(),
             selected_existing_object: None,
@@ -1296,6 +1299,7 @@ pub fn plan_code_workflow(
         return Ok(blocked_code_plan(
             replay.state_hash,
             "missing-spec",
+            change_type,
             vec!["Spec.Create".to_string()],
             vec![format!("spec:{}", options.spec)],
             format!(
@@ -1312,6 +1316,7 @@ pub fn plan_code_workflow(
             allowed: false,
             blocked: false,
             decision: "no-op".to_string(),
+            change_type,
             state_hash: replay.state_hash,
             existing_candidates: Vec::new(),
             selected_existing_object: None,
@@ -1336,6 +1341,7 @@ pub fn plan_code_workflow(
         return Ok(blocked_code_plan(
             replay.state_hash,
             "missing-wanted-object",
+            change_type,
             vec!["CodeObject.Declare".to_string()],
             vec!["wantedObject".to_string()],
             "Code plan requires --wants KIND:NAME.".to_string(),
@@ -1357,6 +1363,7 @@ pub fn plan_code_workflow(
             allowed: false,
             blocked: true,
             decision: "ambiguous-existing-candidates".to_string(),
+            change_type,
             state_hash: replay.state_hash,
             existing_candidates: resolution.existing_candidates,
             selected_existing_object: None,
@@ -1380,6 +1387,7 @@ pub fn plan_code_workflow(
             allowed: false,
             blocked: true,
             decision: "link-existing".to_string(),
+            change_type,
             state_hash: replay.state_hash,
             existing_candidates: resolution.existing_candidates,
             selected_existing_object: Some(selected),
@@ -1407,6 +1415,7 @@ pub fn plan_code_workflow(
         return Ok(blocked_code_plan(
             replay.state_hash,
             "declare-code-object",
+            change_type,
             vec!["CodeObject.Declare".to_string()],
             vec![format!(
                 "code-object:{}/{}/{}/{}",
@@ -1430,6 +1439,7 @@ pub fn plan_code_workflow(
         allowed: true,
         blocked: false,
         decision: "edit-permit".to_string(),
+        change_type,
         state_hash: replay.state_hash,
         existing_candidates: Vec::new(),
         selected_existing_object: None,
@@ -1449,6 +1459,7 @@ pub fn plan_code_workflow(
 fn blocked_code_plan(
     state_hash: String,
     decision: &str,
+    change_type: String,
     required_operations: Vec<String>,
     missing_graph_facts: Vec<String>,
     human_message: String,
@@ -1458,6 +1469,7 @@ fn blocked_code_plan(
         allowed: false,
         blocked: true,
         decision: decision.to_string(),
+        change_type,
         state_hash,
         existing_candidates: Vec::new(),
         selected_existing_object: None,
@@ -1494,6 +1506,46 @@ fn docs_only_code_intent(options: &WorkflowCodePlanOptions) -> bool {
             "type:",
         ],
     )
+}
+
+fn classify_code_change_type(options: &WorkflowCodePlanOptions) -> String {
+    let text = std::iter::once(options.action.as_str())
+        .chain(options.wants.iter().map(String::as_str))
+        .chain(options.file.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    let change_type = if docs_only_code_intent(options) {
+        "docs-only"
+    } else if mentions_any(&text, &["rename"]) {
+        "rename"
+    } else if mentions_any(&text, &["move", "relocate"]) {
+        "move"
+    } else if mentions_any(&text, &["delete", "remove"]) {
+        "delete"
+    } else if mentions_any(&text, &["deprecate", "deprecated"]) {
+        "deprecate"
+    } else if mentions_any(&text, &["refactor"]) {
+        "refactor"
+    } else if mentions_any(&text, &["bug", "fix", "hotfix", "root cause"]) {
+        "bugfix"
+    } else if mentions_any(&text, &["config", "configuration", ".env"]) {
+        "config-change"
+    } else if mentions_any(
+        &text,
+        &["dependency", "package", "cargo.toml", "package.json"],
+    ) {
+        "dependency-change"
+    } else if mentions_any(&text, &["migration", "schema", "database"]) {
+        "migration-change"
+    } else if mentions_any(&text, &["release", "tag", "deploy"]) {
+        "release-change"
+    } else if mentions_any(&text, &["update", "modify", "change"]) {
+        "update"
+    } else {
+        "create"
+    };
+    change_type.to_string()
 }
 
 fn parse_wanted_object(value: &str) -> Option<(String, String)> {
@@ -5130,6 +5182,16 @@ fn validate_operation_semantic_preconditions(
         "CodeObject.LinkExisting" | "CodeObject.Reconcile" => {
             validate_code_object_link_existing_semantic_preconditions(graph, delta)
         }
+        "CodeObject.Update"
+        | "CodeObject.Rename"
+        | "CodeObject.Move"
+        | "CodeObject.Deprecate"
+        | "CodeObject.Delete" => validate_code_object_lifecycle_semantic_preconditions(
+            request.operation.as_str(),
+            graph,
+            request,
+            delta,
+        ),
         "GitCommit.Record" => validate_git_commit_semantic_preconditions(graph, request, delta),
         "Validation.Record" => {
             validate_validation_record_semantic_preconditions(graph, request, delta)
@@ -5540,6 +5602,159 @@ fn validate_code_object_link_existing_semantic_preconditions(
                 ),
             ));
         }
+    }
+
+    findings
+}
+
+fn validate_code_object_lifecycle_semantic_preconditions(
+    operation: &str,
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = validate_project_and_module_ready(graph);
+    let updates = delta
+        .update_nodes
+        .iter()
+        .filter(|node| node.node_type == "CodeObjectDeclaration")
+        .collect::<Vec<_>>();
+    if updates.len() != 1 {
+        findings.push(semantic_finding(
+            "semantic.code_object.lifecycle_update_required",
+            format!("{operation} must update exactly one existing CodeObjectDeclaration."),
+        ));
+        return findings;
+    }
+    let updated = updates[0];
+    let Some(existing) = graph.nodes.get(&updated.id) else {
+        findings.push(semantic_finding(
+            "semantic.code_object.lifecycle_existing_required",
+            format!("{operation} target `{}` must already exist.", updated.id),
+        ));
+        return findings;
+    };
+    if existing.node_type != "CodeObjectDeclaration" {
+        findings.push(semantic_finding(
+            "semantic.code_object.lifecycle_target_type",
+            format!(
+                "{operation} target `{}` must be a CodeObjectDeclaration.",
+                updated.id
+            ),
+        ));
+        return findings;
+    }
+
+    for key in ["spec", "module", "kind"] {
+        if node_attr(existing, key) != node_attr(updated, key) {
+            findings.push(semantic_finding(
+                "semantic.code_object.lifecycle_identity_changed",
+                format!("{operation} cannot change `{key}` for `{}`.", updated.id),
+            ));
+        }
+    }
+
+    if let Some(module) = node_attr(updated, "module") {
+        let module_node = find_module_node(graph, module);
+        if module_node.is_none() {
+            findings.push(semantic_finding(
+                "semantic.code_object.unknown_module",
+                format!("{operation} references unknown Module `{module}`."),
+            ));
+        } else if let (Some(expected_file), Some(module_node)) =
+            (node_attr(updated, "expectedFile"), module_node)
+        {
+            if let Some(package) = module_package_path(module_node) {
+                if !path_is_inside_package(expected_file, package) {
+                    findings.push(semantic_finding(
+                        "semantic.code_object.wrong_module_path",
+                        format!(
+                            "{operation} expected file `{expected_file}` is outside owning module package `{package}`."
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    match operation {
+        "CodeObject.Update" => {
+            if node_attr(existing, "name") != node_attr(updated, "name") {
+                findings.push(semantic_finding(
+                    "semantic.code_object.update_cannot_rename",
+                    "CodeObject.Update cannot rename the declaration; use CodeObject.Rename.",
+                ));
+            }
+            if request.input.get("change").is_none_or(Value::is_null) {
+                findings.push(semantic_finding(
+                    "semantic.code_object.update_change_required",
+                    "CodeObject.Update requires input.change evidence.",
+                ));
+            }
+        }
+        "CodeObject.Rename" => {
+            let old_name = node_attr(existing, "name").unwrap_or("");
+            let new_name = node_attr(updated, "name").unwrap_or("");
+            if old_name == new_name || new_name.trim().is_empty() {
+                findings.push(semantic_finding(
+                    "semantic.code_object.rename_new_name_required",
+                    "CodeObject.Rename must change name to a non-empty value.",
+                ));
+            }
+            if node_attr(updated, "previousName") != Some(old_name) {
+                findings.push(semantic_finding(
+                    "semantic.code_object.rename_previous_name_required",
+                    "CodeObject.Rename must preserve the prior name in previousName.",
+                ));
+            }
+        }
+        "CodeObject.Move" => {
+            let old_file = node_attr(existing, "expectedFile").unwrap_or("");
+            let new_file = node_attr(updated, "expectedFile").unwrap_or("");
+            if old_file == new_file || new_file.trim().is_empty() {
+                findings.push(semantic_finding(
+                    "semantic.code_object.move_new_file_required",
+                    "CodeObject.Move must change expectedFile to a non-empty new path.",
+                ));
+            }
+            if node_attr(updated, "previousFile") != Some(old_file) {
+                findings.push(semantic_finding(
+                    "semantic.code_object.move_previous_file_required",
+                    "CodeObject.Move must preserve the prior file in previousFile.",
+                ));
+            }
+        }
+        "CodeObject.Deprecate" => {
+            if node_attr(updated, "status") != Some("Deprecated") {
+                findings.push(semantic_finding(
+                    "semantic.code_object.deprecate_status_required",
+                    "CodeObject.Deprecate must set status=Deprecated.",
+                ));
+            }
+            if node_attr(updated, "deprecationReason").is_none_or(str::is_empty) {
+                findings.push(semantic_finding(
+                    "semantic.code_object.deprecate_reason_required",
+                    "CodeObject.Deprecate must record deprecationReason.",
+                ));
+            }
+        }
+        "CodeObject.Delete" => {
+            if node_attr(updated, "status") != Some("Deleted") {
+                findings.push(semantic_finding(
+                    "semantic.code_object.delete_status_required",
+                    "CodeObject.Delete must set status=Deleted.",
+                ));
+            }
+            if node_attr(updated, "deletionReason").is_none_or(str::is_empty)
+                || node_attr(updated, "impact").is_none_or(str::is_empty)
+            {
+                findings.push(semantic_finding(
+                    "semantic.code_object.delete_evidence_required",
+                    "CodeObject.Delete must record deletionReason and impact.",
+                ));
+            }
+        }
+        _ => {}
     }
 
     findings
@@ -10736,6 +10951,122 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn code_object_update_records_lifecycle_change_without_identity_drift() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration
+            .attributes
+            .insert("status".to_string(), json!("Updated"));
+        declaration.attributes.insert(
+            "changeSummary".to_string(),
+            json!("Tighten password reset response handling"),
+        );
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Update".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "change": "Tighten password reset response handling",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+
+        assert_eq!(receipt.operation, "CodeObject.Update");
+    }
+
+    #[test]
+    fn code_object_rename_requires_previous_name_evidence() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration
+            .attributes
+            .insert("name".to_string(), json!("requestPasswordResetV2"));
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Rename".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newName": "requestPasswordResetV2",
+                    "reason": "Clarify versioned flow",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "CodeObject.Rename"
+        ));
+    }
+
+    #[test]
+    fn code_object_move_blocks_wrong_module_path() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration.attributes.insert(
+            "previousFile".to_string(),
+            json!("src/identity/password-reset.rs"),
+        );
+        declaration.attributes.insert(
+            "expectedFile".to_string(),
+            json!("src/billing/password-reset.rs"),
+        );
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Move".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newFile": "src/billing/password-reset.rs",
+                    "reason": "Move to wrong module",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "CodeObject.Move"
+        ));
+    }
+
+    #[test]
     fn code_index_reconciles_observed_symbol_to_declaration() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -11348,6 +11679,29 @@ acceptanceCriteria:
             plan.allowed_symbols,
             vec!["requestPasswordReset".to_string()]
         );
+        assert_eq!(plan.change_type, "create");
+    }
+
+    #[test]
+    fn workflow_code_plan_classifies_lifecycle_change_type() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "rename".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(plan.change_type, "rename");
+        assert!(plan.allowed);
     }
 
     #[test]
@@ -11518,6 +11872,43 @@ acceptanceCriteria:
             },
         )
         .unwrap();
+    }
+
+    fn add_declared_password_reset_object(root: &Path) {
+        add_valid_spec(root);
+        append_operation(
+            root,
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+    }
+
+    fn current_password_reset_declaration(root: &Path) -> Node {
+        let replay = replay_events(root, ReplayOptions { check_hashes: true }).unwrap();
+        find_code_object_declaration(
+            &replay.graph,
+            "AUTH-001",
+            "function",
+            "requestPasswordReset",
+            Some("Identity"),
+        )
+        .unwrap()
+        .clone()
     }
 
     fn add_release_for_spec(root: &Path, spec: &str) {

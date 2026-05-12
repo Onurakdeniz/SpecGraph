@@ -120,8 +120,9 @@ Current completed slices:
 - **Phase 0F — Scenario tests and documentation examples** added coding-agent governed edit tests plus a cataloged happy/failure example showing when to declare, link/reuse, accept baseline, reconcile, replan, or stop.
 - **Phase 0.1A — Workflow intent/no-op planner** added runtime intent clarification models, ambiguity questions, safe/risky assumption reporting, feature duplicate detection, `no-op`/`docs-only`/reference guidance for workflow plans, code-plan no-op/docs-only exits, CLI output, and tests.
 - **Phase 0.1B — Persisted intent decisions and wider existing-feature evidence** added `Intent.RecordDecision`, ontology/stable-key support for intent clarification facts, scoped approval enforcement for risky assumptions, and broader existing-feature evidence from endpoints, tests, PRs, docs, and CodeGraph-linked symbols.
+- **Phase 0.2A — Code object lifecycle ABI and change classification** added distinct `CodeObject.Update/Rename/Move/Deprecate/Delete` operation ABI entries, lifecycle semantic validation for declaration identity and placement, `sg workflow code-plan` change type classification, and tests for update, rename evidence, move placement, and lifecycle classification.
 
-Next focus: **Phase 0.2 — Change lifecycle semantics, scope expansion, and stale work permits**. Start from the latest `development`, audit lifecycle operation gaps, then implement the first small slice with operation ABI, runtime validation, tests, and gates.
+Next focus: **Phase 0.2B — Impact, delete/refactor safety, and stale permit foundations**. Start from the latest `development`, add impact/delete safety evidence and stale-permit checks before marking Phase 0.2 complete.
 
 ---
 
@@ -346,9 +347,9 @@ Model real coding work beyond creation. Production systems must understand updat
 
 ## Checklist
 
-- [ ] **Add code object lifecycle operations.** Add Operation ABI entries for `CodeObject.Update`, `CodeObject.Rename`, `CodeObject.Move`, `CodeObject.Deprecate`, and `CodeObject.Delete`. Each operation must validate ownership, placement, public/private boundary, impact, and required evidence.
+- [~] **Add code object lifecycle operations.** Add Operation ABI entries for `CodeObject.Update`, `CodeObject.Rename`, `CodeObject.Move`, `CodeObject.Deprecate`, and `CodeObject.Delete`. Each operation must validate ownership, placement, public/private boundary, impact, and required evidence.
 
-- [ ] **Add change type classification.** Every work permit must classify the requested change as `create`, `update`, `rename`, `move`, `delete`, `deprecate`, `refactor`, `bugfix`, `docs-only`, `config-change`, `dependency-change`, `migration-change`, or `release-change`.
+- [x] **Add change type classification.** Every work permit must classify the requested change as `create`, `update`, `rename`, `move`, `delete`, `deprecate`, `refactor`, `bugfix`, `docs-only`, `config-change`, `dependency-change`, `migration-change`, or `release-change`.
 
 - [ ] **Add update impact analysis.** Updating an existing function/type/method/route must identify all linked specs, tests, endpoints, modules, public interfaces, consumers, and releases that may be impacted.
 
@@ -366,11 +367,11 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [ ] **Add failure/correction lifecycle.** Extend `ExecutionAttempt` with `FailureCause`, `CorrectionPlan`, `Retry`, and `EscalationRequired`. Repeated failures should suggest replan or human intervention instead of endless retries.
 
-- [ ] **Add tests.** Cover update of existing symbol, rename with references, delete blocked by reference, refactor preserving public API, bugfix targeting existing root cause, scope expansion requiring replan, stale permit rejection, and repeated failure escalation.
+- [~] **Add tests.** Cover update of existing symbol, rename with references, delete blocked by reference, refactor preserving public API, bugfix targeting existing root cause, scope expansion requiring replan, stale permit rejection, and repeated failure escalation.
 
 ## Phase Gate
 
-- [ ] Create/update/rename/move/delete/deprecate are distinct graph operations with different gates.
+- [~] Create/update/rename/move/delete/deprecate are distinct graph operations with different gates.
 - [ ] Agent cannot expand scope silently.
 - [ ] Stale work permits are rejected before edit/commit validation.
 - [ ] Refactor-only and bugfix flows have explicit graph evidence.
