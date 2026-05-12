@@ -2912,8 +2912,54 @@ pub fn code_index_strict_findings(graph: &Graph, indexed_delta: &GraphDelta) -> 
         }
     }
 
+    for usage in indexed_delta
+        .create_nodes
+        .iter()
+        .filter(|node| node.node_type == "ConfigUsage")
+    {
+        let Some(name) = node_attr(usage, "name") else {
+            continue;
+        };
+        let kind = node_attr(usage, "kind").unwrap_or("config");
+        if kind == "secret" {
+            if !declared_secret_exists(graph, name) {
+                findings.push(code_index_finding(
+                    "config.secret_reference_required",
+                    format!(
+                        "Observed secret access `{name}` in `{}` is not linked to a declared SecretReference. Remediation: run Config.Declare with approval and documentation evidence before accepting this code usage.",
+                        node_attr(usage, "file").unwrap_or("<unknown>")
+                    ),
+                ));
+            }
+        } else if !declared_config_exists(graph, name) {
+            findings.push(code_index_finding(
+                "config.variable_declaration_required",
+                format!(
+                    "Observed config access `{name}` in `{}` is not linked to a declared ConfigVariable. Remediation: run Config.Declare and add documentation evidence before accepting this code usage.",
+                    node_attr(usage, "file").unwrap_or("<unknown>")
+                ),
+            ));
+        }
+    }
+
     findings.extend(code_graph_declared_missing_findings(graph));
     findings
+}
+
+fn declared_config_exists(graph: &Graph, name: &str) -> bool {
+    graph.nodes.values().any(|node| {
+        node.node_type == "ConfigVariable"
+            && node_attr(node, "name") == Some(name)
+            && node_attr(node, "sourceTrust") != Some("Observation")
+    })
+}
+
+fn declared_secret_exists(graph: &Graph, name: &str) -> bool {
+    graph.nodes.values().any(|node| {
+        node.node_type == "SecretReference"
+            && node_attr(node, "name") == Some(name)
+            && node_attr(node, "sourceTrust") != Some("Observation")
+    })
 }
 
 pub fn code_graph_declared_missing_findings(graph: &Graph) -> Vec<Finding> {
@@ -6314,6 +6360,7 @@ fn validate_operation_semantic_preconditions(
             delta,
         ),
         "Refactor.Record" => validate_refactor_record_semantic_preconditions(graph, delta),
+        "Config.Declare" => validate_config_declare_semantic_preconditions(graph, request, delta),
         "GitCommit.Record" => validate_git_commit_semantic_preconditions(graph, request, delta),
         "Validation.Record" => {
             validate_validation_record_semantic_preconditions(graph, request, delta)
@@ -7844,6 +7891,89 @@ fn human_decision_approval_scope_matches(
         || decision_scopes
             .iter()
             .any(|decision_scope| decision_scope == scope)
+}
+
+fn validate_config_declare_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let declared = delta
+        .create_nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.node_type.as_str(),
+                "ConfigVariable" | "SecretReference"
+            )
+        })
+        .collect::<Vec<_>>();
+    if declared.is_empty() {
+        findings.push(semantic_finding(
+            "semantic.config_declare.target_required",
+            "Config.Declare must create at least one ConfigVariable or SecretReference.",
+        ));
+    }
+
+    for node in declared {
+        let name = node_attr(node, "name").unwrap_or_default().trim();
+        if name.is_empty() {
+            findings.push(semantic_finding(
+                "semantic.config_declare.name_required",
+                format!("{} requires non-empty `name`.", node.node_type),
+            ));
+        }
+        let is_secret = node.node_type == "SecretReference"
+            || node_bool_attr(node, "secret")
+            || node_bool_attr(node, "productionSensitive");
+        if is_secret && !config_node_has_approval(graph, delta, node, request) {
+            findings.push(semantic_finding(
+                "semantic.config_declare.approval_required",
+                format!(
+                    "{} `{}` is secret or production-sensitive and requires approval evidence.",
+                    node.node_type,
+                    if name.is_empty() { "<unknown>" } else { name }
+                ),
+            ));
+        }
+        if !delta.create_edges.iter().any(|edge| {
+            edge.from == node.id
+                && edge.edge_type == "CONFIG_DOCUMENTED_BY"
+                && node_exists_with_type(graph, delta, &edge.to, "DocumentationUpdate")
+        }) {
+            findings.push(semantic_finding(
+                "semantic.config_declare.documentation_required",
+                format!(
+                    "{} `{}` requires DocumentationUpdate evidence so operators know how to configure it.",
+                    node.node_type,
+                    if name.is_empty() { "<unknown>" } else { name }
+                ),
+            ));
+        }
+    }
+
+    findings
+}
+
+fn config_node_has_approval(
+    graph: &Graph,
+    delta: &GraphDelta,
+    node: &Node,
+    request: &OperationRequest,
+) -> bool {
+    let input_approval = request
+        .input
+        .get("approvalId")
+        .and_then(Value::as_str)
+        .and_then(|approval_id| approval_node_for_id(graph, approval_id))
+        .is_some();
+    let edge_approval = delta.create_edges.iter().any(|edge| {
+        edge.from == node.id
+            && edge.edge_type == "CONFIG_HAS_APPROVAL"
+            && node_exists_with_type(graph, delta, &edge.to, "Approval")
+    });
+    input_approval || edge_approval
 }
 
 fn validate_work_reservation_semantic_preconditions(
@@ -14385,6 +14515,87 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn strict_code_index_blocks_undeclared_config_and_secret_usage() {
+        let config_delta = config_usage_delta("src/config.ts", "DATABASE_URL", "config");
+        let findings = code_index_strict_findings(&Graph::default(), &config_delta);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "config.variable_declaration_required"));
+
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "node_config_database_url".to_string(),
+            Node {
+                id: "node_config_database_url".to_string(),
+                stable_key: "config-variable:DATABASE_URL".to_string(),
+                node_type: "ConfigVariable".to_string(),
+                attributes: BTreeMap::from([("name".to_string(), json!("DATABASE_URL"))]),
+            },
+        );
+        assert!(code_index_strict_findings(&graph, &config_delta)
+            .iter()
+            .all(|finding| finding.code != "config.variable_declaration_required"));
+
+        let secret_delta = config_usage_delta("src/config.ts", "API_TOKEN", "secret");
+        let findings = code_index_strict_findings(&Graph::default(), &secret_delta);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "config.secret_reference_required"));
+    }
+
+    #[test]
+    fn config_declare_requires_docs_and_secret_approval() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let rejected = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Config.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"config": "API_TOKEN"}),
+                dry_run: true,
+                delta: secret_reference_declare_delta("API_TOKEN", false, false),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            rejected,
+            StoreError::SemanticValidationFailed { operation, count: 2 }
+                if operation == "Config.Declare"
+        ));
+
+        add_policy_approver(tmp.path(), "local:lead");
+        record_approval(
+            tmp.path(),
+            RecordApprovalOptions {
+                approval_id: "config-secret-approval".to_string(),
+                approval: "declare-secret-reference".to_string(),
+                policy: None,
+                scope: Some("config:API_TOKEN".to_string()),
+                reason: Some("Production secret reference required".to_string()),
+                approved_by: "local:lead".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let accepted = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Config.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"config": "API_TOKEN", "approvalId": "config-secret-approval"}),
+                dry_run: false,
+                delta: secret_reference_declare_delta("API_TOKEN", true, true),
+            },
+        )
+        .unwrap();
+        assert_eq!(accepted.operation, "Config.Declare");
+    }
+
+    #[test]
     fn strict_code_index_blocks_wrong_placement_and_private_imports() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -16253,6 +16464,78 @@ acceptanceCriteria:
                 },
             ],
             create_edges: vec![edge(&file_id, "DEFINES_SYMBOL", &symbol_id)],
+            ..GraphDelta::default()
+        }
+    }
+
+    fn config_usage_delta(file: &str, name: &str, kind: &str) -> GraphDelta {
+        let file_id = sg_codegraph::code_file_node_id(file);
+        let usage_id = node_id("config_usage", &format!("{file}/{name}"));
+        GraphDelta {
+            create_nodes: vec![
+                Node {
+                    id: file_id.clone(),
+                    stable_key: format!("code-file:{file}"),
+                    node_type: "CodeFile".to_string(),
+                    attributes: BTreeMap::from([("path".to_string(), json!(file))]),
+                },
+                Node {
+                    id: usage_id.clone(),
+                    stable_key: format!("config-usage:{file}/{name}"),
+                    node_type: "ConfigUsage".to_string(),
+                    attributes: BTreeMap::from([
+                        ("file".to_string(), json!(file)),
+                        ("name".to_string(), json!(name)),
+                        ("kind".to_string(), json!(kind)),
+                    ]),
+                },
+            ],
+            create_edges: vec![edge(&file_id, "FILE_READS_CONFIG", &usage_id)],
+            ..GraphDelta::default()
+        }
+    }
+
+    fn secret_reference_declare_delta(
+        name: &str,
+        include_docs: bool,
+        include_approval: bool,
+    ) -> GraphDelta {
+        let secret_id = node_id("secret_reference", name);
+        let doc_id = node_id("documentation_update", &format!("config/{name}"));
+        let approval_id = node_id("approval", "config-secret-approval");
+        let mut create_nodes = vec![Node {
+            id: secret_id.clone(),
+            stable_key: format!("secret-reference:{name}"),
+            node_type: "SecretReference".to_string(),
+            attributes: BTreeMap::from([
+                ("name".to_string(), json!(name)),
+                ("secret".to_string(), json!(true)),
+                ("productionSensitive".to_string(), json!(true)),
+            ]),
+        }];
+        let mut create_edges = vec![edge(
+            &node_id("spec", "AUTH-001"),
+            "HAS_SECRET_REFERENCE",
+            &secret_id,
+        )];
+        if include_docs {
+            create_nodes.push(Node {
+                id: doc_id.clone(),
+                stable_key: format!("documentation-update:AUTH-001/config/{name}"),
+                node_type: "DocumentationUpdate".to_string(),
+                attributes: BTreeMap::from([
+                    ("target".to_string(), json!(name)),
+                    ("status".to_string(), json!("Required")),
+                ]),
+            });
+            create_edges.push(edge(&secret_id, "CONFIG_DOCUMENTED_BY", &doc_id));
+        }
+        if include_approval {
+            create_edges.push(edge(&secret_id, "CONFIG_HAS_APPROVAL", &approval_id));
+        }
+        GraphDelta {
+            create_nodes,
+            create_edges,
             ..GraphDelta::default()
         }
     }

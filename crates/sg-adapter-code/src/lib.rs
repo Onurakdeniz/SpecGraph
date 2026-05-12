@@ -24,6 +24,8 @@ pub struct CodeIndexObservation {
     pub imports: Vec<CodeImportObservation>,
     #[serde(default)]
     pub routes: Vec<CodeRouteObservation>,
+    #[serde(default)]
+    pub config_accesses: Vec<ConfigAccessObservation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +58,16 @@ pub struct CodeRouteObservation {
     pub handler_symbol: Option<String>,
     #[serde(default)]
     pub framework: Option<String>,
+    #[serde(default)]
+    pub location: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigAccessObservation {
+    pub name: String,
+    pub kind: String,
+    pub access_pattern: String,
     #[serde(default)]
     pub location: Option<SourceLocation>,
 }
@@ -97,6 +109,7 @@ pub fn index_source_file(path: &str, source: &str) -> CodeIndexObservation {
     let symbols = extract_symbols(path, &language, source);
     let imports = extract_imports(path, &language, source);
     let routes = extract_routes(path, &language, framework.as_deref(), source);
+    let config_accesses = extract_config_accesses(path, &language, source);
     CodeIndexObservation {
         file: path.to_string(),
         language,
@@ -105,6 +118,7 @@ pub fn index_source_file(path: &str, source: &str) -> CodeIndexObservation {
         symbols,
         imports,
         routes,
+        config_accesses,
     }
 }
 
@@ -181,6 +195,10 @@ pub fn observations_to_delta(observations: &[CodeIndexObservation]) -> GraphDelt
                 ("symbolCount".to_string(), json!(observation.symbols.len())),
                 ("importCount".to_string(), json!(observation.imports.len())),
                 ("routeCount".to_string(), json!(observation.routes.len())),
+                (
+                    "configAccessCount".to_string(),
+                    json!(observation.config_accesses.len()),
+                ),
             ]));
             attributes.insert("sourceFile".to_string(), json!(observation.file));
             create_nodes.push(Node {
@@ -297,6 +315,38 @@ pub fn observations_to_delta(observations: &[CodeIndexObservation]) -> GraphDelt
                 );
             }
         }
+        for config in &observation.config_accesses {
+            let usage_id = config_usage_node_id(&observation.file, &config.name);
+            if seen_nodes.insert(usage_id.clone()) {
+                let mut attributes = observed_attributes(BTreeMap::from([
+                    ("file".to_string(), json!(observation.file)),
+                    ("name".to_string(), json!(config.name)),
+                    ("kind".to_string(), json!(config.kind)),
+                    ("accessPattern".to_string(), json!(config.access_pattern)),
+                    ("language".to_string(), json!(observation.language)),
+                    ("framework".to_string(), json!(observation.framework)),
+                ]));
+                insert_location(&mut attributes, &config.location);
+                create_nodes.push(Node {
+                    id: usage_id.clone(),
+                    stable_key: format!("config-usage:{}/{}", observation.file, config.name),
+                    node_type: "ConfigUsage".to_string(),
+                    attributes,
+                });
+            }
+            push_edge(
+                &mut create_edges,
+                &mut seen_edges,
+                observed_edge(&file_id, "FILE_READS_CONFIG", &usage_id),
+            );
+            if config.kind == "secret" {
+                push_edge(
+                    &mut create_edges,
+                    &mut seen_edges,
+                    observed_edge(&file_id, "FILE_READS_SECRET", &usage_id),
+                );
+            }
+        }
     }
 
     GraphDelta {
@@ -390,6 +440,39 @@ fn extract_routes(
     routes
 }
 
+fn extract_config_accesses(
+    path: &str,
+    language: &str,
+    source: &str,
+) -> Vec<ConfigAccessObservation> {
+    let mut accesses = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (index, line) in source.lines().enumerate() {
+        let line_number = (index + 1) as u32;
+        for (name, pattern) in config_accesses_from_line(language, line) {
+            if seen.insert((name.clone(), pattern.clone())) {
+                accesses.push(ConfigAccessObservation {
+                    kind: if looks_like_secret_name(&name) {
+                        "secret".to_string()
+                    } else {
+                        "config".to_string()
+                    },
+                    name,
+                    access_pattern: pattern,
+                    location: Some(SourceLocation {
+                        file: path.to_string(),
+                        start_line: Some(line_number),
+                        end_line: Some(line_number),
+                        start_column: None,
+                        end_column: None,
+                    }),
+                });
+            }
+        }
+    }
+    accesses
+}
+
 pub fn validate_code_index_observations(observations: &[CodeIndexObservation]) -> Vec<Finding> {
     let mut findings = Vec::new();
     for observation in observations {
@@ -426,8 +509,100 @@ pub fn validate_code_index_observations(observations: &[CodeIndexObservation]) -
                 ));
             }
         }
+        for config in &observation.config_accesses {
+            if config.location.is_none() {
+                findings.push(finding(
+                    "code_indexer.config_location_required",
+                    format!(
+                        "Config access `{}` in `{}` must include a source location.",
+                        config.name, observation.file
+                    ),
+                ));
+            }
+        }
     }
     findings
+}
+
+fn config_accesses_from_line(language: &str, line: &str) -> Vec<(String, String)> {
+    match language {
+        "javascript" | "typescript" => javascript_config_accesses_from_line(line),
+        "rust" => rust_config_accesses_from_line(line),
+        "python" => python_config_accesses_from_line(line),
+        _ => Vec::new(),
+    }
+}
+
+fn javascript_config_accesses_from_line(line: &str) -> Vec<(String, String)> {
+    let line = strip_line_comment(line, "//");
+    let mut out = Vec::new();
+    for marker in ["process.env.", "import.meta.env."] {
+        let mut rest = line;
+        while let Some((_, after)) = rest.split_once(marker) {
+            if let Some(name) = clean_identifier(after) {
+                out.push((name, marker.trim_end_matches('.').to_string()));
+            }
+            rest = after;
+        }
+    }
+    if line.contains("readFileSync(") {
+        if let Some(path) = quoted_value(line).and_then(config_file_access_name) {
+            out.push((path, "fs.readFileSync".to_string()));
+        }
+    }
+    out
+}
+
+fn rust_config_accesses_from_line(line: &str) -> Vec<(String, String)> {
+    let line = strip_line_comment(line, "//");
+    let mut out = ["std::env::var(", "env::var("]
+        .iter()
+        .filter_map(|marker| {
+            line.split_once(marker)
+                .and_then(|(_, rest)| quoted_value(rest))
+                .map(|name| (name, marker.trim_end_matches('(').to_string()))
+        })
+        .collect::<Vec<_>>();
+    if line.contains("read_to_string(") {
+        if let Some(path) = quoted_value(line).and_then(config_file_access_name) {
+            out.push((path, "fs::read_to_string".to_string()));
+        }
+    }
+    out
+}
+
+fn python_config_accesses_from_line(line: &str) -> Vec<(String, String)> {
+    let line = strip_line_comment(line, "#");
+    let mut out = Vec::new();
+    for marker in ["os.environ[", "os.getenv("] {
+        if let Some((_, rest)) = line.split_once(marker) {
+            if let Some(name) = quoted_value(rest) {
+                out.push((name, marker.trim_end_matches(['[', '(']).to_string()));
+            }
+        }
+    }
+    if line.contains("open(") {
+        if let Some(path) = quoted_value(line).and_then(config_file_access_name) {
+            out.push((path, "open".to_string()));
+        }
+    }
+    out
+}
+
+fn config_file_access_name(path: String) -> Option<String> {
+    let lower = path.to_ascii_lowercase();
+    if lower.contains("config") || lower.contains(".env") {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn looks_like_secret_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    ["SECRET", "TOKEN", "PASSWORD", "PRIVATE_KEY", "API_KEY"]
+        .iter()
+        .any(|marker| upper.contains(marker))
 }
 
 fn imports_from_line(path: &str, language: &str, line: &str) -> Vec<(String, String)> {
@@ -789,6 +964,13 @@ fn clean_identifier(value: &str) -> Option<String> {
     }
 }
 
+fn config_usage_node_id(file: &str, name: &str) -> String {
+    format!(
+        "node_config_usage_{}",
+        stable_fragment(&format!("{file}/{name}"))
+    )
+}
+
 fn observed_attributes(
     mut attributes: BTreeMap<String, serde_json::Value>,
 ) -> BTreeMap<String, serde_json::Value> {
@@ -972,6 +1154,40 @@ router.post("/password-reset", resetPassword);
     }
 
     #[test]
+    fn indexes_config_and_secret_accesses() {
+        let observation = index_source_file(
+            "src/config.ts",
+            r#"
+const databaseUrl = process.env.DATABASE_URL;
+const apiToken = process.env.API_TOKEN;
+const rawConfig = readFileSync("config/default.json", "utf8");
+"#,
+        );
+
+        assert!(observation
+            .config_accesses
+            .iter()
+            .any(|access| { access.name == "DATABASE_URL" && access.kind == "config" }));
+        assert!(observation
+            .config_accesses
+            .iter()
+            .any(|access| { access.name == "API_TOKEN" && access.kind == "secret" }));
+        assert!(observation
+            .config_accesses
+            .iter()
+            .any(|access| { access.name == "config/default.json" }));
+        let delta = observations_to_delta(&[observation]);
+        assert!(delta
+            .create_nodes
+            .iter()
+            .any(|node| node.node_type == "ConfigUsage"));
+        assert!(delta
+            .create_edges
+            .iter()
+            .any(|edge| edge.edge_type == "FILE_READS_SECRET"));
+    }
+
+    #[test]
     fn observation_validation_requires_source_locations() {
         let findings = validate_code_index_observations(&[CodeIndexObservation {
             file: "src/app.js".to_string(),
@@ -986,6 +1202,7 @@ router.post("/password-reset", resetPassword);
             }],
             imports: Vec::new(),
             routes: Vec::new(),
+            config_accesses: Vec::new(),
         }]);
 
         assert!(findings

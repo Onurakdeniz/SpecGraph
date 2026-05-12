@@ -133,8 +133,9 @@ Current completed slices:
 - **Phase 0.3C — Autonomous audit trails and user-choice blockers** added `userChoiceBlockers` and `autonomyAuditTrail` to workflow code-plan decisions, records rule/evidence/confidence/rollback/replan data for automatic link/edit choices, blocks ambiguous module placement with `HumanDecision.Record`, rejects expired scoped approvals, and completes the Phase 0.3 gate tests.
 - **Phase 0.4A — Work reservation model and lifecycle ABI** added `WorkReservation` graph facts, stable-key/ontology/operation ABI support, semantic validation for create/extend/release/force-release, required reservation scope/expiration/owner links, actor-owned release, force-release approval evidence, and tests for reservation lifecycle plus approved force release.
 - **Phase 0.4B — Reservation enforcement in workflow permits** added strict/team reservation requirements to `sg workflow code-plan`, conflict detection for active file/symbol/module reservations, same spec/action shared-reservation policy, expired reservation stale handling, `sg workflow reservations list/show/release`, and tests for missing/conflicting/shared/stale/released reservations.
+- **Phase 0.5A — Config and secret declaration governance** added config/secret/runtime environment graph facts, stable-key/ontology/operation ABI support, config access detection in the code indexer, `Config.Declare` semantic gates for docs and approval evidence, strict index blockers for undeclared config/secret usage, and tests.
 
-Next focus: **Phase 0.5 — Config, dependency, generated-code, contract, and documentation governance**. Start from the latest `development`, model declared config/secrets/dependencies/generated files/contracts/docs evidence, block unsafe direct edits or public changes without compatibility/docs evidence, and add tests/gates.
+Next focus: **Phase 0.5B — Dependency graph facts and dependency operations**. Start from the latest `development`, model package manifests, dependencies, versions, lockfiles, license/advisory evidence, and add `Dependency.Add/Update/Remove` gates and tests.
 
 ---
 
@@ -458,11 +459,11 @@ Cover common production changes that are not just functions and types: environme
 
 ## Checklist
 
-- [ ] **Add config and secret graph facts.** Add `ConfigVariable`, `SecretReference`, `EnvironmentRequirement`, and `RuntimeConfig` facts. Code that reads env vars or secrets must link to declared config/secret facts.
+- [x] **Add config and secret graph facts.** Add `ConfigVariable`, `SecretReference`, `EnvironmentRequirement`, and `RuntimeConfig` facts. Code that reads env vars or secrets must link to declared config/secret facts.
 
-- [ ] **Add config detection.** Code indexing must detect common config access patterns such as `process.env.X`, `std::env::var`, Python `os.environ`, config file reads, and framework config references.
+- [x] **Add config detection.** Code indexing must detect common config access patterns such as `process.env.X`, `std::env::var`, Python `os.environ`, config file reads, and framework config references.
 
-- [ ] **Add config declaration operation.** Add `Config.Declare` and require approval for production-sensitive or secret config. Generate docs requirements for new config variables.
+- [x] **Add config declaration operation.** Add `Config.Declare` and require approval for production-sensitive or secret config. Generate docs requirements for new config variables.
 
 - [ ] **Add dependency graph facts.** Add `Dependency`, `DependencyVersion`, `PackageManifest`, `Lockfile`, `License`, and `AdvisoryEvidence` facts.
 
@@ -482,7 +483,7 @@ Cover common production changes that are not just functions and types: environme
 
 ## Phase Gate
 
-- [ ] New config/env/secret usage cannot enter trusted graph without declaration.
+- [x] New config/env/secret usage cannot enter trusted graph without declaration.
 - [ ] Dependency changes require package/lock/license/advisory evidence.
 - [ ] Generated files are not edited directly when source artifacts exist.
 - [ ] Public contract changes require compatibility and docs evidence.

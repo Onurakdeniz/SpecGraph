@@ -687,6 +687,31 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Config.Declare",
+            category: "governance",
+            description: "Declare runtime config variables, secret references, environment requirements, and required docs before code uses them.",
+            required_input_fields: &["config"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "ConfigVariable",
+                "SecretReference",
+                "EnvironmentRequirement",
+                "RuntimeConfig",
+                "DocumentationUpdate",
+            ],
+            allowed_create_edge_types: &[
+                "HAS_CONFIG_VARIABLE",
+                "HAS_SECRET_REFERENCE",
+                "HAS_ENVIRONMENT_REQUIREMENT",
+                "HAS_RUNTIME_CONFIG",
+                "CONFIG_HAS_ENVIRONMENT_REQUIREMENT",
+                "CONFIG_DOCUMENTED_BY",
+                "CONFIG_HAS_APPROVAL",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Implementation.Authorize",
             category: "workflow",
             description: "Dry-run a coding work permit for intended spec/action/files/symbols before editing source files.",
@@ -1274,6 +1299,21 @@ mod tests {
         assert!(built_in_operations()
             .iter()
             .all(|definition| definition.schema_version == OPERATION_DEFINITION_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn config_declare_allows_config_secret_and_docs_facts() {
+        let definition = find_operation("Config.Declare").unwrap();
+        assert_eq!(definition.category, "governance");
+        assert!(definition
+            .allowed_create_node_types
+            .contains(&"ConfigVariable"));
+        assert!(definition
+            .allowed_create_node_types
+            .contains(&"SecretReference"));
+        assert!(definition
+            .allowed_create_edge_types
+            .contains(&"CONFIG_DOCUMENTED_BY"));
     }
 
     #[test]
