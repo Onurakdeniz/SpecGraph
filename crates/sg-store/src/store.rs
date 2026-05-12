@@ -322,6 +322,81 @@ pub struct WorkflowFileHash {
     pub missing: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentAutonomyEffect {
+    AutoAllowed,
+    ApprovalRequired,
+    Forbidden,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AgentAutonomyRule {
+    id: &'static str,
+    effect: AgentAutonomyEffect,
+    operation: &'static str,
+    description: &'static str,
+    remediation_operation: &'static str,
+}
+
+const AGENT_AUTONOMY_RULES: &[AgentAutonomyRule] = &[
+    AgentAutonomyRule {
+        id: "autonomy.link-existing-private",
+        effect: AgentAutonomyEffect::AutoAllowed,
+        operation: "CodeObject.LinkExisting",
+        description: "Linking one obvious existing private code object is auto-allowed.",
+        remediation_operation: "CodeObject.LinkExisting",
+    },
+    AgentAutonomyRule {
+        id: "autonomy.module-creation-approval",
+        effect: AgentAutonomyEffect::ApprovalRequired,
+        operation: "ModuleGraph.Upsert",
+        description: "Creating or changing module ownership requires scoped human approval.",
+        remediation_operation: "HumanDecision.Record",
+    },
+    AgentAutonomyRule {
+        id: "autonomy.public-api-approval",
+        effect: AgentAutonomyEffect::ApprovalRequired,
+        operation: "CodeObject.Update",
+        description: "Changing public API code objects requires scoped human approval.",
+        remediation_operation: "HumanDecision.Record",
+    },
+    AgentAutonomyRule {
+        id: "autonomy.dependency-approval",
+        effect: AgentAutonomyEffect::ApprovalRequired,
+        operation: "Dependency.Add",
+        description: "Adding or changing package dependencies requires scoped human approval.",
+        remediation_operation: "HumanDecision.Record",
+    },
+    AgentAutonomyRule {
+        id: "autonomy.migration-approval",
+        effect: AgentAutonomyEffect::ApprovalRequired,
+        operation: "Migration.Record",
+        description: "Creating or changing data migrations requires scoped human approval.",
+        remediation_operation: "HumanDecision.Record",
+    },
+    AgentAutonomyRule {
+        id: "autonomy.release-approval",
+        effect: AgentAutonomyEffect::ApprovalRequired,
+        operation: "Release.Record",
+        description: "Release decisions require scoped human approval.",
+        remediation_operation: "HumanDecision.Record",
+    },
+    AgentAutonomyRule {
+        id: "autonomy.security-approval",
+        effect: AgentAutonomyEffect::ApprovalRequired,
+        operation: "Spec.Intent.Update",
+        description: "Security-sensitive behavior decisions require scoped human approval.",
+        remediation_operation: "HumanDecision.Record",
+    },
+    AgentAutonomyRule {
+        id: "autonomy.secret-edit-forbidden",
+        effect: AgentAutonomyEffect::Forbidden,
+        operation: "Secret.Edit",
+        description: "Editing secret material directly is forbidden for coding agents.",
+        remediation_operation: "Config.Declare",
+    },
+];
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowPlan {
@@ -1428,6 +1503,20 @@ pub fn plan_code_workflow(
         }));
     };
 
+    if let Some(blocker) = autonomy_blocker_for_intent(
+        &replay.graph,
+        spec_node,
+        &kind,
+        &name,
+        &options,
+        &change_type,
+        &action_binding,
+        &file_hashes,
+        &replay.state_hash,
+    ) {
+        return Ok(blocker);
+    }
+
     let module = code_object_module_for_request(&replay.graph, spec_node, &kind, &name, &options);
     let query = CodeObjectQuery {
         kind: kind.clone(),
@@ -1469,7 +1558,7 @@ pub fn plan_code_workflow(
         return Ok(WorkflowCodePlan {
             schema_version: "specgraph.workflow-code-plan/v1".to_string(),
             allowed: false,
-            blocked: true,
+            blocked: false,
             decision: "link-existing".to_string(),
             change_type,
             graph_branch: options.graph_branch,
@@ -1487,9 +1576,10 @@ pub fn plan_code_workflow(
             allowed_files: Vec::new(),
             allowed_symbols: Vec::new(),
             missing_graph_facts: Vec::new(),
-            human_message:
-                "Matching code already exists; link or extend it instead of creating a duplicate."
-                    .to_string(),
+            human_message: format!(
+                "Matching private code already exists; `{}` allows automatically linking it instead of creating a duplicate.",
+                autonomy_rule("autonomy.link-existing-private").description
+            ),
         });
     }
 
@@ -1559,6 +1649,18 @@ pub fn plan_code_workflow(
                     .to_string(),
         }));
     }
+    if let Some(blocker) = autonomy_blocker_for_declared_object(
+        &replay.graph,
+        spec_node,
+        declaration_node,
+        &options,
+        &change_type,
+        &action_binding,
+        &file_hashes,
+        &replay.state_hash,
+    ) {
+        return Ok(blocker);
+    }
     let allowed_file = options
         .file
         .clone()
@@ -1627,6 +1729,273 @@ fn blocked_code_plan(blocked: BlockedCodePlan) -> WorkflowCodePlan {
         missing_graph_facts: blocked.missing_graph_facts,
         human_message: blocked.human_message,
     }
+}
+
+fn autonomy_rule(id: &str) -> AgentAutonomyRule {
+    AGENT_AUTONOMY_RULES
+        .iter()
+        .copied()
+        .find(|rule| rule.id == id)
+        .expect("built-in autonomy rule id must exist")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn autonomy_blocker_for_intent(
+    graph: &Graph,
+    spec_node: &Node,
+    kind: &str,
+    name: &str,
+    options: &WorkflowCodePlanOptions,
+    change_type: &str,
+    action_binding: &(Option<String>, Option<String>),
+    file_hashes: &[WorkflowFileHash],
+    state_hash: &str,
+) -> Option<WorkflowCodePlan> {
+    let normalized_kind = kind.to_ascii_lowercase();
+    let action_text = options.action.to_ascii_lowercase();
+    let wants_text = options.wants.join(" ").to_ascii_lowercase();
+    let combined_text = format!("{action_text} {wants_text}");
+
+    let rule = if matches!(normalized_kind.as_str(), "module" | "package") {
+        Some(autonomy_rule("autonomy.module-creation-approval"))
+    } else if matches!(
+        normalized_kind.as_str(),
+        "dependency" | "crate" | "package-dependency"
+    ) {
+        Some(autonomy_rule("autonomy.dependency-approval"))
+    } else if normalized_kind.contains("migration") || combined_text.contains("migration") {
+        Some(autonomy_rule("autonomy.migration-approval"))
+    } else if normalized_kind == "release" || combined_text.contains("release") {
+        Some(autonomy_rule("autonomy.release-approval"))
+    } else if combined_text.contains("secret") {
+        Some(autonomy_rule("autonomy.secret-edit-forbidden"))
+    } else if security_sensitive_intent(&combined_text) {
+        Some(autonomy_rule("autonomy.security-approval"))
+    } else {
+        None
+    }?;
+
+    if rule.effect == AgentAutonomyEffect::ApprovalRequired
+        && has_scoped_human_approval(
+            graph,
+            spec_node,
+            rule.operation,
+            &autonomy_scope_type_for_rule(rule),
+            name,
+            None,
+        )
+    {
+        return None;
+    }
+
+    Some(autonomy_blocked_code_plan(
+        rule,
+        options,
+        change_type,
+        action_binding,
+        file_hashes,
+        state_hash,
+        name,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn autonomy_blocker_for_declared_object(
+    graph: &Graph,
+    spec_node: &Node,
+    declaration: &Node,
+    options: &WorkflowCodePlanOptions,
+    change_type: &str,
+    action_binding: &(Option<String>, Option<String>),
+    file_hashes: &[WorkflowFileHash],
+    state_hash: &str,
+) -> Option<WorkflowCodePlan> {
+    if node_attr(declaration, "visibility") != Some("public") {
+        return None;
+    }
+
+    let rule = autonomy_rule("autonomy.public-api-approval");
+    let scope_value = node_attr(declaration, "name").unwrap_or(declaration.id.as_str());
+    if has_scoped_human_approval(
+        graph,
+        spec_node,
+        rule.operation,
+        "publicApi",
+        scope_value,
+        Some(&declaration.id),
+    ) {
+        return None;
+    }
+
+    Some(autonomy_blocked_code_plan(
+        rule,
+        options,
+        change_type,
+        action_binding,
+        file_hashes,
+        state_hash,
+        scope_value,
+    ))
+}
+
+fn autonomy_blocked_code_plan(
+    rule: AgentAutonomyRule,
+    options: &WorkflowCodePlanOptions,
+    change_type: &str,
+    action_binding: &(Option<String>, Option<String>),
+    file_hashes: &[WorkflowFileHash],
+    state_hash: &str,
+    scope_value: &str,
+) -> WorkflowCodePlan {
+    let forbidden = rule.effect == AgentAutonomyEffect::Forbidden;
+    blocked_code_plan(BlockedCodePlan {
+        state_hash: state_hash.to_string(),
+        decision: if forbidden {
+            "forbidden-by-autonomy-policy".to_string()
+        } else {
+            "approval-required".to_string()
+        },
+        change_type: change_type.to_string(),
+        graph_branch: options.graph_branch.clone(),
+        action_id: action_binding.0.clone(),
+        commit_plan_id: action_binding.1.clone(),
+        file_hashes: file_hashes.to_vec(),
+        required_operations: if forbidden {
+            vec![rule.remediation_operation.to_string()]
+        } else {
+            vec![
+                "Policy.RecordApproval".to_string(),
+                rule.remediation_operation.to_string(),
+            ]
+        },
+        missing_graph_facts: vec![
+            rule.id.to_string(),
+            format!("operation:{}", rule.operation),
+            format!("scope:{scope_value}"),
+        ],
+        human_message: if forbidden {
+            format!(
+                "{} Remediation: use `{}` instead of direct agent action.",
+                rule.description, rule.remediation_operation
+            )
+        } else {
+            format!(
+                "{} Remediation: record a scoped approval and HumanDecision for `{}` before continuing.",
+                rule.description, rule.operation
+            )
+        },
+    })
+}
+
+fn security_sensitive_intent(text: &str) -> bool {
+    [
+        "security",
+        "authz",
+        "authorization",
+        "permission",
+        "role",
+        "encrypt",
+        "token",
+        "oauth",
+        "credential",
+    ]
+    .iter()
+    .any(|term| text.contains(term))
+}
+
+fn autonomy_scope_type_for_rule(rule: AgentAutonomyRule) -> String {
+    match rule.id {
+        "autonomy.module-creation-approval" => "module",
+        "autonomy.dependency-approval" => "dependency",
+        "autonomy.migration-approval" => "migration",
+        "autonomy.release-approval" => "release",
+        "autonomy.security-approval" => "security",
+        _ => "operation",
+    }
+    .to_string()
+}
+
+fn has_scoped_human_approval(
+    graph: &Graph,
+    spec_node: &Node,
+    operation: &str,
+    scope_type: &str,
+    scope_value: &str,
+    code_object_id: Option<&str>,
+) -> bool {
+    graph
+        .nodes
+        .values()
+        .filter(|node| node.node_type == "HumanDecision")
+        .filter(|decision| node_attr(decision, "authorizesOperation") == Some(operation))
+        .filter(|decision| !node_is_expired(decision))
+        .any(|decision| {
+            human_decision_targets_scope(graph, decision, spec_node, code_object_id)
+                && human_decision_has_scope(graph, decision, scope_type, scope_value)
+                && human_decision_has_live_approval(graph, decision)
+        })
+}
+
+fn human_decision_targets_scope(
+    graph: &Graph,
+    decision: &Node,
+    spec_node: &Node,
+    code_object_id: Option<&str>,
+) -> bool {
+    let targets_spec = graph.edges.values().any(|edge| {
+        edge.from == decision.id && edge.edge_type == "DECISION_FOR_SPEC" && edge.to == spec_node.id
+    });
+    let targets_code_object = code_object_id.is_some_and(|code_object_id| {
+        graph.edges.values().any(|edge| {
+            edge.from == decision.id
+                && edge.edge_type == "DECISION_APPROVES_CODE_OBJECT"
+                && edge.to == code_object_id
+        })
+    });
+    targets_spec || targets_code_object
+}
+
+fn human_decision_has_scope(
+    graph: &Graph,
+    decision: &Node,
+    scope_type: &str,
+    scope_value: &str,
+) -> bool {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == decision.id && edge.edge_type == "DECISION_HAS_SCOPE")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| node.node_type == "DecisionScope")
+        .any(|scope| {
+            let broad = scope
+                .attributes
+                .get("broadApprovalExplicit")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let graph_scope_type = node_attr(scope, "scopeType").unwrap_or("");
+            let graph_scope_value = node_attr(scope, "scopeValue").unwrap_or("");
+            (graph_scope_type == scope_type && graph_scope_value == scope_value)
+                || (broad && matches!(graph_scope_type, "global" | "all"))
+                || (broad && matches!(graph_scope_value, "*" | "all"))
+        })
+}
+
+fn human_decision_has_live_approval(graph: &Graph, decision: &Node) -> bool {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == decision.id && edge.edge_type == "DECISION_HAS_APPROVAL")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .any(|approval| approval.node_type == "Approval" && !node_is_expired(approval))
+}
+
+fn node_is_expired(node: &Node) -> bool {
+    node_attr(node, "expiresAt").is_some_and(|expires_at| {
+        OffsetDateTime::parse(expires_at, &time::format_description::well_known::Rfc3339)
+            .map(|expiration| expiration <= OffsetDateTime::now_utc())
+            .unwrap_or(true)
+    })
 }
 
 fn docs_only_code_intent(options: &WorkflowCodePlanOptions) -> bool {
@@ -13585,12 +13954,99 @@ acceptanceCriteria:
         .unwrap();
 
         assert!(!plan.allowed);
-        assert!(plan.blocked);
+        assert!(!plan.blocked);
         assert_eq!(plan.decision, "link-existing");
         assert!(plan.duplicate_risk);
         assert!(plan
             .required_operations
             .contains(&"CodeObject.LinkExisting".to_string()));
+    }
+
+    #[test]
+    fn workflow_code_plan_blocks_module_creation_without_scoped_approval() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "create a new billing module".to_string(),
+                wants: vec!["module:Billing".to_string()],
+                file: None,
+                expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
+                actor: "agent:codex".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(plan.blocked);
+        assert_eq!(plan.decision, "approval-required");
+        assert!(plan
+            .required_operations
+            .contains(&"Policy.RecordApproval".to_string()));
+        assert!(plan
+            .required_operations
+            .contains(&"HumanDecision.Record".to_string()));
+        assert!(plan
+            .missing_graph_facts
+            .contains(&"autonomy.module-creation-approval".to_string()));
+    }
+
+    #[test]
+    fn workflow_code_plan_blocks_public_api_change_without_scoped_approval() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration
+            .attributes
+            .insert("visibility".to_string(), json!("public"));
+        let impact = impact_analysis_delta(&declaration.id, "AUTH-001/public-plan");
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Update".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "change": "Mark as public API for plan gate",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    create_nodes: impact.create_nodes,
+                    create_edges: impact.create_edges,
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+
+        let plan = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                expected_state_hash: None,
+                expected_file_hashes: Vec::new(),
+                actor: "agent:codex".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!plan.allowed);
+        assert!(plan.blocked);
+        assert_eq!(plan.decision, "approval-required");
+        assert!(plan
+            .missing_graph_facts
+            .contains(&"autonomy.public-api-approval".to_string()));
     }
 
     #[test]
