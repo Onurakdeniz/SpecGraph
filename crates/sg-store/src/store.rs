@@ -2458,7 +2458,7 @@ pub fn generate_action_graph(
     let replay = replay_events(root, ReplayOptions { check_hashes: true })?;
     let spec_node = find_spec_node(&replay.graph, &options.spec)
         .ok_or_else(|| StoreError::SpecNotFound(options.spec.clone()))?;
-    let delta = action_graph_delta(&options.spec, &spec_node.id);
+    let delta = action_graph_delta(&replay.graph, &options.spec, &spec_node.id);
 
     append_operation(
         root,
@@ -2710,6 +2710,7 @@ pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<Op
                 "commit": options.input.commit,
                 "message": options.input.message,
                 "changedFiles": options.input.changed_files,
+                "changedSymbols": options.input.changed_symbols,
             }),
             dry_run: false,
             delta: GraphDelta {
@@ -4194,6 +4195,7 @@ fn validate_git_commit_semantic_preconditions(
         request.operation.as_str(),
     );
     let changed_files = input_string_array(&request.input, "changedFiles");
+    let changed_symbols = input_string_array(&request.input, "changedSymbols");
     let (Some(commit), Some(message)) = (commit, message) else {
         return findings;
     };
@@ -4202,6 +4204,7 @@ fn validate_git_commit_semantic_preconditions(
         commit: commit.clone(),
         message,
         changed_files,
+        changed_symbols,
     };
     findings.extend(validate_commit_binding(graph, &input));
 
@@ -4958,15 +4961,30 @@ fn find_spec_node<'a>(graph: &'a Graph, spec: &str) -> Option<&'a Node> {
     })
 }
 
-fn action_graph_delta(spec: &str, spec_node_id: &str) -> GraphDelta {
+#[derive(Debug, Clone)]
+struct ActionGraphCodeScope {
+    declaration_ids: Vec<String>,
+    files: Vec<String>,
+    symbols: Vec<String>,
+}
+
+fn action_graph_delta(graph: &Graph, spec: &str, spec_node_id: &str) -> GraphDelta {
     let action_graph_id = node_id("action_graph", spec);
+    let declaration_scopes = action_graph_code_scopes(graph, spec_node_id);
     let mut create_nodes = vec![Node {
         id: action_graph_id.clone(),
         stable_key: format!("action-graph:{spec}"),
         node_type: "ActionGraph".to_string(),
         attributes: BTreeMap::from([
             ("spec".to_string(), json!(spec)),
-            ("template".to_string(), json!("mvp-default")),
+            ("template".to_string(), json!("code-object-aware")),
+            (
+                "codeObjectDeclarations".to_string(),
+                json!(declaration_scopes
+                    .values()
+                    .flat_map(|scope| scope.declaration_ids.iter().cloned())
+                    .collect::<Vec<_>>()),
+            ),
         ]),
     }];
     let mut create_edges = vec![edge(spec_node_id, "HAS_ACTION_GRAPH", &action_graph_id)];
@@ -4975,6 +4993,21 @@ fn action_graph_delta(spec: &str, spec_node_id: &str) -> GraphDelta {
         let group_id = node_id("action_group", &format!("{spec}/{}", template.name));
         let action_id = node_id("action_node", &format!("{spec}/{}", template.name));
         let commit_plan_id = node_id("commit_plan", &format!("{spec}/{}", template.name));
+        let scope = declaration_scopes.get(template.name);
+        let scoped_files = scope.map(|scope| scope.files.clone()).unwrap_or_default();
+        let scoped_symbols = scope.map(|scope| scope.symbols.clone()).unwrap_or_default();
+        let scoped_declarations = scope
+            .map(|scope| scope.declaration_ids.clone())
+            .unwrap_or_default();
+        let allowed_files = if scoped_files.is_empty() {
+            template
+                .allowed_paths
+                .iter()
+                .map(|path| (*path).to_string())
+                .collect::<Vec<_>>()
+        } else {
+            scoped_files.clone()
+        };
 
         create_nodes.push(Node {
             id: group_id.clone(),
@@ -4983,6 +5016,10 @@ fn action_graph_delta(spec: &str, spec_node_id: &str) -> GraphDelta {
             attributes: BTreeMap::from([
                 ("name".to_string(), json!(template.name)),
                 ("description".to_string(), json!(template.description)),
+                (
+                    "codeObjectDeclarations".to_string(),
+                    json!(scoped_declarations.clone()),
+                ),
             ]),
         });
         create_nodes.push(Node {
@@ -4991,8 +5028,17 @@ fn action_graph_delta(spec: &str, spec_node_id: &str) -> GraphDelta {
             node_type: "ActionNode".to_string(),
             attributes: BTreeMap::from([
                 ("name".to_string(), json!(template.action)),
-                ("allowedPaths".to_string(), json!(template.allowed_paths)),
+                ("allowedPaths".to_string(), json!(allowed_files.clone())),
+                ("allowedSymbols".to_string(), json!(scoped_symbols.clone())),
+                (
+                    "codeObjectDeclarations".to_string(),
+                    json!(scoped_declarations.clone()),
+                ),
                 ("state".to_string(), json!("Ready")),
+                (
+                    "scopeExpansionRequires".to_string(),
+                    json!(["Spec.Intent.Update", "ActionGraph.Replan"]),
+                ),
             ]),
         });
         create_nodes.push(Node {
@@ -5003,7 +5049,16 @@ fn action_graph_delta(spec: &str, spec_node_id: &str) -> GraphDelta {
                 ("name".to_string(), json!(template.commit_plan)),
                 ("category".to_string(), json!(template.name)),
                 ("state".to_string(), json!("Planned")),
-                ("allowedFiles".to_string(), json!(template.allowed_paths)),
+                ("allowedFiles".to_string(), json!(allowed_files)),
+                ("allowedSymbols".to_string(), json!(scoped_symbols)),
+                (
+                    "codeObjectDeclarations".to_string(),
+                    json!(scoped_declarations),
+                ),
+                (
+                    "scopeExpansionRequires".to_string(),
+                    json!(["Spec.Intent.Update", "ActionGraph.Replan"]),
+                ),
                 (
                     "requiredValidation".to_string(),
                     json!(template.required_validation),
@@ -5024,6 +5079,55 @@ fn action_graph_delta(spec: &str, spec_node_id: &str) -> GraphDelta {
         create_nodes,
         create_edges,
         ..GraphDelta::default()
+    }
+}
+
+fn action_graph_code_scopes(
+    graph: &Graph,
+    spec_node_id: &str,
+) -> BTreeMap<String, ActionGraphCodeScope> {
+    let mut scopes: BTreeMap<String, ActionGraphCodeScope> = BTreeMap::new();
+    for declaration in graph
+        .edges
+        .values()
+        .filter(|edge| edge.from == spec_node_id && edge.edge_type == "DECLARES_CODE_OBJECT")
+        .filter_map(|edge| graph.nodes.get(&edge.to))
+        .filter(|node| node.node_type == "CodeObjectDeclaration")
+    {
+        let group = action_group_for_code_object(declaration);
+        let scope = scopes
+            .entry(group.to_string())
+            .or_insert_with(|| ActionGraphCodeScope {
+                declaration_ids: Vec::new(),
+                files: Vec::new(),
+                symbols: Vec::new(),
+            });
+        push_unique(&mut scope.declaration_ids, declaration.id.clone());
+        if let Some(file) = node_attr(declaration, "expectedFile") {
+            push_unique(&mut scope.files, file.to_string());
+        }
+        if let Some(name) = node_attr(declaration, "name") {
+            push_unique(&mut scope.symbols, name.to_string());
+        }
+    }
+    scopes
+}
+
+fn action_group_for_code_object(declaration: &Node) -> &'static str {
+    let kind = node_attr(declaration, "kind").unwrap_or_default();
+    let layer = node_attr(declaration, "layer").unwrap_or_default();
+    match (kind, layer) {
+        ("testCase", _) => "tests",
+        ("routeHandler" | "dto" | "requestType" | "responseType", _) => "interface",
+        (_, "interface") => "interface",
+        _ => "implementation",
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+        values.sort();
     }
 }
 
@@ -6222,7 +6326,7 @@ acceptanceCriteria:
                 graph_branch: "main".to_string(),
                 input: json!({"spec": "AUTH-001"}),
                 dry_run: false,
-                delta: action_graph_delta("AUTH-001", &spec_node.id),
+                delta: action_graph_delta(&replay.graph, "AUTH-001", &spec_node.id),
             },
         )
         .unwrap_err();
@@ -8275,6 +8379,178 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn generate_action_graph_scopes_commit_plan_to_code_object_declarations() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "class",
+                    "PasswordResetController",
+                    "interface",
+                    Some("src/identity/routes/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "testCase",
+                    "requestPasswordResetTest",
+                    "test",
+                    Some("src/identity/password-reset_test.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        bind_spec_branch(
+            tmp.path(),
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "spec/auth-001-password-reset".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        generate_action_graph(
+            tmp.path(),
+            GenerateActionGraphOptions {
+                spec: "AUTH-001".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let implementation_plan = replay
+            .graph
+            .nodes
+            .values()
+            .find(|node| {
+                node.node_type == "CommitPlan"
+                    && node_attr(node, "category") == Some("implementation")
+            })
+            .unwrap();
+        assert_eq!(
+            string_array_node_attr(implementation_plan, "allowedFiles"),
+            vec!["src/identity/password-reset.rs".to_string()]
+        );
+        assert_eq!(
+            string_array_node_attr(implementation_plan, "allowedSymbols"),
+            vec!["requestPasswordReset".to_string()]
+        );
+        assert_eq!(
+            string_array_node_attr(implementation_plan, "scopeExpansionRequires"),
+            vec![
+                "Spec.Intent.Update".to_string(),
+                "ActionGraph.Replan".to_string()
+            ]
+        );
+
+        let interface_plan = replay
+            .graph
+            .nodes
+            .values()
+            .find(|node| {
+                node.node_type == "CommitPlan" && node_attr(node, "category") == Some("interface")
+            })
+            .unwrap();
+        assert_eq!(
+            string_array_node_attr(interface_plan, "allowedFiles"),
+            vec!["src/identity/routes/password-reset.rs".to_string()]
+        );
+        assert_eq!(
+            string_array_node_attr(interface_plan, "allowedSymbols"),
+            vec!["PasswordResetController".to_string()]
+        );
+
+        let tests_plan = replay
+            .graph
+            .nodes
+            .values()
+            .find(|node| {
+                node.node_type == "CommitPlan" && node_attr(node, "category") == Some("tests")
+            })
+            .unwrap();
+        assert_eq!(
+            string_array_node_attr(tests_plan, "allowedFiles"),
+            vec!["src/identity/password-reset_test.rs".to_string()]
+        );
+        assert_eq!(
+            string_array_node_attr(tests_plan, "allowedSymbols"),
+            vec!["requestPasswordResetTest".to_string()]
+        );
+
+        let ok_commit = CommitValidationInput {
+            commit: "abc123".to_string(),
+            message: "feat: reset\n\nSpec: AUTH-001\nActionGroup: implementation\nCommitPlan: implementation\n".to_string(),
+            changed_files: vec!["src/identity/password-reset.rs".to_string()],
+            changed_symbols: vec!["requestPasswordReset".to_string()],
+        };
+        assert!(validate_commit_binding(&replay.graph, &ok_commit)
+            .iter()
+            .all(|finding| finding.severity != FindingSeverity::Error));
+
+        let wrong_symbol = CommitValidationInput {
+            changed_symbols: vec!["createDuplicateReset".to_string()],
+            ..ok_commit.clone()
+        };
+        assert!(validate_commit_binding(&replay.graph, &wrong_symbol)
+            .iter()
+            .any(|finding| finding.code == "commit_plan.undeclared_symbol"));
+
+        let wrong_file = CommitValidationInput {
+            changed_files: vec!["src/identity/duplicate.rs".to_string()],
+            ..ok_commit
+        };
+        assert!(validate_commit_binding(&replay.graph, &wrong_file)
+            .iter()
+            .any(|finding| finding.code == "commit_plan.out_of_scope_file"));
+    }
+
+    #[test]
     fn generate_action_graph_requires_existing_spec() {
         let tmp = tempdir().unwrap();
         init_project(
@@ -8606,6 +8882,17 @@ acceptanceCriteria:
         assert!(plan
             .required_operations
             .contains(&"CodeObject.LinkExisting".to_string()));
+    }
+
+    fn string_array_node_attr(node: &Node, key: &str) -> Vec<String> {
+        node.attributes
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(ToString::to_string)
+            .collect()
     }
 
     fn only_snapshot_path(root: &Path) -> PathBuf {

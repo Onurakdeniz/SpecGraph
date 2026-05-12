@@ -1001,6 +1001,8 @@ struct GitValidateMessageArgs {
     message_file: PathBuf,
     #[arg(long = "changed-file")]
     changed_files: Vec<String>,
+    #[arg(long = "changed-symbol")]
+    changed_symbols: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1019,6 +1021,8 @@ struct GitRecordCommitArgs {
     message_file: Option<PathBuf>,
     #[arg(long = "changed-file")]
     changed_files: Vec<String>,
+    #[arg(long = "changed-symbol")]
+    changed_symbols: Vec<String>,
     #[arg(long, default_value = "local:user")]
     actor: String,
     #[arg(long, default_value = "main")]
@@ -2718,6 +2722,7 @@ fn handle_git(store: &SpecGraphStore, root: &Path, args: GitArgs) -> anyhow::Res
                 commit: "WORKTREE".to_string(),
                 message,
                 changed_files,
+                changed_symbols: args.changed_symbols,
             };
             let findings = validate_commit_binding(&replay.graph, &input);
             print_findings(&findings);
@@ -2742,6 +2747,7 @@ fn handle_git(store: &SpecGraphStore, root: &Path, args: GitArgs) -> anyhow::Res
                     commit: args.commit,
                     message,
                     changed_files,
+                    changed_symbols: args.changed_symbols,
                 },
                 actor: args.actor,
                 graph_branch: args.graph_branch,
@@ -3581,6 +3587,7 @@ fn collect_git_range_findings(
             commit,
             message,
             changed_files,
+            changed_symbols: Vec::new(),
         };
         findings.extend(validate_commit_binding(graph, &input));
     }
@@ -4154,6 +4161,7 @@ fn run_proof_scenario() -> anyhow::Result<()> {
         commit: "proof".to_string(),
         message: "feat: proof\n\nSpec: AUTH-001\nActionGroup: implementation\nCommitPlan: implementation\n".to_string(),
         changed_files: vec!["crates/proof/src/lib.rs".to_string()],
+        changed_symbols: Vec::new(),
     };
     let commit_findings = validate_commit_binding(&replay.graph, &commit_input);
     fail_on_errors(&commit_findings, "proof commit validation")?;
@@ -4582,6 +4590,7 @@ fn validate_git_range(
             commit,
             message,
             changed_files,
+            changed_symbols: Vec::new(),
         };
         all_findings.extend(validate_commit_binding(&replay.graph, &input));
     }

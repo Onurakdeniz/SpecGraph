@@ -20,6 +20,8 @@ pub struct CommitValidationInput {
     pub message: String,
     #[serde(default)]
     pub changed_files: Vec<String>,
+    #[serde(default)]
+    pub changed_symbols: Vec<String>,
 }
 
 pub fn parse_commit_trailers(message: &str) -> CommitTrailers {
@@ -235,6 +237,15 @@ pub fn validate_commit_plan_requirements(
         ));
     }
 
+    if let Some(allowed_symbols) = string_array_attr(commit_plan, "allowedSymbols") {
+        findings.extend(validate_symbols_against_commit_plan(
+            &allowed_symbols,
+            &input.changed_symbols,
+            input,
+            commit_plan,
+        ));
+    }
+
     for required in string_array_attr(commit_plan, "requiredValidation").unwrap_or_default() {
         let satisfied = graph.nodes.values().any(|node| {
             node.node_type == "ValidationRun"
@@ -282,6 +293,31 @@ pub fn validate_commit_plan_requirements(
     }
 
     findings
+}
+
+fn validate_symbols_against_commit_plan(
+    allowed_symbols: &[String],
+    changed_symbols: &[String],
+    input: &CommitValidationInput,
+    commit_plan: &sg_model::Node,
+) -> Vec<Finding> {
+    if changed_symbols.is_empty() || allowed_symbols.is_empty() {
+        return Vec::new();
+    }
+
+    changed_symbols
+        .iter()
+        .filter(|symbol| !allowed_symbols.iter().any(|allowed| allowed == *symbol))
+        .map(|symbol| {
+            finding(
+                "commit_plan.undeclared_symbol",
+                format!(
+                    "Commit `{}` changes symbol `{symbol}` outside CommitPlan `{}` allowedSymbols. Remediation: declare/link the code object, update spec intent, and replan the ActionGraph before committing scope expansion.",
+                    input.commit, commit_plan.id
+                ),
+            )
+        })
+        .collect()
 }
 
 fn string_array_attr(node: &sg_model::Node, attr: &str) -> Option<Vec<String>> {
@@ -409,6 +445,34 @@ mod tests {
     }
 
     #[test]
+    fn commit_plan_rejects_symbol_outside_allowed_declarations() {
+        let plan = sg_model::Node {
+            id: "node_commit_plan".to_string(),
+            stable_key: "commit-plan:AUTH-001/implementation".to_string(),
+            node_type: "CommitPlan".to_string(),
+            attributes: BTreeMap::from([(
+                "allowedSymbols".to_string(),
+                serde_json::json!(["requestPasswordReset"]),
+            )]),
+        };
+        let input = CommitValidationInput {
+            commit: "abc123".to_string(),
+            message: "feat: test".to_string(),
+            changed_files: vec!["src/identity/password-reset.rs".to_string()],
+            changed_symbols: vec!["createDuplicateReset".to_string()],
+        };
+        let findings = validate_commit_plan_requirements(
+            &Graph::default(),
+            &plan,
+            &input,
+            &CommitTrailers::default(),
+        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "commit_plan.undeclared_symbol"));
+    }
+
+    #[test]
     fn commit_plan_requires_graph_delta_trailer_when_expected() {
         let plan = sg_model::Node {
             id: "node_commit_plan".to_string(),
@@ -423,6 +487,7 @@ mod tests {
             commit: "abc123".to_string(),
             message: "feat: test".to_string(),
             changed_files: vec![],
+            changed_symbols: vec![],
         };
         let findings = validate_commit_plan_requirements(
             &Graph::default(),
