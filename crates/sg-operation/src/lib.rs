@@ -687,6 +687,90 @@ pub fn built_in_operations() -> Vec<OperationDefinition> {
         },
         OperationDefinition {
             schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Dependency.Add",
+            category: "governance",
+            description: "Declare a new package dependency with manifest, lockfile, license, advisory, and approval evidence.",
+            required_input_fields: &["dependency", "manifest", "lockfile"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "Dependency",
+                "DependencyVersion",
+                "PackageManifest",
+                "Lockfile",
+                "License",
+                "AdvisoryEvidence",
+                "DocumentationUpdate",
+            ],
+            allowed_create_edge_types: &[
+                "HAS_PACKAGE_MANIFEST",
+                "MANIFEST_HAS_DEPENDENCY",
+                "DEPENDENCY_HAS_VERSION",
+                "MANIFEST_HAS_LOCKFILE",
+                "DEPENDENCY_HAS_LICENSE",
+                "DEPENDENCY_HAS_ADVISORY",
+                "DEPENDENCY_HAS_APPROVAL",
+                "DEPENDENCY_DOCUMENTED_BY",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Dependency.Update",
+            category: "governance",
+            description: "Update a package dependency with manifest, lockfile, license, advisory, and approval evidence.",
+            required_input_fields: &["dependency", "manifest", "lockfile"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "Dependency",
+                "DependencyVersion",
+                "PackageManifest",
+                "Lockfile",
+                "License",
+                "AdvisoryEvidence",
+                "DocumentationUpdate",
+            ],
+            allowed_create_edge_types: &[
+                "HAS_PACKAGE_MANIFEST",
+                "MANIFEST_HAS_DEPENDENCY",
+                "DEPENDENCY_HAS_VERSION",
+                "MANIFEST_HAS_LOCKFILE",
+                "DEPENDENCY_HAS_LICENSE",
+                "DEPENDENCY_HAS_ADVISORY",
+                "DEPENDENCY_HAS_APPROVAL",
+                "DEPENDENCY_DOCUMENTED_BY",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
+            name: "Dependency.Remove",
+            category: "governance",
+            description: "Remove or deprecate a package dependency with manifest, lockfile, advisory, and approval evidence.",
+            required_input_fields: &["dependency", "manifest", "lockfile"],
+            preconditions: GENERIC_MUTATION_PRECONDITIONS,
+            allowed_create_node_types: &[
+                "Dependency",
+                "DependencyVersion",
+                "PackageManifest",
+                "Lockfile",
+                "License",
+                "AdvisoryEvidence",
+                "DocumentationUpdate",
+            ],
+            allowed_create_edge_types: &[
+                "HAS_PACKAGE_MANIFEST",
+                "MANIFEST_HAS_DEPENDENCY",
+                "DEPENDENCY_HAS_VERSION",
+                "MANIFEST_HAS_LOCKFILE",
+                "DEPENDENCY_HAS_LICENSE",
+                "DEPENDENCY_HAS_ADVISORY",
+                "DEPENDENCY_HAS_APPROVAL",
+                "DEPENDENCY_DOCUMENTED_BY",
+            ],
+            postconditions: GENERIC_MUTATION_POSTCONDITIONS,
+        },
+        OperationDefinition {
+            schema_version: OPERATION_DEFINITION_SCHEMA_VERSION,
             name: "Config.Declare",
             category: "governance",
             description: "Declare runtime config variables, secret references, environment requirements, and required docs before code uses them.",
@@ -1299,6 +1383,22 @@ mod tests {
         assert!(built_in_operations()
             .iter()
             .all(|definition| definition.schema_version == OPERATION_DEFINITION_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn dependency_operations_require_manifest_lock_and_evidence_abi() {
+        for operation in ["Dependency.Add", "Dependency.Update", "Dependency.Remove"] {
+            let definition = find_operation(operation).unwrap();
+            assert_eq!(definition.category, "governance");
+            assert!(definition.allowed_create_node_types.contains(&"Dependency"));
+            assert!(definition
+                .allowed_create_node_types
+                .contains(&"PackageManifest"));
+            assert!(definition.allowed_create_node_types.contains(&"Lockfile"));
+            assert!(definition
+                .allowed_create_edge_types
+                .contains(&"DEPENDENCY_HAS_ADVISORY"));
+        }
     }
 
     #[test]

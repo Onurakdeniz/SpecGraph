@@ -6360,6 +6360,9 @@ fn validate_operation_semantic_preconditions(
             delta,
         ),
         "Refactor.Record" => validate_refactor_record_semantic_preconditions(graph, delta),
+        "Dependency.Add" | "Dependency.Update" | "Dependency.Remove" => {
+            validate_dependency_semantic_preconditions(graph, request, delta)
+        }
         "Config.Declare" => validate_config_declare_semantic_preconditions(graph, request, delta),
         "GitCommit.Record" => validate_git_commit_semantic_preconditions(graph, request, delta),
         "Validation.Record" => {
@@ -7891,6 +7894,220 @@ fn human_decision_approval_scope_matches(
         || decision_scopes
             .iter()
             .any(|decision_scope| decision_scope == scope)
+}
+
+fn validate_dependency_semantic_preconditions(
+    graph: &Graph,
+    request: &OperationRequest,
+    delta: &GraphDelta,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let dependencies = delta
+        .create_nodes
+        .iter()
+        .chain(delta.update_nodes.iter())
+        .filter(|node| node.node_type == "Dependency")
+        .collect::<Vec<_>>();
+    if dependencies.len() != 1 {
+        findings.push(semantic_finding(
+            "semantic.dependency.target_required",
+            format!(
+                "{} must create or update exactly one Dependency.",
+                request.operation
+            ),
+        ));
+        return findings;
+    }
+    let dependency = dependencies[0];
+    for field in ["name", "manager", "manifestPath", "requestedVersion"] {
+        if node_attr(dependency, field).is_none_or(str::is_empty) {
+            findings.push(semantic_finding(
+                "semantic.dependency.field_required",
+                format!("Dependency requires non-empty `{field}`."),
+            ));
+        }
+    }
+    if !dependency_has_manifest_link(graph, delta, dependency) {
+        findings.push(semantic_finding(
+            "semantic.dependency.manifest_required",
+            "Dependency operation requires PackageManifest evidence linked with MANIFEST_HAS_DEPENDENCY.",
+        ));
+    }
+    if !dependency_has_lockfile_evidence(graph, delta, dependency) {
+        findings.push(semantic_finding(
+            "semantic.dependency.lockfile_required",
+            "Dependency operation requires Lockfile evidence linked from the package manifest.",
+        ));
+    } else if !dependency_lockfile_matches(graph, delta, dependency) {
+        findings.push(semantic_finding(
+            "semantic.dependency.lockfile_mismatch",
+            "Dependency lockfile evidence must match the dependency `lockfilePath`.",
+        ));
+    }
+    if !dependency_has_license_evidence(graph, delta, dependency) {
+        findings.push(semantic_finding(
+            "semantic.dependency.license_required",
+            "Dependency operation requires License evidence.",
+        ));
+    }
+    if !dependency_has_advisory_evidence(graph, delta, dependency) {
+        findings.push(semantic_finding(
+            "semantic.dependency.advisory_required",
+            "Dependency operation requires reviewed AdvisoryEvidence vulnerability evidence.",
+        ));
+    }
+    if dependency_requires_approval(dependency)
+        && !dependency_has_approval(graph, delta, dependency, request)
+    {
+        findings.push(semantic_finding(
+            "semantic.dependency.approval_required",
+            "Risky, native, postinstall, unknown, or production dependency changes require approval evidence.",
+        ));
+    }
+    findings
+}
+
+fn dependency_has_manifest_link(graph: &Graph, delta: &GraphDelta, dependency: &Node) -> bool {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .any(|edge| {
+            edge.edge_type == "MANIFEST_HAS_DEPENDENCY"
+                && edge.to == dependency.id
+                && node_exists_with_type(graph, delta, &edge.from, "PackageManifest")
+        })
+}
+
+fn dependency_manifest_ids<'a>(
+    graph: &'a Graph,
+    delta: &'a GraphDelta,
+    dependency: &Node,
+) -> Vec<&'a str> {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .filter(|edge| edge.edge_type == "MANIFEST_HAS_DEPENDENCY" && edge.to == dependency.id)
+        .map(|edge| edge.from.as_str())
+        .collect()
+}
+
+fn dependency_has_lockfile_evidence(graph: &Graph, delta: &GraphDelta, dependency: &Node) -> bool {
+    let manifests = dependency_manifest_ids(graph, delta, dependency);
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .any(|edge| {
+            edge.edge_type == "MANIFEST_HAS_LOCKFILE"
+                && manifests.iter().any(|manifest| *manifest == edge.from)
+                && node_exists_with_type(graph, delta, &edge.to, "Lockfile")
+        })
+}
+
+fn dependency_lockfile_matches(graph: &Graph, delta: &GraphDelta, dependency: &Node) -> bool {
+    let Some(expected) = node_attr(dependency, "lockfilePath") else {
+        return true;
+    };
+    let manifests = dependency_manifest_ids(graph, delta, dependency);
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .filter(|edge| {
+            edge.edge_type == "MANIFEST_HAS_LOCKFILE"
+                && manifests.iter().any(|manifest| *manifest == edge.from)
+        })
+        .any(|edge| {
+            graph
+                .nodes
+                .get(&edge.to)
+                .into_iter()
+                .chain(
+                    delta
+                        .create_nodes
+                        .iter()
+                        .chain(delta.update_nodes.iter())
+                        .filter(|node| node.id == edge.to),
+                )
+                .any(|node| {
+                    node.node_type == "Lockfile" && node_attr(node, "path") == Some(expected)
+                })
+        })
+}
+
+fn dependency_has_license_evidence(graph: &Graph, delta: &GraphDelta, dependency: &Node) -> bool {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .any(|edge| {
+            edge.edge_type == "DEPENDENCY_HAS_LICENSE"
+                && edge.from == dependency.id
+                && node_exists_with_type(graph, delta, &edge.to, "License")
+        })
+}
+
+fn dependency_has_advisory_evidence(graph: &Graph, delta: &GraphDelta, dependency: &Node) -> bool {
+    delta
+        .create_edges
+        .iter()
+        .chain(graph.edges.values())
+        .any(|edge| {
+            if edge.edge_type != "DEPENDENCY_HAS_ADVISORY" || edge.from != dependency.id {
+                return false;
+            }
+            graph
+                .nodes
+                .get(&edge.to)
+                .into_iter()
+                .chain(
+                    delta
+                        .create_nodes
+                        .iter()
+                        .chain(delta.update_nodes.iter())
+                        .filter(|node| node.id == edge.to),
+                )
+                .any(|node| {
+                    node.node_type == "AdvisoryEvidence"
+                        && matches!(
+                            node_attr(node, "status"),
+                            Some("Reviewed" | "Passed" | "NoKnownVulnerability")
+                        )
+                        && !matches!(node_attr(node, "severity"), Some("Critical" | "High"))
+                })
+        })
+}
+
+fn dependency_requires_approval(dependency: &Node) -> bool {
+    node_bool_attr(dependency, "risky")
+        || matches!(
+            node_attr(dependency, "risk"),
+            Some("risky" | "unknown" | "production" | "native" | "postinstall")
+        )
+        || node_bool_attr(dependency, "production")
+        || node_bool_attr(dependency, "native")
+        || node_bool_attr(dependency, "postinstall")
+}
+
+fn dependency_has_approval(
+    graph: &Graph,
+    delta: &GraphDelta,
+    dependency: &Node,
+    request: &OperationRequest,
+) -> bool {
+    request
+        .input
+        .get("approvalId")
+        .and_then(Value::as_str)
+        .and_then(|approval_id| approval_node_for_id(graph, approval_id))
+        .is_some()
+        || delta.create_edges.iter().any(|edge| {
+            edge.from == dependency.id
+                && edge.edge_type == "DEPENDENCY_HAS_APPROVAL"
+                && node_exists_with_type(graph, delta, &edge.to, "Approval")
+        })
 }
 
 fn validate_config_declare_semantic_preconditions(
@@ -14544,6 +14761,100 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn dependency_add_requires_manifest_lock_license_and_advisory_evidence() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let rejected = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Dependency.Add".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"dependency": "zod", "manifest": "package.json", "lockfile": "pnpm-lock.yaml"}),
+                dry_run: true,
+                delta: dependency_delta("zod", false, false, false, false, false),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            rejected,
+            StoreError::SemanticValidationFailed { operation, .. }
+                if operation == "Dependency.Add"
+        ));
+
+        let accepted = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Dependency.Add".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"dependency": "zod", "manifest": "package.json", "lockfile": "pnpm-lock.yaml"}),
+                dry_run: true,
+                delta: dependency_delta("zod", true, true, true, true, false),
+            },
+        )
+        .unwrap();
+        assert!(accepted.dry_run);
+    }
+
+    #[test]
+    fn dependency_add_blocks_lockfile_mismatch_and_requires_approval_for_risky_packages() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        let mismatch = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Dependency.Add".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"dependency": "native-risk", "manifest": "package.json", "lockfile": "pnpm-lock.yaml"}),
+                dry_run: true,
+                delta: dependency_delta("native-risk", true, true, true, true, true),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            mismatch,
+            StoreError::SemanticValidationFailed { operation, .. }
+                if operation == "Dependency.Add"
+        ));
+
+        add_policy_approver(tmp.path(), "local:lead");
+        record_approval(
+            tmp.path(),
+            RecordApprovalOptions {
+                approval_id: "dependency-risk-approval".to_string(),
+                approval: "allow-risky-dependency".to_string(),
+                policy: None,
+                scope: Some("dependency:npm/native-risk".to_string()),
+                reason: Some("Native package reviewed".to_string()),
+                approved_by: "local:lead".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let accepted = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Dependency.Add".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "dependency": "native-risk",
+                    "manifest": "package.json",
+                    "lockfile": "pnpm-lock.yaml",
+                    "approvalId": "dependency-risk-approval",
+                }),
+                dry_run: true,
+                delta: dependency_delta_with_approval("native-risk"),
+            },
+        )
+        .unwrap();
+        assert!(accepted.dry_run);
+    }
+
+    #[test]
     fn config_declare_requires_docs_and_secret_approval() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -16466,6 +16777,128 @@ acceptanceCriteria:
             create_edges: vec![edge(&file_id, "DEFINES_SYMBOL", &symbol_id)],
             ..GraphDelta::default()
         }
+    }
+
+    fn dependency_delta(
+        name: &str,
+        include_lockfile: bool,
+        include_license: bool,
+        include_advisory: bool,
+        include_docs: bool,
+        mismatch_lockfile: bool,
+    ) -> GraphDelta {
+        let dependency_id = node_id("dependency", &format!("npm/{name}"));
+        let version_id = node_id("dependency_version", &format!("npm/{name}/1.0.0"));
+        let manifest_id = node_id("package_manifest", "package.json");
+        let lockfile_id = node_id("lockfile", "pnpm-lock.yaml");
+        let license_id = node_id("license", &format!("npm/{name}/MIT"));
+        let advisory_id = node_id("advisory_evidence", &format!("npm/{name}/audit"));
+        let doc_id = node_id("documentation_update", &format!("dependency/{name}"));
+        let risk = if name.contains("risk") {
+            "native"
+        } else {
+            "reviewed"
+        };
+        let mut create_nodes = vec![
+            Node {
+                id: manifest_id.clone(),
+                stable_key: "package-manifest:package.json".to_string(),
+                node_type: "PackageManifest".to_string(),
+                attributes: BTreeMap::from([
+                    ("path".to_string(), json!("package.json")),
+                    ("manager".to_string(), json!("npm")),
+                ]),
+            },
+            Node {
+                id: dependency_id.clone(),
+                stable_key: format!("dependency:npm/{name}"),
+                node_type: "Dependency".to_string(),
+                attributes: BTreeMap::from([
+                    ("name".to_string(), json!(name)),
+                    ("manager".to_string(), json!("npm")),
+                    ("manifestPath".to_string(), json!("package.json")),
+                    ("lockfilePath".to_string(), json!("pnpm-lock.yaml")),
+                    ("requestedVersion".to_string(), json!("^1.0.0")),
+                    ("risk".to_string(), json!(risk)),
+                ]),
+            },
+            Node {
+                id: version_id.clone(),
+                stable_key: format!("dependency-version:npm/{name}/1.0.0"),
+                node_type: "DependencyVersion".to_string(),
+                attributes: BTreeMap::from([("version".to_string(), json!("1.0.0"))]),
+            },
+        ];
+        let mut create_edges = vec![
+            edge("node_project", "HAS_PACKAGE_MANIFEST", &manifest_id),
+            edge(&manifest_id, "MANIFEST_HAS_DEPENDENCY", &dependency_id),
+            edge(&dependency_id, "DEPENDENCY_HAS_VERSION", &version_id),
+        ];
+        if include_lockfile {
+            create_nodes.push(Node {
+                id: lockfile_id.clone(),
+                stable_key: "lockfile:pnpm-lock.yaml".to_string(),
+                node_type: "Lockfile".to_string(),
+                attributes: BTreeMap::from([(
+                    "path".to_string(),
+                    json!(if mismatch_lockfile {
+                        "package-lock.json"
+                    } else {
+                        "pnpm-lock.yaml"
+                    }),
+                )]),
+            });
+            create_edges.push(edge(&manifest_id, "MANIFEST_HAS_LOCKFILE", &lockfile_id));
+        }
+        if include_license {
+            create_nodes.push(Node {
+                id: license_id.clone(),
+                stable_key: format!("license:npm/{name}/MIT"),
+                node_type: "License".to_string(),
+                attributes: BTreeMap::from([("spdx".to_string(), json!("MIT"))]),
+            });
+            create_edges.push(edge(&dependency_id, "DEPENDENCY_HAS_LICENSE", &license_id));
+        }
+        if include_advisory {
+            create_nodes.push(Node {
+                id: advisory_id.clone(),
+                stable_key: format!("advisory-evidence:npm/{name}/audit"),
+                node_type: "AdvisoryEvidence".to_string(),
+                attributes: BTreeMap::from([
+                    ("status".to_string(), json!("Reviewed")),
+                    ("severity".to_string(), json!("None")),
+                ]),
+            });
+            create_edges.push(edge(
+                &dependency_id,
+                "DEPENDENCY_HAS_ADVISORY",
+                &advisory_id,
+            ));
+        }
+        if include_docs {
+            create_nodes.push(Node {
+                id: doc_id.clone(),
+                stable_key: format!("documentation-update:AUTH-001/dependency/{name}"),
+                node_type: "DocumentationUpdate".to_string(),
+                attributes: BTreeMap::from([("status".to_string(), json!("Required"))]),
+            });
+            create_edges.push(edge(&dependency_id, "DEPENDENCY_DOCUMENTED_BY", &doc_id));
+        }
+        GraphDelta {
+            create_nodes,
+            create_edges,
+            ..GraphDelta::default()
+        }
+    }
+
+    fn dependency_delta_with_approval(name: &str) -> GraphDelta {
+        let mut delta = dependency_delta(name, true, true, true, true, false);
+        delta.create_edges.push(edge(
+            &node_id("dependency", &format!("npm/{name}")),
+            "DEPENDENCY_HAS_APPROVAL",
+            &node_id("approval", "dependency-risk-approval"),
+        ));
+        delta
     }
 
     fn config_usage_delta(file: &str, name: &str, kind: &str) -> GraphDelta {
