@@ -7,7 +7,18 @@
       "area": "full-loop",
       "happyPath": "docs/happy-path.md",
       "failurePath": "docs/failure-path.md",
-      "commands": ["sg init", "sg project profile upsert", "sg project validate", "sg module import", "sg module validate", "sg spec import", "sg action generate", "sg code index", "sg trace validate", "sg ci validate"]
+      "commands": [
+        "sg init",
+        "sg project profile upsert",
+        "sg project validate",
+        "sg module import",
+        "sg module validate",
+        "sg spec import",
+        "sg action generate",
+        "sg code index",
+        "sg trace validate",
+        "sg ci validate"
+      ]
     },
     {
       "id": "architecture-pack-boundary",
@@ -15,7 +26,11 @@
       "area": "architecture-packs",
       "happyPath": "happy-path.md",
       "failurePath": "failure-path.md",
-      "commands": ["sg ontology validate-pack", "sg ontology install-pack", "sg ci validate"]
+      "commands": [
+        "sg ontology validate-pack",
+        "sg ontology install-pack",
+        "sg ci validate"
+      ]
     },
     {
       "id": "existing-repo-adoption",
@@ -23,7 +38,10 @@
       "area": "adoption",
       "happyPath": "happy-path.md",
       "failurePath": "failure-path.md",
-      "commands": ["sg adopt scan --mode observe", "sg adopt scan --mode strict"]
+      "commands": [
+        "sg adopt scan --mode observe",
+        "sg adopt scan --mode strict"
+      ]
     },
     {
       "id": "issue-fix-regression",
@@ -31,7 +49,11 @@
       "area": "issuegraph",
       "happyPath": "happy-path.md",
       "failurePath": "failure-path.md",
-      "commands": ["sg spec create", "sg test record-run", "sg ci validate"]
+      "commands": [
+        "sg spec create",
+        "sg test record-run",
+        "sg ci validate"
+      ]
     },
     {
       "id": "data-migration",
@@ -39,7 +61,10 @@
       "area": "datagraph-migration",
       "happyPath": "happy-path.md",
       "failurePath": "failure-path.md",
-      "commands": ["sg spec create", "sg ci validate"]
+      "commands": [
+        "sg spec create",
+        "sg ci validate"
+      ]
     },
     {
       "id": "llm-proposal",
@@ -47,7 +72,26 @@
       "area": "proposal-runtime",
       "happyPath": "happy-path.md",
       "failurePath": "failure-path.md",
-      "commands": ["sg proposal validate", "sg proposal sandbox", "sg proposal accept"]
+      "commands": [
+        "sg proposal validate",
+        "sg proposal sandbox",
+        "sg proposal accept"
+      ]
+    },
+    {
+      "id": "coding-agent-governed-edit",
+      "path": "examples/coding-agent-governed-edit",
+      "area": "graph-governed-coding",
+      "happyPath": "happy-path.md",
+      "failurePath": "failure-path.md",
+      "commands": [
+        "sg workflow plan",
+        "sg workflow code-plan",
+        "sg code declare-object",
+        "sg action generate",
+        "sg code index --strict",
+        "sg git validate-message"
+      ]
     }
   ]
 }

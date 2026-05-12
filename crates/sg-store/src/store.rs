@@ -2982,12 +2982,14 @@ pub fn record_git_commit(root: &Path, options: RecordCommitOptions) -> Result<Op
 
     for file in &options.input.changed_files {
         let file_id = node_id("code_file", file);
-        create_nodes.push(Node {
-            id: file_id.clone(),
-            stable_key: format!("code-file:{file}"),
-            node_type: "CodeFile".to_string(),
-            attributes: BTreeMap::from([("path".to_string(), json!(file))]),
-        });
+        if !replay.graph.nodes.contains_key(&file_id) {
+            create_nodes.push(Node {
+                id: file_id.clone(),
+                stable_key: format!("code-file:{file}"),
+                node_type: "CodeFile".to_string(),
+                attributes: BTreeMap::from([("path".to_string(), json!(file))]),
+            });
+        }
         create_edges.push(edge(&commit_id, "CHANGES_FILE", &file_id));
     }
 
@@ -9236,6 +9238,343 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn coding_agent_governed_edit_happy_path_declares_indexes_reconciles_and_commits() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        bind_spec_branch(
+            tmp.path(),
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "spec/auth-001-password-reset".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let before_declare = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(before_declare.decision, "declare-code-object");
+
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+
+        let permit = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: Some("src/identity/password-reset.rs".to_string()),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(permit.allowed);
+        assert_eq!(permit.allowed_files, vec!["src/identity/password-reset.rs"]);
+        assert_eq!(permit.allowed_symbols, vec!["requestPasswordReset"]);
+
+        generate_action_graph(
+            tmp.path(),
+            GenerateActionGraphOptions {
+                spec: "AUTH-001".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+
+        let index_delta = code_symbol_delta(
+            "src/identity/password-reset.rs",
+            "function",
+            "requestPasswordReset",
+        );
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Code.Index".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"changedFiles": ["src/identity/password-reset.rs"], "strict": true}),
+                dry_run: false,
+                delta: index_delta.clone(),
+            },
+        )
+        .unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        assert!(code_index_strict_findings(&replay.graph, &index_delta).is_empty());
+        let reconcile_delta = code_index_reconciliation_delta(&replay.graph, &index_delta);
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Reconcile".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObjects": 1}),
+                dry_run: false,
+                delta: reconcile_delta,
+            },
+        )
+        .unwrap();
+
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let commit = CommitValidationInput {
+            commit: "abc123".to_string(),
+            message: "feat: reset\n\nSpec: AUTH-001\nActionGroup: implementation\nCommitPlan: implementation\n".to_string(),
+            changed_files: vec!["src/identity/password-reset.rs".to_string()],
+            changed_symbols: vec!["requestPasswordReset".to_string()],
+        };
+        assert!(validate_commit_binding(&replay.graph, &commit)
+            .iter()
+            .all(|finding| finding.severity != FindingSeverity::Error));
+        let receipt = record_git_commit(
+            tmp.path(),
+            RecordCommitOptions {
+                input: commit,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt.operation, "GitCommit.Record");
+    }
+
+    #[test]
+    fn coding_agent_scenarios_block_ambiguous_duplicate_wrong_scope_and_invalid_type() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeGraph.Upsert".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeGraph": "symbol"}),
+                dry_run: false,
+                delta: code_file_symbol_delta(
+                    "src/identity/password-reset.rs",
+                    "function",
+                    "requestPasswordReset",
+                ),
+            },
+        )
+        .unwrap();
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeGraph.Upsert".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeGraph": "symbol"}),
+                dry_run: false,
+                delta: code_file_symbol_delta(
+                    "src/identity/password-reset-alt.rs",
+                    "function",
+                    "requestPasswordReset",
+                ),
+            },
+        )
+        .unwrap();
+
+        let ambiguous = plan_code_workflow(
+            tmp.path(),
+            WorkflowCodePlanOptions {
+                spec: "AUTH-001".to_string(),
+                action: "implementation".to_string(),
+                wants: vec!["function:requestPasswordReset".to_string()],
+                file: None,
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(ambiguous.decision, "ambiguous-existing-candidates");
+        assert!(ambiguous.needs_user_choice);
+
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    None,
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        bind_spec_branch(
+            tmp.path(),
+            BindBranchOptions {
+                spec: "AUTH-001".to_string(),
+                branch: "spec/auth-001-password-reset".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        generate_action_graph(
+            tmp.path(),
+            GenerateActionGraphOptions {
+                spec: "AUTH-001".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+            },
+        )
+        .unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let scope_expansion = CommitValidationInput {
+            commit: "abc123".to_string(),
+            message: "feat: reset\n\nSpec: AUTH-001\nActionGroup: implementation\nCommitPlan: implementation\n".to_string(),
+            changed_files: vec!["src/identity/password-reset.rs".to_string()],
+            changed_symbols: vec!["discoveredMissingType".to_string()],
+        };
+        let findings = validate_commit_binding(&replay.graph, &scope_expansion);
+        assert!(findings.iter().any(|finding| {
+            finding.code == "commit_plan.undeclared_symbol"
+                && finding.message.contains("replan the ActionGraph")
+        }));
+
+        let method_error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "method",
+                    "reset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            method_error,
+            StoreError::SemanticValidationFailed { .. } | StoreError::OperationValidationFailed(_)
+        ));
+
+        let dto_wrong_layer = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "dto",
+                    "PasswordResetRequest",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            dto_wrong_layer,
+            StoreError::SemanticValidationFailed { .. } | StoreError::OperationValidationFailed(_)
+        ));
+    }
+
+    #[test]
+    fn coding_agent_existing_baseline_reuse_preserves_relationship() {
+        let tmp = tempdir().unwrap();
+        add_valid_spec(tmp.path());
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Declare".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"codeObject": {"spec": "AUTH-001"}}),
+                dry_run: false,
+                delta: code_object_declaration_delta(
+                    "AUTH-001",
+                    "Identity",
+                    "function",
+                    "requestPasswordReset",
+                    "application",
+                    Some("src/identity/password-reset.rs"),
+                    None,
+                ),
+            },
+        )
+        .unwrap();
+        let mut index_delta = code_symbol_delta(
+            "src/identity/password-reset.rs",
+            "function",
+            "requestPasswordReset",
+        );
+        mark_code_index_delta_as_baseline(&mut index_delta, "REUSES_EXISTING_SYMBOL");
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Code.Index".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({"changedFiles": ["src/identity/password-reset.rs"], "acceptBaseline": true}),
+                dry_run: false,
+                delta: index_delta.clone(),
+            },
+        )
+        .unwrap();
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let reconcile_delta = code_index_reconciliation_delta(&replay.graph, &index_delta);
+        let relationship = reconcile_delta.create_edges[0]
+            .attributes
+            .get("relationship")
+            .and_then(Value::as_str);
+        assert_eq!(relationship, Some("REUSES_EXISTING_SYMBOL"));
+    }
+
+    #[test]
     fn workflow_code_plan_requires_declaration_before_edit() {
         let tmp = tempdir().unwrap();
         add_valid_spec(tmp.path());
@@ -9528,6 +9867,33 @@ acceptanceCriteria:
         GraphDelta {
             create_nodes,
             create_edges,
+            ..GraphDelta::default()
+        }
+    }
+
+    fn code_file_symbol_delta(file: &str, kind: &str, name: &str) -> GraphDelta {
+        let file_id = node_id("code_file", file);
+        let symbol_id = node_id("code_symbol", &format!("{file}/{kind}/{name}"));
+        GraphDelta {
+            create_nodes: vec![
+                Node {
+                    id: file_id.clone(),
+                    stable_key: format!("code-file:{file}"),
+                    node_type: "CodeFile".to_string(),
+                    attributes: BTreeMap::from([("path".to_string(), json!(file))]),
+                },
+                Node {
+                    id: symbol_id.clone(),
+                    stable_key: format!("code-symbol:{file}/{kind}/{name}"),
+                    node_type: "CodeSymbol".to_string(),
+                    attributes: BTreeMap::from([
+                        ("file".to_string(), json!(file)),
+                        ("kind".to_string(), json!(kind)),
+                        ("name".to_string(), json!(name)),
+                    ]),
+                },
+            ],
+            create_edges: vec![edge(&file_id, "DEFINES_SYMBOL", &symbol_id)],
             ..GraphDelta::default()
         }
     }

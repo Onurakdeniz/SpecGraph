@@ -21,6 +21,7 @@ Each scenario has:
 | Issue/fix/regression | `examples/issue-fix-regression` | Bug evidence, fix spec, regression test, closure. |
 | Data migration | `examples/data-migration` | DataGraph migration plan/evidence and missing rollback failure. |
 | LLM proposal | `examples/llm-proposal` | Typed proposal, sandbox validation, acceptance receipt, trust-boundary failure. |
+| Coding-agent governed edit | `examples/coding-agent-governed-edit` | Work-permit, declaration/link decisions, strict indexing, reconciliation, and scoped commit validation. |
 
 Examples are not trusted sources. They exercise public CLI/API/SDK/Studio
 surfaces and all trusted mutations still flow through Operation Runtime.

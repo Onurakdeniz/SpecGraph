@@ -88,7 +88,7 @@ Important consistency rules:
 
 ## Current Repo Baseline
 
-As of the latest `development` baseline after the Phase 0E index reconciliation and strict-mode blocker slice, the repository already contains several foundations that later phases should reuse instead of rebuilding:
+As of the latest `development` baseline after the Phase 0F scenario/docs slice, the repository already contains several foundations that later phases should reuse instead of rebuilding:
 
 - Operation Runtime receipts, dry-run behavior, ABI validation, policy gate, approval/waiver facts, and actor/identity foundations.
 - Project profile and module baseline enforcement before spec authoring.
@@ -98,6 +98,7 @@ As of the latest `development` baseline after the Phase 0E index reconciliation 
 - `Implementation.Authorize` dry-run ABI plus `sg workflow code-plan` permit decisions with duplicate/link guidance, ambiguity blockers, required operations, allowed files/symbols, and human remediation output.
 - ActionGraph/CommitPlan generation consumes accepted `CodeObjectDeclaration` facts for allowed files/symbols and records scope-expansion replan requirements; commit validation can reject out-of-plan changed symbols.
 - Code indexing can run strict governed-symbol checks, accept existing-baseline symbols explicitly, reconcile observed symbols back to declarations through `CodeObject.Reconcile`, and report declared-but-missing implemented objects.
+- Governed coding-agent scenario tests and catalog examples now document declaration, link/reuse, ambiguity, wrong placement, parent/type/layer blockers, baseline reuse, reconciliation, and scoped commit validation.
 - DataGraph and migration runtime foundations.
 - GitGraph facts for branches, commits, tags, merges, PR placeholders, and basic release records.
 - Graph diff/conflict reports, graph merge/rebase dry-run, and `sg graph integrate` acceptance path.
@@ -116,8 +117,9 @@ Current completed slices:
 - **Phase 0C — Work permit command** introduced `Implementation.Authorize`, `sg workflow code-plan`, permit/block decisions, duplicate/link guidance, ambiguity blockers, allowed files/symbols, and tests.
 - **Phase 0D — ActionGraph and CommitPlan integration** made generated action groups and commit plans consume code object declarations, allowed files, allowed symbols, and scope-expansion replan requirements. Commit validation now accepts changed-symbol evidence and rejects undeclared/out-of-plan symbols.
 - **Phase 0E — Index reconciliation and strict-mode blockers** added strict code-index findings for undeclared symbols, wrong placement, and private cross-module imports; explicit existing-baseline acceptance; `CodeObject.Reconcile`; and declared-but-missing validation for implemented declarations.
+- **Phase 0F — Scenario tests and documentation examples** added coding-agent governed edit tests plus a cataloged happy/failure example showing when to declare, link/reuse, accept baseline, reconcile, replan, or stop.
 
-Next focus: **Phase 0F — Scenario tests and documentation examples**. This should add the full happy/failure scenario suite and update examples so coding agents know when to declare, link, extend, replan, or stop.
+Next focus: **Phase 1 — Branch-aware runtime hardening**. Start from the latest `development`, audit the Phase 1 checklist against current branch/merge/runtime behavior, then implement the first missing branch-aware slice with tests and gates.
 
 ---
 
@@ -255,7 +257,7 @@ Next operation: CodeObject.LinkExisting or CodeGraph.Upsert to accept/link the e
 
 - [x] **Update CommitPlan enforcement to use declarations.** A commit that creates `requestPasswordReset` should be valid only if the symbol is declared/authorized for the current spec/action/commit plan and appears in an allowed file path.
 
-- [ ] **Add tests for normal coding-agent scenarios.** Cover creating a function in the correct module, detecting an existing function and linking instead of recreating, ambiguous existing function candidates, creating a method without parent type, creating a DTO in the wrong layer, importing a private symbol from another module, discovering a missing type and updating spec intent, replanning after scope change, existing-baseline reuse, and successful observed-to-declared reconciliation.
+- [x] **Add tests for normal coding-agent scenarios.** Cover creating a function in the correct module, detecting an existing function and linking instead of recreating, ambiguous existing function candidates, creating a method without parent type, creating a DTO in the wrong layer, importing a private symbol from another module, discovering a missing type and updating spec intent, replanning after scope change, existing-baseline reuse, and successful observed-to-declared reconciliation.
 
 ## Recommended Phase 0 Implementation Slices
 
@@ -266,7 +268,7 @@ Phase 0 is too large to implement safely as one unreviewable change. Keep the ph
 - [x] **Phase 0C — Work permit command.** Implement `Implementation.Authorize` and `sg workflow code-plan` with `existingCandidates`, `requiredOperations`, `allowedFiles`, `allowedSymbols`, and human-readable remediation output.
 - [x] **Phase 0D — ActionGraph and CommitPlan integration.** Make generated action groups and commit validation consume code object declarations, discovered existing objects, allowed files, allowed symbols, and scope-expansion/replan decisions.
 - [x] **Phase 0E — Index reconciliation and strict-mode blockers.** Reconcile observed symbols back to declarations or accepted baseline facts, and block undeclared/new symbols, declared-but-missing symbols, wrong placement, and private boundary violations in strict mode.
-- [ ] **Phase 0F — Scenario tests and documentation examples.** Add the full happy/failure scenario suite and update examples so coding agents know when to declare, link, extend, replan, or stop.
+- [x] **Phase 0F — Scenario tests and documentation examples.** Add the full happy/failure scenario suite and update examples so coding agents know when to declare, link, extend, replan, or stop.
 
 Phase 0 must not be checked off until every slice above passes its local tests and the full Phase 0 gate.
 

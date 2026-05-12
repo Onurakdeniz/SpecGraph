@@ -16,6 +16,7 @@ REQUIRED_IDS = {
     "issue-fix-regression",
     "data-migration",
     "llm-proposal",
+    "coding-agent-governed-edit",
 }
 
 
