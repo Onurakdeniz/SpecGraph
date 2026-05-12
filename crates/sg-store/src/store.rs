@@ -6114,13 +6114,17 @@ fn validate_code_object_lifecycle_semantic_preconditions(
                     "CodeObject.Delete must record deletionReason and impact.",
                 ));
             }
-            if code_object_has_delete_blocking_references(graph, &updated.id)
+            let delete_blockers = code_object_delete_blocking_references(graph, updated);
+            if !delete_blockers.is_empty()
                 && (node_attr(updated, "removalPlan").is_none_or(str::is_empty)
                     || node_attr(updated, "approvalId").is_none_or(str::is_empty))
             {
                 findings.push(semantic_finding(
                     "semantic.code_object.delete_reference_safety_required",
-                    "CodeObject.Delete is blocked for referenced objects unless removalPlan and approvalId are recorded.",
+                    format!(
+                        "CodeObject.Delete is blocked for referenced objects unless removalPlan and approvalId are recorded. Blocking references: {}.",
+                        delete_blockers.join(",")
+                    ),
                 ));
             }
         }
@@ -6185,23 +6189,44 @@ fn code_object_has_lifecycle_references(graph: &Graph, declaration_id: &str) -> 
     })
 }
 
-fn code_object_has_delete_blocking_references(graph: &Graph, declaration_id: &str) -> bool {
-    graph.edges.values().any(|edge| {
-        (edge.from == declaration_id
-            && matches!(
-                edge.edge_type.as_str(),
-                "CODE_OBJECT_REALIZED_BY"
-                    | "CODE_OBJECT_FOR_ENDPOINT"
-                    | "CODE_OBJECT_FOR_USE_CASE"
-                    | "CODE_OBJECT_IMPLEMENTS"
-                    | "CODE_OBJECT_EXPECTS_FILE"
-            ))
-            || (edge.to == declaration_id
-                && matches!(
-                    edge.edge_type.as_str(),
-                    "CODE_OBJECT_IMPLEMENTS" | "CODE_OBJECT_PARENT_OBJECT" | "IMPACTS"
-                ))
-    })
+fn code_object_delete_blocking_references(graph: &Graph, declaration: &Node) -> Vec<String> {
+    let mut blockers = graph
+        .edges
+        .values()
+        .filter_map(|edge| {
+            let label = if edge.from == declaration.id {
+                match edge.edge_type.as_str() {
+                    "CODE_OBJECT_REALIZED_BY" => Some("implementation"),
+                    "CODE_OBJECT_FOR_ENDPOINT" => Some("endpoint"),
+                    "CODE_OBJECT_FOR_USE_CASE" => Some("use-case"),
+                    "CODE_OBJECT_IMPLEMENTS" => Some("public-interface"),
+                    "CODE_OBJECT_EXPECTS_FILE" => Some("file"),
+                    "CODE_OBJECT_PARENT_SYMBOL" | "CODE_OBJECT_PARENT_OBJECT" => Some("parent"),
+                    "CODE_OBJECT_HAS_ALIAS" => Some("alias"),
+                    _ => None,
+                }
+            } else if edge.to == declaration.id {
+                match edge.edge_type.as_str() {
+                    "DECLARES_CODE_OBJECT" => Some("spec"),
+                    "CODE_OBJECT_IMPLEMENTS" | "CODE_OBJECT_PARENT_OBJECT" => Some("code-object"),
+                    "IMPACTS" => Some("impact-analysis"),
+                    "REFACTORS_CODE_OBJECT" => Some("refactor"),
+                    "ROOT_CAUSE_TARGETS_CODE_OBJECT" => Some("root-cause"),
+                    _ => None,
+                }
+            } else {
+                None
+            }?;
+            Some(label.to_string())
+        })
+        .collect::<Vec<_>>();
+
+    if node_attr(declaration, "spec").is_some_and(|spec| spec_has_release(graph, Some(spec))) {
+        blockers.push("release".to_string());
+    }
+    blockers.sort();
+    blockers.dedup();
+    blockers
 }
 
 fn validate_git_commit_semantic_preconditions(
@@ -11841,6 +11866,59 @@ acceptanceCriteria:
                 count: 1,
             } if operation == "CodeObject.Delete"
         ));
+    }
+
+    #[test]
+    fn code_object_delete_reports_broad_reference_blockers_and_allows_approved_removal_plan() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        add_release_for_spec(tmp.path(), "AUTH-001");
+        let replay = replay_events(tmp.path(), ReplayOptions { check_hashes: true }).unwrap();
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        let blockers = code_object_delete_blocking_references(&replay.graph, &declaration);
+        assert!(blockers.contains(&"spec".to_string()));
+        assert!(blockers.contains(&"file".to_string()));
+        assert!(blockers.contains(&"release".to_string()));
+
+        declaration
+            .attributes
+            .insert("status".to_string(), json!("Deleted"));
+        declaration.attributes.insert(
+            "deletionReason".to_string(),
+            json!("Superseded by release cleanup"),
+        );
+        declaration.attributes.insert(
+            "impact".to_string(),
+            json!("Removes released password reset implementation"),
+        );
+        declaration.attributes.insert(
+            "removalPlan".to_string(),
+            json!("Deprecate old behavior, update docs/tests, and preserve release notes"),
+        );
+        declaration
+            .attributes
+            .insert("approvalId".to_string(), json!("approval:DELETE-AUTH-001"));
+
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Delete".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "reason": "Superseded by release cleanup",
+                    "impact": "Removes released password reset implementation",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        assert!(receipt.dry_run);
     }
 
     #[test]

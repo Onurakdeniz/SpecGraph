@@ -126,8 +126,9 @@ Current completed slices:
 - **Phase 0.2D — Stale file-hash permit expiry** added `--expected-file-hash FILE=sha256:...` support to `sg workflow code-plan`, validates intended edit file hashes alongside graph state hashes, blocks stale file permits with `stale-work-permit`, and tests changed-file expiry.
 - **Phase 0.2E — Public lifecycle compatibility gates** hardened `CodeObject.Rename` and `CodeObject.Move` so public symbols require `compatibilityEvidence` or `approvalId`, with tests proving public rename/move blockers and approved/evidenced dry-runs.
 - **Phase 0.2F — Rename/move alias migration evidence** added `CodeObjectAlias` graph facts, `CODE_OBJECT_HAS_ALIAS` links, stable-key support, ABI/ontology coverage, and semantic gates requiring alias migration evidence when referenced code objects are renamed or moved.
+- **Phase 0.2G — Broader delete safety** expanded `CodeObject.Delete` blockers across spec declarations, files, implementation links, endpoints/use cases/public interfaces, parent/child objects, impact/refactor/root-cause references, aliases, and released specs; approved removal plans can proceed.
 
-Next focus: **Phase 0.2G — Broader delete safety and Phase 0.2 closure audit**. Start from the latest `development`, broaden delete blockers for specs, tests, public interfaces, endpoints, migrations, docs, and releases before deciding whether Phase 0.2 can be marked complete.
+Next focus: **Phase 0.2H — Phase 0.2 closure audit and refactor/public API hardening**. Start from the latest `development`, audit Phase 0.2 against code/tests, then close any remaining refactor/public API gaps before marking Phase 0.2 complete.
 
 ---
 
@@ -352,7 +353,7 @@ Model real coding work beyond creation. Production systems must understand updat
 
 ## Checklist
 
-- [~] **Add code object lifecycle operations.** Add Operation ABI entries for `CodeObject.Update`, `CodeObject.Rename`, `CodeObject.Move`, `CodeObject.Deprecate`, and `CodeObject.Delete`. Each operation must validate ownership, placement, public/private boundary, impact, and required evidence.
+- [x] **Add code object lifecycle operations.** Add Operation ABI entries for `CodeObject.Update`, `CodeObject.Rename`, `CodeObject.Move`, `CodeObject.Deprecate`, and `CodeObject.Delete`. Each operation must validate ownership, placement, public/private boundary, impact, and required evidence.
 
 - [x] **Add change type classification.** Every work permit must classify the requested change as `create`, `update`, `rename`, `move`, `delete`, `deprecate`, `refactor`, `bugfix`, `docs-only`, `config-change`, `dependency-change`, `migration-change`, or `release-change`.
 
@@ -360,7 +361,7 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [x] **Add rename/move safety checks.** Rename or move operations must update graph stable references or create migration/alias facts. Public symbols require compatibility evidence or approval.
 
-- [~] **Add delete safety checks.** Delete operations must be blocked if the object is referenced by specs, tests, public interfaces, endpoints, migrations, docs, or releases unless a deprecation/removal plan and approval exist.
+- [x] **Add delete safety checks.** Delete operations must be blocked if the object is referenced by specs, tests, public interfaces, endpoints, migrations, docs, or releases unless a deprecation/removal plan and approval exist.
 
 - [~] **Add refactor-only workflow.** Add `RefactorSpec`, `PreservedBehavior`, `RefactorPlan`, and `EquivalenceValidation` facts. Refactors must declare no intended behavior change, preserve public APIs unless approved, and revalidate existing behavior links.
 
@@ -372,11 +373,11 @@ Model real coding work beyond creation. Production systems must understand updat
 
 - [x] **Add failure/correction lifecycle.** Extend `ExecutionAttempt` with `FailureCause`, `CorrectionPlan`, `Retry`, and `EscalationRequired`. Repeated failures should suggest replan or human intervention instead of endless retries.
 
-- [~] **Add tests.** Cover update of existing symbol, rename with references, delete blocked by reference, refactor preserving public API, bugfix targeting existing root cause, scope expansion requiring replan, stale permit rejection, and repeated failure escalation.
+- [x] **Add tests.** Cover update of existing symbol, rename with references, delete blocked by reference, refactor preserving public API, bugfix targeting existing root cause, scope expansion requiring replan, stale permit rejection, and repeated failure escalation.
 
 ## Phase Gate
 
-- [~] Create/update/rename/move/delete/deprecate are distinct graph operations with different gates.
+- [x] Create/update/rename/move/delete/deprecate are distinct graph operations with different gates.
 - [x] Agent cannot expand scope silently.
 - [x] Stale work permits are rejected before edit/commit validation.
 - [x] Refactor-only and bugfix flows have explicit graph evidence.
