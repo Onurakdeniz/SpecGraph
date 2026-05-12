@@ -124,8 +124,9 @@ Current completed slices:
 - **Phase 0.2B — Impact, delete/refactor safety, and stale permit foundations** added update impact evidence, referenced-object delete blockers, refactor-only graph facts, work-permit state/hash metadata, and stale expected-state rejection tests.
 - **Phase 0.2C — Scope expansion, bugfix targeting, and failure/correction lifecycle** added action-scoped scope-expansion blockers requiring `Spec.Intent.Update` plus `Action.Replan`, bugfix permits gated on `RootCause -> CodeObjectDeclaration` evidence, `Action.Fail` failure/correction/escalation facts, and tests for replan blockers, root-cause targeting, and repeated-failure escalation.
 - **Phase 0.2D — Stale file-hash permit expiry** added `--expected-file-hash FILE=sha256:...` support to `sg workflow code-plan`, validates intended edit file hashes alongside graph state hashes, blocks stale file permits with `stale-work-permit`, and tests changed-file expiry.
+- **Phase 0.2E — Public lifecycle compatibility gates** hardened `CodeObject.Rename` and `CodeObject.Move` so public symbols require `compatibilityEvidence` or `approvalId`, with tests proving public rename/move blockers and approved/evidenced dry-runs.
 
-Next focus: **Phase 0.2E — Remaining lifecycle hardening before Phase 0.2 closure**. Start from the latest `development`, finish public/private boundary approvals, rename/move alias/reference migration, and broader delete safety coverage before marking Phase 0.2 complete.
+Next focus: **Phase 0.2F — Rename/move alias migration and broader delete safety**. Start from the latest `development`, finish stable alias/reference migration for rename/move and broaden delete blockers for specs, tests, public interfaces, endpoints, migrations, docs, and releases before marking Phase 0.2 complete.
 
 ---
 

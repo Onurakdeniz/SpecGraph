@@ -6036,6 +6036,14 @@ fn validate_code_object_lifecycle_semantic_preconditions(
                     "CodeObject.Rename must preserve the prior name in previousName.",
                 ));
             }
+            if lifecycle_touches_public_boundary(existing, updated)
+                && !lifecycle_has_compatibility_or_approval(updated)
+            {
+                findings.push(semantic_finding(
+                    "semantic.code_object.public_rename_safety_required",
+                    "CodeObject.Rename for public symbols requires compatibilityEvidence or approvalId.",
+                ));
+            }
         }
         "CodeObject.Move" => {
             let old_file = node_attr(existing, "expectedFile").unwrap_or("");
@@ -6050,6 +6058,14 @@ fn validate_code_object_lifecycle_semantic_preconditions(
                 findings.push(semantic_finding(
                     "semantic.code_object.move_previous_file_required",
                     "CodeObject.Move must preserve the prior file in previousFile.",
+                ));
+            }
+            if lifecycle_touches_public_boundary(existing, updated)
+                && !lifecycle_has_compatibility_or_approval(updated)
+            {
+                findings.push(semantic_finding(
+                    "semantic.code_object.public_move_safety_required",
+                    "CodeObject.Move for public symbols requires compatibilityEvidence or approvalId.",
                 ));
             }
         }
@@ -6107,6 +6123,16 @@ fn lifecycle_has_impact_analysis(delta: &GraphDelta, target_id: &str) -> bool {
             .create_edges
             .iter()
             .any(|edge| edge.edge_type == "IMPACTS" && edge.to == target_id)
+}
+
+fn lifecycle_touches_public_boundary(existing: &Node, updated: &Node) -> bool {
+    node_attr(existing, "visibility") == Some("public")
+        || node_attr(updated, "visibility") == Some("public")
+}
+
+fn lifecycle_has_compatibility_or_approval(updated: &Node) -> bool {
+    node_attr(updated, "compatibilityEvidence").is_some_and(|value| !value.trim().is_empty())
+        || node_attr(updated, "approvalId").is_some_and(|value| !value.trim().is_empty())
 }
 
 fn code_object_has_delete_blocking_references(graph: &Graph, declaration_id: &str) -> bool {
@@ -11395,6 +11421,75 @@ acceptanceCriteria:
     }
 
     #[test]
+    fn code_object_rename_public_symbol_requires_compatibility_or_approval() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration
+            .attributes
+            .insert("visibility".to_string(), json!("public"));
+        declaration
+            .attributes
+            .insert("name".to_string(), json!("requestPasswordResetV2"));
+        declaration
+            .attributes
+            .insert("previousName".to_string(), json!("requestPasswordReset"));
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Rename".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newName": "requestPasswordResetV2",
+                    "reason": "Rename public API",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration.clone()],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "CodeObject.Rename"
+        ));
+
+        declaration.attributes.insert(
+            "compatibilityEvidence".to_string(),
+            json!("Maintains old route alias and release notes"),
+        );
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Rename".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newName": "requestPasswordResetV2",
+                    "reason": "Rename public API",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        assert!(receipt.dry_run);
+    }
+
+    #[test]
     fn code_object_move_blocks_wrong_module_path() {
         let tmp = tempdir().unwrap();
         add_declared_password_reset_object(tmp.path());
@@ -11435,6 +11530,76 @@ acceptanceCriteria:
                 count: 1,
             } if operation == "CodeObject.Move"
         ));
+    }
+
+    #[test]
+    fn code_object_move_public_symbol_requires_compatibility_or_approval() {
+        let tmp = tempdir().unwrap();
+        add_declared_password_reset_object(tmp.path());
+        let mut declaration = current_password_reset_declaration(tmp.path());
+        declaration
+            .attributes
+            .insert("visibility".to_string(), json!("public"));
+        declaration.attributes.insert(
+            "previousFile".to_string(),
+            json!("src/identity/password-reset.rs"),
+        );
+        declaration.attributes.insert(
+            "expectedFile".to_string(),
+            json!("src/identity/password-reset-v2.rs"),
+        );
+
+        let error = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Move".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newFile": "src/identity/password-reset-v2.rs",
+                    "reason": "Move public API implementation",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration.clone()],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StoreError::SemanticValidationFailed {
+                operation,
+                count: 1,
+            } if operation == "CodeObject.Move"
+        ));
+
+        declaration
+            .attributes
+            .insert("approvalId".to_string(), json!("approval:PUBLIC-MOVE-001"));
+        let receipt = append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "CodeObject.Move".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "codeObject": "AUTH-001/Identity/function/requestPasswordReset",
+                    "newFile": "src/identity/password-reset-v2.rs",
+                    "reason": "Move public API implementation",
+                }),
+                dry_run: true,
+                delta: GraphDelta {
+                    update_nodes: vec![declaration],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+        assert!(receipt.dry_run);
     }
 
     #[test]
