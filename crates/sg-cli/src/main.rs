@@ -2659,8 +2659,13 @@ fn handle_adapter(args: AdapterArgs) -> anyhow::Result<()> {
                     .map(|signature| signature.algorithm.as_str())
                     .unwrap_or("none");
                 println!(
-                    "{} kind={} capabilities={} signature={}",
-                    adapter.id, adapter.kind, capabilities, signature
+                    "{} kind={} version={} trustLevel={:?} capabilities={} signature={}",
+                    adapter.id,
+                    adapter.kind,
+                    adapter.version,
+                    adapter.trust_level,
+                    capabilities,
+                    signature
                 );
             }
             let findings = validate_adapter_catalog(&catalog);

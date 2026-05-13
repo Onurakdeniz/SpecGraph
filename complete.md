@@ -155,8 +155,9 @@ Current completed slices:
 - **Phase 8B — Migration execution evidence and release gates** added `MigrationExecution` and `MigrationRollbackExecution` evidence facts, release-to-migration links, release validation blockers for missing migration execution/rollback evidence, and Phase 8 gate tests.
 - **Phase 9A — LLM provider proposal generation foundations** added a provider trait, YAML/env-backed provider registry with offline mock provider, proposal request schema, provider provenance and output validation, and `sg proposal generate/explain` commands that record only untrusted Proposal facts.
 - **Phase 9B — Proposal acceptance invariant closure** added regression coverage for missing payload warnings and the unchanged `Proposal.Accept` path requiring validated proposal state, passed validation run, exact diff hash, passed sandbox evidence, and acceptance evidence nodes.
+- **Phase 10A — Adapter runtime boundary foundations** added versioned/trust-leveled adapter descriptors, disabled-by-default adapter registry/config models for `.specgraph/adapters/config.yaml`, a capability broker, provenance envelopes with input/output hashes, and adapter-output validation that keeps facts observed and rejects direct trust promotion.
 
-Next focus: **Phase 10 — Adapter Runtime and Provenance Hardening**. Start from the latest `development` and continue the five-checklist-item branch policy with adapter registry/config, capability broker, provenance envelopes, and trust-promotion enforcement.
+Next focus: **Phase 10B — Adapter CLI and audit closure**. Start from the latest `development`, add `sg adapter enable/disable/show/run/audit`, complete audit-report tests, and keep the five-checklist-item branch policy.
 
 ---
 
@@ -842,15 +843,15 @@ Turn adapter descriptors into an enforceable runtime boundary with capability ch
 
 ## Checklist
 
-- [ ] **Add adapter registry.** Implement `AdapterRegistry` with descriptors, enabled/disabled state, capability policy, version, signature metadata, and trust level.
+- [x] **Add adapter registry.** Implement `AdapterRegistry` with descriptors, enabled/disabled state, capability policy, version, signature metadata, and trust level.
 
-- [ ] **Add adapter config.** Store enabled adapters and capability grants in `.specgraph/adapters/config.yaml`. Default to least privilege.
+- [x] **Add adapter config.** Store enabled adapters and capability grants in `.specgraph/adapters/config.yaml`. Default to least privilege.
 
-- [ ] **Add capability broker.** Before any adapter runs, verify it has required capabilities such as `ReadFilesystem`, `ReadGit`, `ReadDatabaseSchema`, `EmitObservations`, `EmitProviderChecks`, or `ProposeCodePatch`.
+- [x] **Add capability broker.** Before any adapter runs, verify it has required capabilities such as `ReadFilesystem`, `ReadGit`, `ReadDatabaseSchema`, `EmitObservations`, `EmitProviderChecks`, or `ProposeCodePatch`.
 
-- [ ] **Add provenance envelope.** Wrap every adapter output with adapter id, adapter version, capabilities used, input hash, output hash, source trust, trust state, timestamp, and optional signature.
+- [x] **Add provenance envelope.** Wrap every adapter output with adapter id, adapter version, capabilities used, input hash, output hash, source trust, trust state, timestamp, and optional signature.
 
-- [ ] **Enforce no direct trust promotion.** Update validators so adapter-created facts with `Trusted` state fail unless produced by an accepted operation that explicitly promotes them.
+- [x] **Enforce no direct trust promotion.** Update validators so adapter-created facts with `Trusted` state fail unless produced by an accepted operation that explicitly promotes them.
 
 - [ ] **Add CLI commands.** Add `sg adapter enable`, `sg adapter disable`, `sg adapter show`, `sg adapter run <id>`, and `sg adapter audit`.
 
@@ -858,9 +859,9 @@ Turn adapter descriptors into an enforceable runtime boundary with capability ch
 
 ## Phase Gate
 
-- [ ] Adapter lacking capability cannot emit output.
-- [ ] All adapter outputs include provenance.
-- [ ] Trust promotion only happens through Operation Runtime.
+- [x] Adapter lacking capability cannot emit output.
+- [x] All adapter outputs include provenance.
+- [x] Trust promotion only happens through Operation Runtime.
 
 ---
 
