@@ -237,6 +237,15 @@ Phase 11C completes the explicit golden fixture inventory for dry-run receipts:
 - `sg api mutate --format json` emits a `specgraph.cli/v1` envelope with the Operation Runtime receipt in `receipt`.
 - The golden CLI contract suite covers a dry-run `Identity.UpsertActor` request and verifies `dryRun: true`, no appended `eventIds`, and stable changed-node reporting.
 
+## Phase 11D Implemented JSON Guardrail
+
+Phase 11D guarantees automation receives parseable JSON instead of accidental human text:
+
+- The CLI now classifies command paths with completed JSON output handling before dispatch.
+- In JSON mode, command paths that are not yet converted fail before running and emit one `specgraph.cli/v1` error envelope with code `cli.json_unsupported`.
+- This keeps the global parseability contract stable while preserving existing human output for legacy commands.
+- A golden contract test covers the unsupported-command envelope.
+
 ## F.1 Implemented Project Baseline CLI
 
 The project-first closure adds the first trusted ProjectGraph command group:

@@ -65,6 +65,9 @@ fn golden(path: &str) -> serde_json::Value {
         "golden/policy_failure.json" => include_str!("golden/policy_failure.json"),
         "golden/provider_check.json" => include_str!("golden/provider_check.json"),
         "golden/release_validation.json" => include_str!("golden/release_validation.json"),
+        "golden/unsupported_json_error.json" => {
+            include_str!("golden/unsupported_json_error.json")
+        }
         _ => panic!("unknown golden fixture {path}"),
     };
     serde_json::from_str(contents).unwrap()
@@ -138,6 +141,49 @@ fn json_errors_match_golden_and_include_findings() {
         normalize_envelope(parse_stdout(&output)),
         golden("golden/json_error_findings.json")
     );
+}
+
+#[test]
+fn unsupported_json_commands_fail_with_parseable_envelope() {
+    let output = Command::new(sg())
+        .args(["--format", "json", "proof", "run"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/unsupported_json_error.json")
+    );
+}
+
+#[test]
+fn partially_converted_json_subcommands_are_guarded() {
+    let root = temp_root("partial-json-guard");
+    let output_path = root.join("cli.txt");
+    let output = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "--format",
+            "json",
+            "docs",
+            "cli-reference",
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let envelope = parse_stdout(&output);
+    assert_eq!(envelope["schemaVersion"], "specgraph.cli/v1");
+    assert_eq!(envelope["status"], "error");
+    assert_eq!(
+        envelope["data"]["error"]["code"],
+        serde_json::json!("cli.json_unsupported")
+    );
+    assert!(!output_path.exists());
 }
 
 #[test]

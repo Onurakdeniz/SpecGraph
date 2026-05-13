@@ -287,6 +287,62 @@ impl Commands {
             Commands::Graph(_) => "graph",
         }
     }
+
+    fn supports_json_output(&self) -> bool {
+        match self {
+            Commands::Project(_) | Commands::Module(_) | Commands::Operation(_) => true,
+            Commands::Policy(args) => matches!(
+                &args.command,
+                PolicyCommand::Check(_) | PolicyCommand::NonWaivable
+            ),
+            Commands::Workflow(args) => matches!(
+                &args.command,
+                WorkflowCommand::Plan(_)
+                    | WorkflowCommand::CodePlan(_)
+                    | WorkflowCommand::Reservations(_)
+            ),
+            Commands::Adapter(_) => true,
+            Commands::Api(args) => matches!(&args.command, ApiCommand::Mutate(_)),
+            Commands::Pr(args) => matches!(&args.command, PrCommand::Validate(_)),
+            Commands::Action(args) => matches!(
+                &args.command,
+                ActionCommand::Status(_) | ActionCommand::Blockers(_)
+            ),
+            Commands::Code(args) => matches!(&args.command, CodeCommand::ResolveObject(_)),
+            Commands::Data(_) => true,
+            Commands::Ci(_) => true,
+            Commands::Docs(args) => matches!(
+                &args.command,
+                DocsCommand::Check | DocsCommand::CliReference { check: Some(_), .. }
+            ),
+            Commands::Release(args) => matches!(
+                &args.command,
+                ReleaseCommand::Evidence { .. }
+                    | ReleaseCommand::Validate(_)
+                    | ReleaseCommand::Artifact { .. }
+                    | ReleaseCommand::Record(_)
+            ),
+            Commands::Perf(args) => match &args.command {
+                PerfCommand::Budgets { check } => !*check,
+            },
+            Commands::Graph(args) => matches!(
+                &args.command,
+                GraphCommand::Status(_) | GraphCommand::Query(_)
+            ),
+            Commands::Init(_)
+            | Commands::Spec(_)
+            | Commands::Ontology(_)
+            | Commands::Identity(_)
+            | Commands::Adopt(_)
+            | Commands::Impact(_)
+            | Commands::Proposal(_)
+            | Commands::Git(_)
+            | Commands::Trace(_)
+            | Commands::Test(_)
+            | Commands::Security(_)
+            | Commands::Proof(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -1870,6 +1926,10 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run_cli(cli: Cli, output: OutputConfig) -> anyhow::Result<()> {
+    if output.json() && !cli.command.supports_json_output() {
+        return Err(unsupported_json_output_failure(&cli.command).into());
+    }
+
     let root = cli.root.canonicalize().unwrap_or(cli.root);
     let store = SpecGraphStore::new(&root);
 
@@ -1905,6 +1965,24 @@ fn run_cli(cli: Cli, output: OutputConfig) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn unsupported_json_output_failure(command: &Commands) -> CliFailure {
+    let command_label = format!("sg {}", command.label());
+    let remediation =
+        "Use --format human for this command until it is converted, or choose a JSON-supported subcommand.";
+    CliFailure::with_findings(
+        "cli.json_unsupported",
+        format!("`{command_label}` does not yet support rich JSON output"),
+        vec![Finding::new(
+            "cli.json_unsupported",
+            FindingSeverity::Error,
+            format!(
+                "`{command_label}` is intentionally blocked in JSON mode so automation never receives human-formatted output."
+            ),
+        )
+        .with_remediation(remediation)],
+    )
 }
 
 fn handle_init(store: &SpecGraphStore, root: &Path, args: InitArgs) -> anyhow::Result<()> {
@@ -1985,6 +2063,14 @@ fn handle_project(
         }
         ProjectCommand::Validate(args) => {
             let report = store.project_baseline()?;
+            if output.json()
+                && report
+                    .findings
+                    .iter()
+                    .any(|finding| finding.severity == FindingSeverity::Error)
+            {
+                fail_on_errors(&report.findings, "project baseline validation")?;
+            }
             if output.json() {
                 print_json(&json!({
                     "schemaVersion": "specgraph.cli/v1",
@@ -2085,6 +2171,14 @@ fn handle_module(
         }
         ModuleCommand::Validate(args) => {
             let report = store.module_baseline()?;
+            if output.json()
+                && report
+                    .findings
+                    .iter()
+                    .any(|finding| finding.severity == FindingSeverity::Error)
+            {
+                fail_on_errors(&report.findings, "module baseline validation")?;
+            }
             if output.json() {
                 print_json(&json!({
                     "schemaVersion": "specgraph.cli/v1",
@@ -5438,6 +5532,24 @@ fn handle_docs(root: &Path, args: DocsArgs, output: OutputConfig) -> anyhow::Res
                 .filter(|path| !root.join(path).exists())
                 .copied()
                 .collect::<Vec<_>>();
+            if output.json() && !missing.is_empty() {
+                return Err(CliFailure::with_findings(
+                    "cli.docs_check_failed",
+                    format!("docs check failed with {} missing file(s)", missing.len()),
+                    vec![Finding::new(
+                        "docs.required_missing",
+                        FindingSeverity::Error,
+                        format!(
+                            "Missing required documentation file(s): {}",
+                            missing.join(",")
+                        ),
+                    )
+                    .with_remediation(
+                        "Create the missing documentation files, then rerun `sg docs check`.",
+                    )],
+                )
+                .into());
+            }
             if output.json() {
                 print_json(&json!({
                     "schemaVersion": "specgraph.cli/v1",

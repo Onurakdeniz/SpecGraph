@@ -160,8 +160,9 @@ Current completed slices:
 - **Phase 11A — CLI envelope and reference-check foundations** added the typed `CliEnvelope<T>` JSON contract, structured JSON error envelopes with finding preservation, adapter-audit envelope coverage, generated CLI reference drift checking, checked-in CLI reference output, and starter CLI contract tests.
 - **Phase 11B — CLI JSON conversion and golden fixture expansion** moved operation inventory, policy checks, graph status/query, CI validation, PR provider checks, and release validation toward parseable JSON envelopes; added golden fixtures for adapter success, operation inventory, policy failure, CI report, release validation, branch query, and provider-check failure; and wired CI to consume the adapter-audit JSON path.
 - **Phase 11C — Dry-run receipt golden coverage** added JSON envelope output for `sg api mutate`, covered an Operation Runtime dry-run receipt through the CLI contract golden suite, and completed the explicit Phase 11 golden fixture list.
+- **Phase 11D — JSON-mode guardrail closure** added pre-dispatch JSON support classification so converted commands emit their machine-readable JSON and unconverted legacy command paths fail with a single `specgraph.cli/v1` `cli.json_unsupported` envelope instead of leaking human output; added a golden unsupported-command fixture and documented the transitional guardrail.
 
-Next focus: **Phase 11D — Complete remaining CLI output conversion**. Start from the latest `development`, finish legacy command groups, then close the Phase 11 parseable-JSON gate.
+Next focus: **Phase 12A — Performance fixture and runner foundations**. Start from the latest `development`, group about five Phase 12 checklist items in one branch, and make the local performance report machine-readable before adding CI enforcement.
 
 ---
 
@@ -879,7 +880,7 @@ Make CLI output stable for automation, CI, SDKs, and provider integrations.
 
 - [x] **Add central CLI envelope.** Define `CliEnvelope<T>` with schema version, command, status, data, findings, receipt, warnings, and elapsed time.
 
-- [ ] **Convert every command to output layer.** Ensure every command respects `--format human`, `--format json`, `--quiet`, and `--no-color`. Commands like operation/adapter lists must emit valid JSON in JSON mode.
+- [x] **Convert every command to output layer.** Ensure every command respects `--format human`, `--format json`, `--quiet`, and `--no-color`. Commands like operation/adapter lists must emit valid JSON in JSON mode.
 
 - [x] **Standardize errors.** Convert CLI failures to structured JSON errors when JSON mode is enabled, including error code, message, findings, and remediation when available.
 
@@ -891,7 +892,7 @@ Make CLI output stable for automation, CI, SDKs, and provider integrations.
 
 ## Phase Gate
 
-- [ ] Every command emits parseable JSON with `--format json`.
+- [x] Every command emits parseable JSON with `--format json`.
 - [x] Golden tests fail on accidental output drift.
 - [x] CI consumes JSON output for at least one validation path.
 

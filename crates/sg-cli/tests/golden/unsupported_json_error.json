@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg proof",
+  "status": "error",
+  "data": {
+    "error": {
+      "code": "cli.json_unsupported",
+      "message": "`sg proof` does not yet support rich JSON output",
+      "remediation": "Use --format human for this command until it is converted, or choose a JSON-supported subcommand."
+    }
+  },
+  "findings": [
+    {
+      "code": "cli.json_unsupported",
+      "severity": "Error",
+      "message": "`sg proof` is intentionally blocked in JSON mode so automation never receives human-formatted output.",
+      "remediation": "Use --format human for this command until it is converted, or choose a JSON-supported subcommand.",
+      "relatedNodes": [],
+      "relatedEdges": []
+    }
+  ],
+  "elapsedMs": 0
+}
