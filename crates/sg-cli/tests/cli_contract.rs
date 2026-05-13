@@ -31,6 +31,17 @@ fn normalize_envelope(mut value: serde_json::Value) -> serde_json::Value {
         if object.contains_key("elapsedMs") {
             object.insert("elapsedMs".to_string(), serde_json::json!(0));
         }
+        if let Some(receipt) = object
+            .get_mut("receipt")
+            .and_then(|data| data.as_object_mut())
+        {
+            if receipt.contains_key("operationId") {
+                receipt.insert(
+                    "operationId".to_string(),
+                    serde_json::json!("<OPERATION_ID>"),
+                );
+            }
+        }
         if let Some(data) = object.get_mut("data").and_then(|data| data.as_object_mut()) {
             if data.contains_key("configPath") {
                 data.insert(
@@ -47,6 +58,7 @@ fn golden(path: &str) -> serde_json::Value {
     let contents = match path {
         "golden/adapter_audit.json" => include_str!("golden/adapter_audit.json"),
         "golden/ci_report.json" => include_str!("golden/ci_report.json"),
+        "golden/dry_run_receipt.json" => include_str!("golden/dry_run_receipt.json"),
         "golden/graph_query.json" => include_str!("golden/graph_query.json"),
         "golden/json_error_findings.json" => include_str!("golden/json_error_findings.json"),
         "golden/operation_list.json" => include_str!("golden/operation_list.json"),
@@ -236,6 +248,70 @@ fn ci_report_json_matches_golden() {
     assert_eq!(
         normalize_envelope(parse_stdout(&output)),
         golden("golden/ci_report.json")
+    );
+}
+
+#[test]
+fn dry_run_receipt_json_matches_golden() {
+    let root = temp_root("dry-run-receipt-json");
+    let init = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "init",
+            "--project-name",
+            "Test",
+        ])
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+    let request = root.join("request.json");
+    std::fs::write(
+        &request,
+        r#"{
+  "schemaVersion": "specgraph.server-api/v1",
+  "operation": "Identity.UpsertActor",
+  "actor": "local:test",
+  "graphBranch": "main",
+  "dryRun": true,
+  "input": { "actorId": "local:dry-run" },
+  "delta": {
+    "createNodes": [
+      {
+        "id": "node_actor_local_dry_run",
+        "stableKey": "actor:local:dry-run",
+        "nodeType": "Actor",
+        "attributes": {
+          "actorId": "local:dry-run",
+          "displayName": "local:dry-run",
+          "provider": "local",
+          "subject": "local:dry-run",
+          "kind": "Human"
+        }
+      }
+    ]
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "--format",
+            "json",
+            "api",
+            "mutate",
+            request.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/dry_run_receipt.json")
     );
 }
 

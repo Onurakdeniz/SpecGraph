@@ -230,6 +230,13 @@ Phase 11B extends the envelope contract to more automation-facing commands while
 - Golden CLI contract fixtures now cover adapter audit success, operation inventory, policy failure, CI report, release validation failure, graph branch query, provider-check failure, and structured finding errors.
 - The GitHub CI workflow consumes `sg adapter audit --format json --check` and validates the envelope shape before the proof scenario.
 
+## Phase 11C Implemented Dry-Run Receipt Fixture
+
+Phase 11C completes the explicit golden fixture inventory for dry-run receipts:
+
+- `sg api mutate --format json` emits a `specgraph.cli/v1` envelope with the Operation Runtime receipt in `receipt`.
+- The golden CLI contract suite covers a dry-run `Identity.UpsertActor` request and verifies `dryRun: true`, no appended `eventIds`, and stable changed-node reporting.
+
 ## F.1 Implemented Project Baseline CLI
 
 The project-first closure adds the first trusted ProjectGraph command group:

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg api mutate",
+  "status": "accepted",
+  "receipt": {
+    "accepted": true,
+    "actor": "local:test",
+    "createdEdges": [],
+    "createdNodes": [
+      "node_actor_local_dry_run"
+    ],
+    "deletedEdges": [],
+    "deletedNodes": [],
+    "dryRun": true,
+    "eventIds": [],
+    "findings": [],
+    "operation": "Identity.UpsertActor",
+    "operationId": "<OPERATION_ID>",
+    "postStateHash": "sha256:9c1d24c02c18e893862202f03071d91bbae62f8da78b4ed58a3fc1af3a53e259",
+    "preStateHash": "sha256:0c254156981dfa24ce39f093a940b427a6edafbcfad6138aca9d5cdaa3f65389",
+    "schemaVersion": "specgraph.operation-receipt/v1",
+    "updatedEdges": [],
+    "updatedNodes": []
+  },
+  "elapsedMs": 0
+}

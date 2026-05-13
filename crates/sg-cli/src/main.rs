@@ -1886,7 +1886,7 @@ fn run_cli(cli: Cli, output: OutputConfig) -> anyhow::Result<()> {
         Commands::Workflow(args) => handle_workflow(&store, args, output)?,
         Commands::Impact(args) => handle_impact(&store, args)?,
         Commands::Adapter(args) => handle_adapter(&root, args, output)?,
-        Commands::Api(args) => handle_api(&store, &root, args)?,
+        Commands::Api(args) => handle_api(&store, &root, args, output)?,
         Commands::Pr(args) => handle_pr(&store, &root, args, output)?,
         Commands::Proposal(args) => handle_proposal(&store, &root, args)?,
         Commands::Action(args) => handle_action(&store, args, output)?,
@@ -3235,7 +3235,12 @@ fn parse_adapter_capability(value: &str) -> Result<AdapterCapability, String> {
     }
 }
 
-fn handle_api(store: &SpecGraphStore, root: &Path, args: ApiArgs) -> anyhow::Result<()> {
+fn handle_api(
+    store: &SpecGraphStore,
+    root: &Path,
+    args: ApiArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
     let api = SpecGraphApi::with_store(store.clone());
     match args.command {
         ApiCommand::Serve(args) => {
@@ -3313,12 +3318,28 @@ fn handle_api(store: &SpecGraphStore, root: &Path, args: ApiArgs) -> anyhow::Res
         ApiCommand::Mutate(args) => {
             let request = read_api_operation_request(root, &args.request)?;
             let response = api.submit_operation(request)?;
-            println!("operationId: {}", response.receipt.operation_id);
-            println!("operation: {}", response.receipt.operation);
-            println!("accepted: {}", response.receipt.accepted);
-            println!("dryRun: {}", response.receipt.dry_run);
-            println!("stateHash: {}", response.receipt.post_state_hash);
-            println!("events: {}", response.receipt.event_ids.len());
+            if output.json() {
+                print_cli_envelope(
+                    "sg api mutate",
+                    if response.receipt.accepted {
+                        "accepted"
+                    } else {
+                        "rejected"
+                    },
+                    None,
+                    response.receipt.findings.clone(),
+                    Some(json!(response.receipt)),
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+            } else if !output.quiet {
+                println!("operationId: {}", response.receipt.operation_id);
+                println!("operation: {}", response.receipt.operation);
+                println!("accepted: {}", response.receipt.accepted);
+                println!("dryRun: {}", response.receipt.dry_run);
+                println!("stateHash: {}", response.receipt.post_state_hash);
+                println!("events: {}", response.receipt.event_ids.len());
+            }
         }
     }
     Ok(())
