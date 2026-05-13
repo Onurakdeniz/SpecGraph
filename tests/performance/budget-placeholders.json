@@ -57,6 +57,14 @@
       "command": "cargo run -p sg-cli -- api query --view specs --max-nodes 1000 --max-edges 5000",
       "budget": { "metric": "wallMs", "max": 1000 },
       "phaseClosure": "7.10"
+    },
+    {
+      "id": "merge.branch-dry-run",
+      "area": "merge",
+      "description": "Run a deterministic branch merge dry-run against generated fixture graph snapshots.",
+      "command": "cargo run -p sg-cli -- graph integrate --dry-run --source-branch perf-feature --target-branch main",
+      "budget": { "metric": "wallMs", "max": 2000 },
+      "phaseClosure": "12.0"
     }
   ]
 }

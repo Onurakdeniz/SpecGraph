@@ -22,9 +22,15 @@ machine-readable source is [`tests/performance/budget-placeholders.json`](../../
 | Indexing | `indexing.changed-files` | `cargo run -p sg-cli -- code index --changed-file <FILE>` | `filesPerSecond >= 1` |
 | Adoption | `adoption.scan-observe` | `cargo run -p sg-cli -- adopt scan --mode observe` | `filesPerSecond >= 1` |
 | CI/proof | `ci.full-proof-path` | `cargo run -p sg-cli -- proof run` | `wallMs <= 30000` |
+| Merge | `merge.branch-dry-run` | `cargo run -p sg-cli -- graph integrate --dry-run --source-branch perf-feature --target-branch main` | `wallMs <= 2000` |
 
-The current checker enforces schema completeness and numeric thresholds. Runtime
-measurement harnesses can tighten these values without renaming ids.
+Use `sg perf fixture generate --size small|medium|large --output <DIR>` to create
+deterministic local benchmark inputs, then run
+`sg --format json perf run --fixture <DIR> --check --budget tests/performance/budget-placeholders.json`
+to produce a `specgraph.performance-results/v1` report. The CI workflow runs the
+small and medium fixtures through this measurement path so budget regressions
+fail before merge. Larger fixtures are reserved for release or scheduled
+validation.
 
 ## Release Evidence
 

@@ -91,6 +91,8 @@ use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CLI_SCHEMA_VERSION: &str = "specgraph.cli/v1";
+const PERF_FIXTURE_SCHEMA_VERSION: &str = "specgraph.performance-fixture/v1";
+const PERF_RESULTS_SCHEMA_VERSION: &str = "specgraph.performance-results/v1";
 
 #[derive(Debug, Parser)]
 #[command(name = "sg", version, about = "SpecGraph OS MVP CLI")]
@@ -324,6 +326,7 @@ impl Commands {
             ),
             Commands::Perf(args) => match &args.command {
                 PerfCommand::Budgets { check } => !*check,
+                PerfCommand::Fixture { .. } | PerfCommand::Run(_) => true,
             },
             Commands::Graph(args) => matches!(
                 &args.command,
@@ -1757,6 +1760,64 @@ enum PerfCommand {
         #[arg(long)]
         check: bool,
     },
+    /// Generate deterministic local benchmark fixtures.
+    Fixture {
+        #[command(subcommand)]
+        command: PerfFixtureCommand,
+    },
+    /// Measure a generated fixture and optionally enforce budgets.
+    Run(PerfRunArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum PerfFixtureCommand {
+    Generate(PerfFixtureGenerateArgs),
+}
+
+#[derive(Debug, Args)]
+struct PerfFixtureGenerateArgs {
+    #[arg(long, value_enum)]
+    size: PerfFixtureSize,
+    #[arg(long)]
+    output: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum PerfFixtureSize {
+    Small,
+    Medium,
+    Large,
+}
+
+impl PerfFixtureSize {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+        }
+    }
+
+    fn source_file_count(self) -> usize {
+        match self {
+            Self::Small => 3,
+            Self::Medium => 12,
+            Self::Large => 40,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct PerfRunArgs {
+    #[arg(long)]
+    fixture: PathBuf,
+    #[arg(long, default_value = "tests/performance/budget-placeholders.json")]
+    budget: PathBuf,
+    #[arg(long)]
+    check: bool,
+    #[arg(long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -5859,8 +5920,428 @@ fn handle_perf(root: &Path, args: PerfArgs, output: OutputConfig) -> anyhow::Res
                 );
             }
         }
+        PerfCommand::Fixture { command } => match command {
+            PerfFixtureCommand::Generate(args) => {
+                let manifest = generate_perf_fixture(root, args)?;
+                if output.json() {
+                    print_cli_envelope(
+                        "sg perf fixture generate",
+                        "passed",
+                        Some(json!(manifest)),
+                        Vec::new(),
+                        None,
+                        Vec::new(),
+                        output.started_at.elapsed(),
+                    )?;
+                } else if !output.quiet {
+                    println!("perfFixture: {}", manifest.fixture_id);
+                    println!("size: {}", manifest.size);
+                    println!("root: {}", manifest.root);
+                    println!("sourceFiles: {}", manifest.source_files);
+                    println!("eventLogs: {}", manifest.event_logs);
+                    println!("branchFixtures: {}", manifest.branch_fixtures);
+                }
+            }
+        },
+        PerfCommand::Run(args) => {
+            let report = run_perf_benchmarks(root, &args)?;
+            let failed = report.status == "failed";
+            if let Some(path) = args.output.as_ref() {
+                write_json_file(&resolve_path(root, path.clone()), &json!(report))?;
+            }
+            if output.json() {
+                print_cli_envelope(
+                    "sg perf run",
+                    report.status.clone(),
+                    Some(json!(report)),
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+                if args.check && failed {
+                    std::process::exit(1);
+                }
+            } else if !output.quiet {
+                println!("perfRun: {}", report.status);
+                println!("fixture: {}", report.fixture_id);
+                println!("benchmarks: {}", report.results.len());
+                for result in &report.results {
+                    println!(
+                        "{} {} actual={} status={}",
+                        result.benchmark_id, result.metric, result.actual, result.status
+                    );
+                }
+            }
+            if args.check && failed {
+                bail!("performance budget check failed");
+            }
+        }
     }
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PerfFixtureManifest {
+    schema_version: &'static str,
+    fixture_id: String,
+    size: String,
+    root: String,
+    source_files: usize,
+    migration_files: usize,
+    event_logs: usize,
+    trace_fixtures: usize,
+    branch_fixtures: usize,
+    adoption_fixtures: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PerfRunReport {
+    schema_version: &'static str,
+    fixture_id: String,
+    fixture_root: String,
+    status: String,
+    generated_at: String,
+    machine: PerfMachineInfo,
+    results: Vec<PerfBenchmarkResult>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PerfMachineInfo {
+    os: &'static str,
+    arch: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PerfBenchmarkResult {
+    benchmark_id: String,
+    fixture_id: String,
+    command: String,
+    metric: String,
+    actual: f64,
+    budget: serde_json::Value,
+    status: String,
+    elapsed_ms: u128,
+}
+
+fn generate_perf_fixture(
+    root: &Path,
+    args: PerfFixtureGenerateArgs,
+) -> anyhow::Result<PerfFixtureManifest> {
+    let fixture_root = resolve_path(root, args.output);
+    if fixture_root.exists() && fs::read_dir(&fixture_root)?.next().is_some() {
+        bail!(
+            "performance fixture output is not empty at {}; choose an empty output directory",
+            fixture_root.display()
+        );
+    }
+    fs::create_dir_all(fixture_root.join("src"))
+        .with_context(|| format!("failed to create {}", fixture_root.join("src").display()))?;
+    fs::create_dir_all(fixture_root.join("migrations")).with_context(|| {
+        format!(
+            "failed to create {}",
+            fixture_root.join("migrations").display()
+        )
+    })?;
+
+    let file_count = args.size.source_file_count();
+    for index in 0..file_count {
+        let path = fixture_root
+            .join("src")
+            .join(format!("module_{index:03}.rs"));
+        fs::write(
+            &path,
+            format!("pub fn perf_function_{index:03}(input: u64) -> u64 {{ input + {index} }}\n"),
+        )
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+    let migration_path = fixture_root
+        .join("migrations")
+        .join("0001_create_perf_table.sql");
+    fs::write(
+        &migration_path,
+        "CREATE TABLE perf_fixture (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n",
+    )
+    .with_context(|| format!("failed to write {}", migration_path.display()))?;
+    let store = SpecGraphStore::new(&fixture_root);
+    store.init(InitOptions {
+        project_name: format!("perf-{}", args.size.as_str()),
+        actor: "local:perf".to_string(),
+        graph_branch: "main".to_string(),
+    })?;
+    store.create_graph_branch(GraphBranchCreateOptions {
+        branch: "perf-feature".to_string(),
+        parent_branch: "main".to_string(),
+        actor: "local:perf".to_string(),
+    })?;
+    let links_path = fixture_root.join(".specgraph").join("links.yaml");
+    fs::write(&links_path, "links: []\n")
+        .with_context(|| format!("failed to write {}", links_path.display()))?;
+
+    let manifest = PerfFixtureManifest {
+        schema_version: PERF_FIXTURE_SCHEMA_VERSION,
+        fixture_id: format!("perf-fixture-{}", args.size.as_str()),
+        size: args.size.as_str().to_string(),
+        root: fixture_root.display().to_string(),
+        source_files: file_count,
+        migration_files: 1,
+        event_logs: 1,
+        trace_fixtures: 1,
+        branch_fixtures: 1,
+        adoption_fixtures: 1,
+    };
+    write_json_file(&fixture_root.join("fixture.json"), &json!(manifest))?;
+    Ok(manifest)
+}
+
+fn run_perf_benchmarks(root: &Path, args: &PerfRunArgs) -> anyhow::Result<PerfRunReport> {
+    let fixture_root = resolve_perf_fixture_path(root, &args.fixture);
+    let budget_path = resolve_path(root, args.budget.clone());
+    let budgets: serde_json::Value = serde_json::from_slice(
+        &fs::read(&budget_path)
+            .with_context(|| format!("failed to read {}", budget_path.display()))?,
+    )
+    .with_context(|| format!("failed to parse {}", budget_path.display()))?;
+    let fixture_id = read_perf_fixture_id(&fixture_root)?;
+    let benchmarks = budgets
+        .get("benchmarks")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut results = Vec::new();
+    for bench in benchmarks {
+        if let Some(result) = measure_perf_benchmark(&fixture_root, &fixture_id, &bench)? {
+            results.push(result);
+        }
+    }
+    let failed = results.iter().any(|result| result.status == "failed");
+    Ok(PerfRunReport {
+        schema_version: PERF_RESULTS_SCHEMA_VERSION,
+        fixture_id,
+        fixture_root: fixture_root.display().to_string(),
+        status: if failed { "failed" } else { "passed" }.to_string(),
+        generated_at: unix_timestamp_string(),
+        machine: PerfMachineInfo {
+            os: std::env::consts::OS,
+            arch: std::env::consts::ARCH,
+        },
+        results,
+    })
+}
+
+fn resolve_perf_fixture_path(root: &Path, fixture: &Path) -> PathBuf {
+    let direct = resolve_path(root, fixture.to_path_buf());
+    if direct.exists() {
+        direct
+    } else {
+        root.join("tests")
+            .join("performance")
+            .join("fixtures")
+            .join(fixture)
+    }
+}
+
+fn read_perf_fixture_id(fixture_root: &Path) -> anyhow::Result<String> {
+    let path = fixture_root.join("fixture.json");
+    if path.exists() {
+        let value: serde_json::Value = serde_json::from_slice(
+            &fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?,
+        )
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+        if let Some(id) = value.get("fixtureId").and_then(serde_json::Value::as_str) {
+            return Ok(id.to_string());
+        }
+    }
+    Ok(fixture_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("fixture")
+        .to_string())
+}
+
+fn measure_perf_benchmark(
+    fixture_root: &Path,
+    fixture_id: &str,
+    bench: &serde_json::Value,
+) -> anyhow::Result<Option<PerfBenchmarkResult>> {
+    let Some(benchmark_id) = bench.get("id").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+    let command = bench
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let budget = bench.get("budget").cloned().unwrap_or_else(|| json!({}));
+    let metric = budget
+        .get("metric")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("wallMs")
+        .to_string();
+    let start = Instant::now();
+    let actual = match benchmark_id {
+        "replay.small-event-log" => {
+            let store = SpecGraphStore::new(fixture_root);
+            store.replay(ReplayOptions::checking())?;
+            start.elapsed().as_millis() as f64
+        }
+        "query.stable-neighborhood" => {
+            let store = SpecGraphStore::new(fixture_root);
+            store.query_graph(QueryContext {
+                target: QueryTarget::Current {
+                    graph_branch: "main".to_string(),
+                },
+                limits: QueryLimits {
+                    max_depth: 4,
+                    max_nodes: 1_000,
+                    max_edges: 5_000,
+                },
+                actor: None,
+                require_permission: false,
+            })?;
+            start.elapsed().as_millis() as f64
+        }
+        "server.readonly-query" => {
+            let store = SpecGraphStore::new(fixture_root);
+            let api = SpecGraphApi::with_store(store);
+            api.query(ApiQueryRequest {
+                target: ApiGraphTarget::Current {
+                    graph_branch: "main".to_string(),
+                },
+                selector: ApiQuerySelector::All,
+                limits: ApiQueryLimits {
+                    max_depth: 4,
+                    max_nodes: 1_000,
+                    max_edges: 5_000,
+                },
+                ..ApiQueryRequest::default()
+            })?;
+            start.elapsed().as_millis() as f64
+        }
+        "validation.aggregate-ci" => {
+            let store = SpecGraphStore::new(fixture_root);
+            store.validate_specs()?;
+            start.elapsed().as_millis() as f64
+        }
+        "indexing.changed-files" => {
+            let files = perf_source_files(fixture_root)?;
+            let observations = code_index_observations(fixture_root, &files)?;
+            let elapsed = start.elapsed();
+            files_per_second(observations.len(), elapsed)
+        }
+        "adoption.scan-observe" => {
+            let delta = scan_repository(fixture_root, AdoptionMode::Observe)?;
+            let elapsed = start.elapsed();
+            files_per_second(delta.create_nodes.len(), elapsed)
+        }
+        "merge.branch-dry-run" => {
+            let store = SpecGraphStore::new(fixture_root);
+            let report = store.replay(ReplayOptions::checking())?;
+            let _integration = dry_run_graph_merge(
+                &report.graph,
+                &report.graph,
+                &report.graph,
+                "perf-feature".to_string(),
+                "main".to_string(),
+            );
+            start.elapsed().as_millis() as f64
+        }
+        "ci.full-proof-path" => {
+            let output = Command::new(std::env::current_exe()?)
+                .args(["proof", "run"])
+                .output()
+                .context("failed to run proof benchmark")?;
+            if !output.status.success() {
+                bail!("proof benchmark failed");
+            }
+            start.elapsed().as_millis() as f64
+        }
+        _ => return Ok(None),
+    };
+    let status = if budget_allows(&budget, actual) {
+        "passed"
+    } else {
+        "failed"
+    };
+    Ok(Some(PerfBenchmarkResult {
+        benchmark_id: benchmark_id.to_string(),
+        fixture_id: fixture_id.to_string(),
+        command,
+        metric,
+        actual,
+        budget,
+        status: status.to_string(),
+        elapsed_ms: start.elapsed().as_millis(),
+    }))
+}
+
+fn budget_allows(budget: &serde_json::Value, actual: f64) -> bool {
+    if let Some(max) = budget.get("max").and_then(serde_json::Value::as_f64) {
+        if actual > max {
+            return false;
+        }
+    }
+    if let Some(min) = budget.get("min").and_then(serde_json::Value::as_f64) {
+        if actual < min {
+            return false;
+        }
+    }
+    true
+}
+
+fn files_per_second(count: usize, elapsed: Duration) -> f64 {
+    let seconds = elapsed.as_secs_f64();
+    if seconds <= f64::EPSILON {
+        count as f64
+    } else {
+        count as f64 / seconds
+    }
+}
+
+fn perf_source_files(root: &Path) -> anyhow::Result<Vec<String>> {
+    let mut files = Vec::new();
+    collect_perf_source_files(root, &root.join("src"), &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_perf_source_files(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<String>,
+) -> anyhow::Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_perf_source_files(root, &path, files)?;
+        } else if matches!(
+            path.extension().and_then(|ext| ext.to_str()),
+            Some("rs" | "ts" | "js" | "py")
+        ) {
+            files.push(
+                path.strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn unix_timestamp_string() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string())
 }
 
 fn required_docs() -> Vec<&'static str> {
@@ -8280,5 +8761,22 @@ mod tests {
         assert!(findings
             .iter()
             .all(|finding| !finding.code.starts_with("release.migration_")));
+    }
+
+    #[test]
+    fn performance_budget_allows_max_and_min_thresholds() {
+        assert!(budget_allows(&json!({"metric": "wallMs", "max": 10}), 9.0));
+        assert!(!budget_allows(
+            &json!({"metric": "wallMs", "max": 10}),
+            11.0
+        ));
+        assert!(budget_allows(
+            &json!({"metric": "filesPerSecond", "min": 2}),
+            3.0
+        ));
+        assert!(!budget_allows(
+            &json!({"metric": "filesPerSecond", "min": 2}),
+            1.0
+        ));
     }
 }

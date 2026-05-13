@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUDGET_FILE = ROOT / "tests/performance/budget-placeholders.json"
-REQUIRED_AREAS = {"replay", "query", "validation", "indexing", "adoption", "ci"}
+REQUIRED_AREAS = {"replay", "query", "validation", "indexing", "adoption", "ci", "merge"}
 REQUIRED_IDS = {
     "replay.small-event-log",
     "query.stable-neighborhood",
@@ -18,6 +18,7 @@ REQUIRED_IDS = {
     "adoption.scan-observe",
     "ci.full-proof-path",
     "server.readonly-query",
+    "merge.branch-dry-run",
 }
 
 

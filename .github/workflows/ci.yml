@@ -25,6 +25,23 @@ jobs:
         run: python3 scripts/check_examples_catalog.py
       - name: Benchmark budget check
         run: python3 scripts/check_benchmark_budgets.py
+      - name: Performance benchmark smoke
+        run: |
+          for size in small medium; do
+            cargo run -q -p sg-cli -- perf fixture generate --size "$size" --output "/tmp/sg-perf-$size"
+            cargo run -q -p sg-cli -- --format json perf run --fixture "/tmp/sg-perf-$size" --check --budget tests/performance/budget-placeholders.json > "/tmp/sg-perf-$size-report.json"
+            python3 - "$size" <<'PY'
+          import json, sys
+          size = sys.argv[1]
+          report = json.load(open(f"/tmp/sg-perf-{size}-report.json"))
+          assert report["schemaVersion"] == "specgraph.cli/v1"
+          assert report["status"] == "passed"
+          data = report["data"]
+          assert data["schemaVersion"] == "specgraph.performance-results/v1"
+          assert data["fixtureId"] == f"perf-fixture-{size}"
+          assert len(data["results"]) >= 8
+          PY
+          done
       - name: Phase 7 asset check
         run: python3 scripts/check_phase7_assets.py
       - name: Clippy

@@ -128,7 +128,7 @@ Status values:
 | `sg proof` | `run`, future named proof scenarios | Partial | Human progress lines; JSON proof report with passed/failed scenario steps. |
 | `sg docs` | `check`, `cli-reference` | Current | Documentation validation/generation report. |
 | `sg release` | `check`, `evidence`, `validate`, `artifact add`, `record` | Current | Release evidence/checksum/signature report; `validate` checks graph-bound release evidence; `record` binds release version/tag/commit/validation/snapshot/artifact facts through Operation Runtime. |
-| `sg perf` | `budgets` | Current | Performance budget inventory and threshold validation report. |
+| `sg perf` | `budgets`, `fixture generate`, `run` | Current | Performance budget inventory, deterministic fixture generation, and measured threshold validation report. |
 
 ## Command-Specific Output Families
 

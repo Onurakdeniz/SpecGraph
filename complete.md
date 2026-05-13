@@ -161,8 +161,9 @@ Current completed slices:
 - **Phase 11B — CLI JSON conversion and golden fixture expansion** moved operation inventory, policy checks, graph status/query, CI validation, PR provider checks, and release validation toward parseable JSON envelopes; added golden fixtures for adapter success, operation inventory, policy failure, CI report, release validation, branch query, and provider-check failure; and wired CI to consume the adapter-audit JSON path.
 - **Phase 11C — Dry-run receipt golden coverage** added JSON envelope output for `sg api mutate`, covered an Operation Runtime dry-run receipt through the CLI contract golden suite, and completed the explicit Phase 11 golden fixture list.
 - **Phase 11D — JSON-mode guardrail closure** added pre-dispatch JSON support classification so converted commands emit their machine-readable JSON and unconverted legacy command paths fail with a single `specgraph.cli/v1` `cli.json_unsupported` envelope instead of leaking human output; added a golden unsupported-command fixture and documented the transitional guardrail.
+- **Phase 12A — Performance fixture and runner closure** added `sg perf fixture generate`, `sg perf run`, a `specgraph.performance-results/v1` schema, measured replay/query/validation/indexing/adoption/proof/server-query/merge benchmarks, budget enforcement with machine-readable failure reports, small/medium CI benchmark smoke coverage, and regression tests for deterministic fixture inputs plus impossible-threshold failures.
 
-Next focus: **Phase 12A — Performance fixture and runner foundations**. Start from the latest `development`, group about five Phase 12 checklist items in one branch, and make the local performance report machine-readable before adding CI enforcement.
+Next focus: **Phase 13A — Release distribution target matrix foundations**. Start from the latest `development`, group about five Phase 13 checklist items in one branch, and preserve Phase 4's scoped-release semantics while adding target/artifact distribution hardening.
 
 ---
 
@@ -906,23 +907,23 @@ Turn performance budget files into real measured CI-enforced benchmarks.
 
 ## Checklist
 
-- [ ] **Add fixture generator.** Implement `scripts/generate_perf_fixture.py` or `sg perf fixture generate` for small, medium, and large graphs: event logs, trace graphs, code index fixtures, branch merge fixtures, and adoption fixtures.
+- [x] **Add fixture generator.** Implement `scripts/generate_perf_fixture.py` or `sg perf fixture generate` for small, medium, and large graphs: event logs, trace graphs, code index fixtures, branch merge fixtures, and adoption fixtures.
 
-- [ ] **Add benchmark runner.** Implement `sg perf run --fixture <name> --json` measuring replay wall time, query wall time, validation wall time, indexing throughput, and branch merge time. If memory measurement is supported on the current platform, include it as an additional non-blocking metric.
+- [x] **Add benchmark runner.** Implement `sg perf run --fixture <name> --json` measuring replay wall time, query wall time, validation wall time, indexing throughput, and branch merge time. If memory measurement is supported on the current platform, include it as an additional non-blocking metric.
 
-- [ ] **Execute budget checks.** Update performance budget checker so `sg perf run --check --budget tests/performance/budget-placeholders.json` executes benchmarks or verifies a fresh result file.
+- [x] **Execute budget checks.** Update performance budget checker so `sg perf run --check --budget tests/performance/budget-placeholders.json` executes benchmarks or verifies a fresh result file.
 
-- [ ] **Add reproducible result schema.** Store results with benchmark id, fixture id, machine info subset, command, metric, actual value, budget, status, and timestamp.
+- [x] **Add reproducible result schema.** Store results with benchmark id, fixture id, machine info subset, command, metric, actual value, budget, status, and timestamp.
 
-- [ ] **Integrate CI.** Add a CI job or step that runs small/medium benchmarks on every PR and reserves large benchmarks for scheduled or release workflow.
+- [x] **Integrate CI.** Add a CI job or step that runs small/medium benchmarks on every PR and reserves large benchmarks for scheduled or release workflow.
 
-- [ ] **Add regression tests.** Unit-test budget parsing and failure behavior. Integration-test at least one tiny benchmark that intentionally fails with an impossible threshold.
+- [x] **Add regression tests.** Unit-test budget parsing and failure behavior. Integration-test at least one tiny benchmark that intentionally fails with an impossible threshold.
 
 ## Phase Gate
 
-- [ ] CI fails when a measured benchmark exceeds budget.
-- [ ] Local `sg perf run --check` produces a machine-readable report.
-- [ ] Fixture generation is deterministic.
+- [x] CI fails when a measured benchmark exceeds budget.
+- [x] Local `sg perf run --check` produces a machine-readable report.
+- [x] Fixture generation is deterministic.
 
 ---
 

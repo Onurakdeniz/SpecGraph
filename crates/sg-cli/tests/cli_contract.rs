@@ -362,6 +362,115 @@ fn dry_run_receipt_json_matches_golden() {
 }
 
 #[test]
+fn perf_fixture_generation_is_deterministic_for_source_inputs() {
+    let root = temp_root("perf-fixture-deterministic");
+    let first = root.join("first");
+    let second = root.join("second");
+
+    for path in [&first, &second] {
+        let output = Command::new(sg())
+            .args([
+                "perf",
+                "fixture",
+                "generate",
+                "--size",
+                "small",
+                "--output",
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let first_manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(first.join("fixture.json")).unwrap()).unwrap();
+    let second_manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(second.join("fixture.json")).unwrap()).unwrap();
+    assert_eq!(first_manifest["fixtureId"], second_manifest["fixtureId"]);
+    assert_eq!(
+        first_manifest["sourceFiles"],
+        second_manifest["sourceFiles"]
+    );
+    assert_eq!(
+        std::fs::read_to_string(first.join("src/module_000.rs")).unwrap(),
+        std::fs::read_to_string(second.join("src/module_000.rs")).unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(first.join(".specgraph/links.yaml")).unwrap(),
+        std::fs::read_to_string(second.join(".specgraph/links.yaml")).unwrap()
+    );
+}
+
+#[test]
+fn perf_run_check_failure_is_machine_readable() {
+    let root = temp_root("perf-run-check");
+    let fixture = root.join("fixture");
+    let generate = Command::new(sg())
+        .args([
+            "perf",
+            "fixture",
+            "generate",
+            "--size",
+            "small",
+            "--output",
+            fixture.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(generate.status.success());
+
+    let budget = root.join("budget.json");
+    std::fs::write(
+        &budget,
+        serde_json::json!({
+            "schemaVersion": "specgraph.performance-budgets/v1",
+            "status": "enforced",
+            "benchmarks": [{
+                "id": "replay.small-event-log",
+                "area": "replay",
+                "description": "Impossible replay threshold for regression coverage.",
+                "command": "sg graph replay --check",
+                "budget": { "metric": "wallMs", "max": 0.000001 },
+                "phaseClosure": "test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let output = Command::new(sg())
+        .args([
+            "--format",
+            "json",
+            "perf",
+            "run",
+            "--fixture",
+            fixture.to_str().unwrap(),
+            "--budget",
+            budget.to_str().unwrap(),
+            "--check",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let envelope = parse_stdout(&output);
+    assert_eq!(envelope["schemaVersion"], "specgraph.cli/v1");
+    assert_eq!(envelope["status"], "failed");
+    assert_eq!(
+        envelope["data"]["schemaVersion"],
+        "specgraph.performance-results/v1"
+    );
+    assert_eq!(envelope["data"]["status"], "failed");
+    assert_eq!(envelope["data"]["results"][0]["status"], "failed");
+}
+
+#[test]
 fn release_validation_json_matches_golden() {
     let root = temp_root("release-validation-json");
     let init = Command::new(sg())
