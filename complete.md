@@ -153,8 +153,9 @@ Current completed slices:
 - **Phase 7B — Drift detection and trust promotion hardening** enforced observed-only `Code.Index` output, required accepted-observation evidence for observed CodeGraph promotion, expanded drift findings for missing/renamed symbols, route mismatch, stale trace links, missing use-case implementations, and unrepresented entities, and broadened language/framework fixture coverage.
 - **Phase 8A — Migration observation and risk policy foundations** added deterministic SQL/Prisma/Knex/TypeORM migration observers, `sg data observe --from`, observed-only migration/table facts, migration risk classification, and destructive/production-sensitive migration evidence policy checks.
 - **Phase 8B — Migration execution evidence and release gates** added `MigrationExecution` and `MigrationRollbackExecution` evidence facts, release-to-migration links, release validation blockers for missing migration execution/rollback evidence, and Phase 8 gate tests.
+- **Phase 9A — LLM provider proposal generation foundations** added a provider trait, YAML/env-backed provider registry with offline mock provider, proposal request schema, provider provenance and output validation, and `sg proposal generate/explain` commands that record only untrusted Proposal facts.
 
-Next focus: **Phase 9 — LLM Proposal Provider Runtime**. Start from the latest `development` and continue the five-checklist-item branch policy with provider trait/config/schema, provider output validation, CLI generation, and unchanged proposal acceptance path.
+Next focus after Phase 9A: **Phase 9B — Proposal acceptance invariants and provider tests**. Continue the five-checklist-item branch policy with acceptance-path regression coverage, direct-trust bypass tests, and remaining Phase 9 gates.
 
 ---
 
@@ -810,15 +811,15 @@ Allow real LLM providers to create proposals while preserving the rule that LLMs
 
 ## Checklist
 
-- [ ] **Add provider trait.** Define `LlmProvider` with `propose(request) -> Proposal` and include provider id, model id, input snapshot hash, prompt hash, output hash, and generated timestamp.
+- [x] **Add provider trait.** Define `LlmProvider` with `propose(request) -> Proposal` and include provider id, model id, input snapshot hash, prompt hash, output hash, and generated timestamp.
 
-- [ ] **Add provider registry/config.** Support provider configuration from `.specgraph/adapters/llm.yaml` and environment variables. Include an offline/mock provider for tests.
+- [x] **Add provider registry/config.** Support provider configuration from `.specgraph/adapters/llm.yaml` and environment variables. Include an offline/mock provider for tests.
 
-- [ ] **Add proposal request schema.** Define prompt inputs: target spec, relevant graph slice, allowed files, policy constraints, required output kind, and max output size.
+- [x] **Add proposal request schema.** Define prompt inputs: target spec, relevant graph slice, allowed files, policy constraints, required output kind, and max output size.
 
-- [ ] **Implement provider output validation.** Every generated proposal must be born `Proposed` or `Observed`, must include typed payload when possible, and must include provenance. Reject provider output that claims `Accepted`, `Trusted`, or direct graph authority.
+- [x] **Implement provider output validation.** Every generated proposal must be born `Proposed` or `Observed`, must include typed payload when possible, and must include provenance. Reject provider output that claims `Accepted`, `Trusted`, or direct graph authority.
 
-- [ ] **Add CLI commands.** Add `sg proposal generate --provider <id> --spec <spec>` and `sg proposal explain --id <id>`. Generation records only a Proposal node through Operation Runtime.
+- [x] **Add CLI commands.** Add `sg proposal generate --provider <id> --spec <spec>` and `sg proposal explain --id <id>`. Generation records only a Proposal node through Operation Runtime.
 
 - [ ] **Keep acceptance path unchanged.** Proposal acceptance must still require validation run id, exact diff hash, sandbox evidence from the existing sandbox flow, and `Proposal.Accept` Operation Runtime validation.
 
@@ -826,8 +827,8 @@ Allow real LLM providers to create proposals while preserving the rule that LLMs
 
 ## Phase Gate
 
-- [ ] Provider-generated proposal is untrusted and provenance-rich.
-- [ ] Proposal cannot bypass Operation Runtime.
+- [x] Provider-generated proposal is untrusted and provenance-rich.
+- [x] Proposal cannot bypass Operation Runtime.
 - [ ] Proposal acceptance still requires validation and exact evidence.
 
 ---

@@ -602,7 +602,13 @@ dependencies = [
 name = "sg-adapter-llm"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sg-model",
  "sg-proposal",
+ "sg-validation",
+ "sha2",
 ]
 
 [[package]]
@@ -659,6 +665,7 @@ dependencies = [
  "sg-adapter-api",
  "sg-adapter-code",
  "sg-adapter-hosting",
+ "sg-adapter-llm",
  "sg-adoption",
  "sg-codegraph",
  "sg-data",

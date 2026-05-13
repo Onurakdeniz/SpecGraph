@@ -6,4 +6,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+sg-model.workspace = true
 sg-proposal.workspace = true
+sg-validation.workspace = true

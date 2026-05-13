@@ -7,6 +7,10 @@ use sg_adapter_code::{index_source_file_with_cache, observations_to_delta, CodeI
 use sg_adapter_hosting::{
     validate_provider_check_report, GitHubProvider, HostingProvider, ProviderCheckReport,
 };
+use sg_adapter_llm::{
+    default_proposal_request, load_provider_registry_from_str, validate_llm_request,
+    validate_provider_output, LlmProviderRegistry,
+};
 use sg_adoption::{
     adoption_report_delta, adoption_report_from_delta, scan_repository, AdoptionMode,
 };
@@ -937,6 +941,10 @@ struct ProposalArgs {
 
 #[derive(Debug, Subcommand)]
 enum ProposalCommand {
+    /// Generate an untrusted proposal from a configured LLM provider.
+    Generate(ProposalGenerateArgs),
+    /// Explain a recorded proposal and its provider provenance.
+    Explain(ProposalExplainArgs),
     /// Store an untrusted proposal node without accepting it as trusted graph facts.
     Create(ProposalCreateArgs),
     /// Validate a typed untrusted proposal JSON/YAML file without mutating the graph.
@@ -949,6 +957,28 @@ enum ProposalCommand {
     Reject(ProposalRejectArgs),
     /// Move a proposal through the trust-state lifecycle.
     Transition(ProposalTransitionArgs),
+}
+
+#[derive(Debug, Args)]
+struct ProposalGenerateArgs {
+    #[arg(long)]
+    provider: Option<String>,
+    #[arg(long)]
+    spec: String,
+    #[arg(long)]
+    prompt: Option<String>,
+    #[arg(long = "allowed-file")]
+    allowed_files: Vec<String>,
+    #[arg(long, default_value = "local:user")]
+    actor: String,
+    #[arg(long, default_value = "main")]
+    graph_branch: String,
+}
+
+#[derive(Debug, Args)]
+struct ProposalExplainArgs {
+    #[arg(long)]
+    id: String,
 }
 
 #[derive(Debug, Args)]
@@ -3045,6 +3075,67 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
 
 fn handle_proposal(store: &SpecGraphStore, root: &Path, args: ProposalArgs) -> anyhow::Result<()> {
     match args.command {
+        ProposalCommand::Generate(args) => {
+            let replay = store.replay(ReplayOptions::checking())?;
+            let registry = load_llm_provider_registry(root)?;
+            let provider = registry
+                .provider(args.provider.as_deref())
+                .ok_or_else(|| anyhow::anyhow!("unknown or unsupported LLM provider"))?;
+            let mut request = default_proposal_request(&args.spec, &replay.state_hash);
+            request.allowed_files = args.allowed_files;
+            if let Some(prompt) = args.prompt {
+                request.prompt = prompt;
+            }
+            let request_findings = validate_llm_request(&request);
+            print_findings(&request_findings);
+            fail_on_errors(&request_findings, "LLM proposal request validation")?;
+            let proposal = provider.propose(&request);
+            let findings = validate_provider_output(&proposal);
+            print_findings(&findings);
+            fail_on_errors(&findings, "LLM provider output validation")?;
+            let delta = proposal_delta(&proposal);
+            let receipt = store.append_operation(AppendOperationOptions {
+                operation: "Proposal.Create".to_string(),
+                actor: args.actor,
+                graph_branch: args.graph_branch,
+                input: json!({
+                    "proposal": proposal.id.clone(),
+                    "provider": provider.provider_id(),
+                    "model": provider.model_id(),
+                    "schemaVersion": proposal.schema_version.clone(),
+                    "kind": proposal.kind,
+                }),
+                dry_run: false,
+                delta,
+            })?;
+            println!("proposalGenerated: {}", proposal.id);
+            println!("provider: {}", provider.provider_id());
+            println!("model: {}", provider.model_id());
+            println!("operationId: {}", receipt.operation_id);
+        }
+        ProposalCommand::Explain(args) => {
+            let replay = store.replay(ReplayOptions::checking())?;
+            let proposal_id = node_id("proposal", &args.id);
+            let proposal = replay
+                .graph
+                .nodes
+                .get(&proposal_id)
+                .or_else(|| {
+                    replay.graph.nodes.values().find(|node| {
+                        node.node_type == "Proposal"
+                            && graph_node_attr(node, "id") == Some(&args.id)
+                    })
+                })
+                .with_context(|| format!("Proposal `{}` is not recorded", args.id))?;
+            print_json(&json!({
+                "schemaVersion": "specgraph.proposal-explain/v1",
+                "id": graph_node_attr(proposal, "id"),
+                "title": graph_node_attr(proposal, "title"),
+                "trustState": graph_node_attr(proposal, "trustState"),
+                "kind": proposal.attributes.get("kind"),
+                "providerProvenance": proposal.attributes.get("providerProvenance"),
+            }))?;
+        }
         ProposalCommand::Create(args) => {
             let proposal = proposal_from_create_args(root, args.id, args.title, args.file)?;
             let findings = validate_proposal_schema(&proposal);
@@ -6536,6 +6627,18 @@ fn proposal_from_create_args(
     }
 }
 
+fn load_llm_provider_registry(root: &Path) -> anyhow::Result<LlmProviderRegistry> {
+    let path = root.join(".specgraph").join("adapters").join("llm.yaml");
+    if !path.exists() {
+        return Ok(
+            LlmProviderRegistry::from_env().unwrap_or_else(LlmProviderRegistry::with_default_mock)
+        );
+    }
+    let source = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read LLM provider config {}", path.display()))?;
+    load_provider_registry_from_str(&source).map_err(anyhow::Error::msg)
+}
+
 fn read_proposal_file(root: &Path, path: &Path) -> anyhow::Result<Proposal> {
     let path = resolve_path(root, path.to_path_buf());
     let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -6560,6 +6663,10 @@ fn proposal_delta(proposal: &Proposal) -> GraphDelta {
             ("trustState".to_string(), json!(proposal.trust_state)),
             ("kind".to_string(), json!(proposal.kind)),
             ("sourceTrust".to_string(), json!("Proposal")),
+            (
+                "providerProvenance".to_string(),
+                json!(proposal.provider_provenance),
+            ),
         ]),
     }];
     let mut create_edges = Vec::new();

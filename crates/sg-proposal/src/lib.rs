@@ -80,6 +80,17 @@ pub struct ProposedPolicyChange {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProposalProviderProvenance {
+    pub provider_id: String,
+    pub model_id: String,
+    pub input_snapshot_hash: String,
+    pub prompt_hash: String,
+    pub output_hash: String,
+    pub generated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PatchSandboxPolicy {
     #[serde(default = "default_allowed_patch_prefixes")]
     pub allowed_path_prefixes: Vec<String>,
@@ -158,6 +169,8 @@ pub struct Proposal {
     pub ontology_changes: Vec<ProposedOntologyChange>,
     #[serde(default)]
     pub policy_changes: Vec<ProposedPolicyChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_provenance: Option<ProposalProviderProvenance>,
 }
 
 fn proposal_schema_version() -> String {
@@ -213,6 +226,7 @@ impl Proposal {
             test_suggestions: Vec::new(),
             ontology_changes: Vec::new(),
             policy_changes: Vec::new(),
+            provider_provenance: None,
         }
     }
 }
@@ -265,6 +279,27 @@ pub fn validate_proposal_schema(proposal: &Proposal) -> Vec<Finding> {
                 proposal.id
             ),
         ));
+    }
+    if let Some(provenance) = &proposal.provider_provenance {
+        for (field, value) in [
+            ("providerId", provenance.provider_id.as_str()),
+            ("modelId", provenance.model_id.as_str()),
+            ("inputSnapshotHash", provenance.input_snapshot_hash.as_str()),
+            ("promptHash", provenance.prompt_hash.as_str()),
+            ("outputHash", provenance.output_hash.as_str()),
+            ("generatedAt", provenance.generated_at.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                findings.push(Finding::new(
+                    "proposal.provider_provenance_required",
+                    FindingSeverity::Error,
+                    format!(
+                        "Provider-generated Proposal `{}` requires provenance field `{field}`.",
+                        proposal.id
+                    ),
+                ));
+            }
+        }
     }
     for patch in proposal
         .code_patch
