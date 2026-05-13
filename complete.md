@@ -157,8 +157,9 @@ Current completed slices:
 - **Phase 9B — Proposal acceptance invariant closure** added regression coverage for missing payload warnings and the unchanged `Proposal.Accept` path requiring validated proposal state, passed validation run, exact diff hash, passed sandbox evidence, and acceptance evidence nodes.
 - **Phase 10A — Adapter runtime boundary foundations** added versioned/trust-leveled adapter descriptors, disabled-by-default adapter registry/config models for `.specgraph/adapters/config.yaml`, a capability broker, provenance envelopes with input/output hashes, and adapter-output validation that keeps facts observed and rejects direct trust promotion.
 - **Phase 10B — Adapter CLI and audit closure** added `sg adapter enable/disable/show/run/audit`, config persistence for capability grants, runtime authorization/audit output, and tests/manual checks for disabled adapters, missing grants, envelope integrity, observed output, trust-promotion rejection, and audit findings.
+- **Phase 11A — CLI envelope and reference-check foundations** added the typed `CliEnvelope<T>` JSON contract, structured JSON error envelopes with finding preservation, adapter-audit envelope coverage, generated CLI reference drift checking, checked-in CLI reference output, and starter CLI contract tests.
 
-Next focus: **Phase 11 — CLI JSON and UX Contract Completion**. Start from the latest `development` and continue the five-checklist-item branch policy with stable JSON/human output, exit-code semantics, and machine-readable finding contracts.
+Next focus: **Phase 11B — Complete CLI output conversion and golden coverage**. Start from the latest `development` and continue the five-checklist-item branch policy with full command output conversion, comprehensive golden fixtures, and CI JSON consumption.
 
 ---
 
@@ -874,13 +875,13 @@ Make CLI output stable for automation, CI, SDKs, and provider integrations.
 
 ## Checklist
 
-- [ ] **Add central CLI envelope.** Define `CliEnvelope<T>` with schema version, command, status, data, findings, receipt, warnings, and elapsed time.
+- [x] **Add central CLI envelope.** Define `CliEnvelope<T>` with schema version, command, status, data, findings, receipt, warnings, and elapsed time.
 
 - [ ] **Convert every command to output layer.** Ensure every command respects `--format human`, `--format json`, `--quiet`, and `--no-color`. Commands like operation/adapter lists must emit valid JSON in JSON mode.
 
-- [ ] **Standardize errors.** Convert CLI failures to structured JSON errors when JSON mode is enabled, including error code, message, findings, and remediation when available.
+- [x] **Standardize errors.** Convert CLI failures to structured JSON errors when JSON mode is enabled, including error code, message, findings, and remediation when available.
 
-- [ ] **Add generated CLI reference check.** Generate current CLI reference and add a drift check so command changes update the reference intentionally.
+- [x] **Add generated CLI reference check.** Generate current CLI reference and add a drift check so command changes update the reference intentionally.
 
 - [ ] **Add golden output tests.** Add fixtures for success, validation failure, policy failure, dry-run receipt, CI report, release validation, branch query, and provider check output.
 

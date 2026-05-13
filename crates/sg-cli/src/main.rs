@@ -82,11 +82,15 @@ use sg_validation::{
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
+use std::error::Error as StdError;
+use std::fmt;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const CLI_SCHEMA_VERSION: &str = "specgraph.cli/v1";
 
 #[derive(Debug, Parser)]
 #[command(name = "sg", version, about = "SpecGraph OS MVP CLI")]
@@ -116,6 +120,7 @@ enum OutputFormat {
 struct OutputConfig {
     format: OutputFormat,
     quiet: bool,
+    started_at: Instant,
 }
 
 impl OutputConfig {
@@ -128,6 +133,7 @@ impl OutputConfig {
                 cli.format
             },
             quiet: cli.quiet,
+            started_at: Instant::now(),
         }
     }
 
@@ -135,6 +141,52 @@ impl OutputConfig {
         self.format == OutputFormat::Json
     }
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CliEnvelope<T: Serialize> {
+    schema_version: &'static str,
+    command: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<T>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    findings: Vec<Finding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
+    elapsed_ms: u128,
+}
+
+#[derive(Debug, Clone)]
+struct CliFailure {
+    code: String,
+    message: String,
+    findings: Vec<Finding>,
+}
+
+impl CliFailure {
+    fn with_findings(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        findings: Vec<Finding>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            findings,
+        }
+    }
+}
+
+impl fmt::Display for CliFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.message)
+    }
+}
+
+impl StdError for CliFailure {}
 
 #[derive(Debug, Subcommand)]
 enum Commands {
@@ -194,6 +246,47 @@ enum Commands {
     Proof(ProofArgs),
     /// Graph inspection and replay commands.
     Graph(GraphArgs),
+}
+
+impl Cli {
+    fn command_label(&self) -> String {
+        format!("sg {}", self.command.label())
+    }
+}
+
+impl Commands {
+    fn label(&self) -> &'static str {
+        match self {
+            Commands::Init(_) => "init",
+            Commands::Project(_) => "project",
+            Commands::Module(_) => "module",
+            Commands::Spec(_) => "spec",
+            Commands::Ontology(_) => "ontology",
+            Commands::Operation(_) => "operation",
+            Commands::Identity(_) => "identity",
+            Commands::Policy(_) => "policy",
+            Commands::Adopt(_) => "adopt",
+            Commands::Workflow(_) => "workflow",
+            Commands::Impact(_) => "impact",
+            Commands::Adapter(_) => "adapter",
+            Commands::Api(_) => "api",
+            Commands::Pr(_) => "pr",
+            Commands::Proposal(_) => "proposal",
+            Commands::Action(_) => "action",
+            Commands::Git(_) => "git",
+            Commands::Code(_) => "code",
+            Commands::Data(_) => "data",
+            Commands::Trace(_) => "trace",
+            Commands::Test(_) => "test",
+            Commands::Ci(_) => "ci",
+            Commands::Security(_) => "security",
+            Commands::Docs(_) => "docs",
+            Commands::Release(_) => "release",
+            Commands::Perf(_) => "perf",
+            Commands::Proof(_) => "proof",
+            Commands::Graph(_) => "graph",
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -1498,6 +1591,8 @@ enum DocsCommand {
     CliReference {
         #[arg(long)]
         output: Option<PathBuf>,
+        #[arg(long)]
+        check: Option<PathBuf>,
     },
 }
 
@@ -1759,8 +1854,22 @@ struct GraphQueryArgs {
 }
 
 fn main() -> anyhow::Result<()> {
+    let started_at = Instant::now();
     let cli = Cli::parse();
     let output = OutputConfig::from_cli(&cli);
+    let command = cli.command_label();
+    if let Err(error) = run_cli(cli, output) {
+        if output.json() {
+            print_cli_error(&command, &error, started_at.elapsed())?;
+            std::process::exit(1);
+        }
+        return Err(error);
+    }
+
+    Ok(())
+}
+
+fn run_cli(cli: Cli, output: OutputConfig) -> anyhow::Result<()> {
     let root = cli.root.canonicalize().unwrap_or(cli.root);
     let store = SpecGraphStore::new(&root);
 
@@ -2693,6 +2802,15 @@ fn handle_adapter(root: &Path, args: AdapterArgs, output: OutputConfig) -> anyho
     match args.command {
         AdapterCommand::Catalog { check } => {
             let catalog = built_in_adapter_catalog();
+            let findings = validate_adapter_catalog(&catalog);
+            if check
+                && output.json()
+                && findings
+                    .iter()
+                    .any(|finding| finding.severity == FindingSeverity::Error)
+            {
+                fail_on_errors(&findings, "adapter catalog validation")?;
+            }
             if output.json() {
                 print_json(&json!({
                     "schemaVersion": "specgraph.cli/v1",
@@ -2703,7 +2821,6 @@ fn handle_adapter(root: &Path, args: AdapterArgs, output: OutputConfig) -> anyho
                     print_adapter_descriptor(adapter);
                 }
             }
-            let findings = validate_adapter_catalog(&catalog);
             if !output.json() {
                 print_findings(&findings);
             }
@@ -2831,11 +2948,19 @@ fn handle_adapter(root: &Path, args: AdapterArgs, output: OutputConfig) -> anyho
                     GraphDelta::default(),
                 );
                 findings.extend(validate_adapter_output(entry, &output_envelope));
-                if output.json() {
+                if findings
+                    .iter()
+                    .any(|finding| finding.severity == FindingSeverity::Error)
+                {
+                    if !output.json() {
+                        print_findings(&findings);
+                    }
+                    fail_on_errors(&findings, "adapter runtime authorization")?;
+                } else if output.json() {
                     print_json(&json!({
                         "schemaVersion": "specgraph.cli/v1",
                         "adapter": args.id,
-                        "authorized": findings.iter().all(|finding| finding.severity != FindingSeverity::Error),
+                        "authorized": true,
                         "requiredCapabilities": required,
                         "output": output_envelope,
                         "findings": findings,
@@ -2851,31 +2976,43 @@ fn handle_adapter(root: &Path, args: AdapterArgs, output: OutputConfig) -> anyho
                     print_findings(&findings);
                 }
             } else {
-                if output.json() {
-                    print_json(&json!({
-                        "schemaVersion": "specgraph.cli/v1",
-                        "adapter": args.id,
-                        "authorized": false,
-                        "requiredCapabilities": required,
-                        "findings": findings,
-                    }))?;
-                } else {
+                if !output.json() {
                     print_findings(&findings);
                 }
                 fail_on_errors(&findings, "adapter runtime authorization")?;
             }
-            fail_on_errors(&findings, "adapter runtime authorization")?;
         }
         AdapterCommand::Audit(args) => {
             let (registry, mut findings) = load_adapter_registry(root)?;
             findings.extend(audit_adapter_registry(&registry));
+            if args.check
+                && output.json()
+                && findings
+                    .iter()
+                    .any(|finding| finding.severity == FindingSeverity::Error)
+            {
+                fail_on_errors(&findings, "adapter audit")?;
+            }
             if output.json() {
-                print_json(&json!({
-                    "schemaVersion": "specgraph.cli/v1",
-                    "configPath": adapter_config_path(root).display().to_string(),
-                    "adapterCount": registry.adapters.len(),
-                    "findings": findings,
-                }))?;
+                print_cli_envelope(
+                    "sg adapter audit",
+                    if findings
+                        .iter()
+                        .any(|finding| finding.severity == FindingSeverity::Error)
+                    {
+                        "failed"
+                    } else {
+                        "passed"
+                    },
+                    Some(json!({
+                        "configPath": adapter_config_path(root).display().to_string(),
+                        "adapterCount": registry.adapters.len(),
+                    })),
+                    findings.clone(),
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
             } else if !output.quiet {
                 println!("adapterAudit: {} adapter(s)", registry.adapters.len());
                 println!("config: {}", adapter_config_path(root).display());
@@ -5101,9 +5238,36 @@ fn handle_docs(root: &Path, args: DocsArgs, output: OutputConfig) -> anyhow::Res
                 bail!("docs check failed with {} missing file(s)", missing.len());
             }
         }
-        DocsCommand::CliReference { output: path } => {
+        DocsCommand::CliReference {
+            output: path,
+            check,
+        } => {
             let mut command = Cli::command();
             let reference = command.render_long_help().to_string();
+            if let Some(check_path) = check {
+                let check_path = resolve_path(root, check_path);
+                let expected = fs::read_to_string(&check_path)
+                    .with_context(|| format!("failed to read {}", check_path.display()))?;
+                if expected != reference {
+                    bail!(
+                        "CLI reference drift detected for {}; regenerate with `sg docs cli-reference --output {}`",
+                        check_path.display(),
+                        check_path.display()
+                    );
+                }
+                if output.json() {
+                    print_json(&json!({
+                        "schemaVersion": "specgraph.cli/v1",
+                        "command": "sg docs cli-reference --check",
+                        "status": "passed",
+                        "path": check_path.display().to_string(),
+                    }))?;
+                } else if !output.quiet {
+                    println!("cliReferenceCheck: ok");
+                    println!("path: {}", check_path.display());
+                }
+                return Ok(());
+            }
             if let Some(path) = path {
                 fs::write(&path, &reference)
                     .with_context(|| format!("failed to write {}", path.display()))?;
@@ -5374,6 +5538,7 @@ fn required_docs() -> Vec<&'static str> {
         "docs/release/distribution.md",
         "docs/performance/budgets.md",
         "docs/examples/catalog.md",
+        "docs/reference/cli.txt",
         "docs/reference/index.md",
         "docs/full-system-implementation/phase-gated-implementation-plan.md",
         "docs/full-system-implementation/implementation-checklist.md",
@@ -5767,6 +5932,63 @@ fn write_json_file(path: &Path, value: &serde_json::Value) -> anyhow::Result<()>
 fn print_json(value: &serde_json::Value) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
+}
+
+fn print_cli_envelope(
+    command: impl Into<String>,
+    status: impl Into<String>,
+    data: Option<serde_json::Value>,
+    findings: Vec<Finding>,
+    receipt: Option<serde_json::Value>,
+    warnings: Vec<String>,
+    elapsed: Duration,
+) -> anyhow::Result<()> {
+    let envelope = CliEnvelope {
+        schema_version: CLI_SCHEMA_VERSION,
+        command: command.into(),
+        status: status.into(),
+        data,
+        findings,
+        receipt,
+        warnings,
+        elapsed_ms: elapsed.as_millis(),
+    };
+    println!("{}", serde_json::to_string_pretty(&envelope)?);
+    Ok(())
+}
+
+fn print_cli_error(command: &str, error: &anyhow::Error, elapsed: Duration) -> anyhow::Result<()> {
+    let (code, message, findings) = if let Some(failure) = error.downcast_ref::<CliFailure>() {
+        (
+            failure.code.clone(),
+            failure.message.clone(),
+            failure.findings.clone(),
+        )
+    } else {
+        (
+            "cli.error".to_string(),
+            error.to_string(),
+            Vec::<Finding>::new(),
+        )
+    };
+    let remediation = findings
+        .iter()
+        .find_map(|finding| finding.remediation.clone());
+    print_cli_envelope(
+        command.to_string(),
+        "error",
+        Some(json!({
+            "error": {
+                "code": code,
+                "message": message,
+                "remediation": remediation,
+            }
+        })),
+        findings,
+        None,
+        Vec::new(),
+        elapsed,
+    )
 }
 
 fn budget_threshold_missing(budget: Option<&serde_json::Value>) -> bool {
@@ -7238,7 +7460,12 @@ fn fail_on_errors(findings: &[Finding], label: &str) -> anyhow::Result<()> {
         .filter(|finding| finding.severity == FindingSeverity::Error)
         .count();
     if errors > 0 {
-        bail!("{label} failed with {errors} error finding(s)");
+        return Err(CliFailure::with_findings(
+            "cli.findings_failed",
+            format!("{label} failed with {errors} error finding(s)"),
+            findings.to_vec(),
+        )
+        .into());
     }
     Ok(())
 }

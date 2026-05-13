@@ -19,7 +19,7 @@ SpecGraph OS is the full system, not the historical MVP. Current commands may st
 Current global options:
 
 - `--root <DIR>` selects the repository root. Default: current directory.
-- `--format human|json` and `--json` are accepted globally. Phase 7 closure applies JSON envelopes first to docs/release/performance/API surfaces while legacy command groups keep their established human output until their area-specific finalization.
+- `--format human|json` and `--json` are accepted globally. Phase 11 begins the stable CLI envelope rollout for automation surfaces while legacy command groups keep established human output until their area-specific finalization.
 - `--quiet` and `--no-color` are accepted globally. Current human output is non-colored by default.
 
 Full-system global options:
@@ -57,14 +57,18 @@ JSON output is the automation contract:
 - writes diagnostics that are not part of the JSON document to stderr;
 - must be deterministic in field meaning and stable ordering of arrays where order is not semantically meaningful.
 
-Recommended envelope:
+Stable envelope:
 
 ```json
 {
   "schemaVersion": "specgraph.cli/v1",
   "command": "sg spec validate",
   "status": "failed",
-  "graphBranch": "main",
+  "data": {
+    "graphBranch": "main"
+  },
+  "warnings": [],
+  "elapsedMs": 12,
   "findings": []
 }
 ```
@@ -120,7 +124,7 @@ Status values:
 | `sg adopt` | `scan`, future `report`, `promote`, `mode` | Partial | Adoption observations/report/findings; promotions return receipts. |
 | `sg issue` | `create`, `link-repro`, `root-cause`, `fix-spec`, `close` | Planned | IssueGraph report/items/findings; lifecycle mutations return receipts. |
 | `sg proposal` | `create`, `transition`, future `validate`, `accept`, `reject`, `sandbox` | Partial | Proposal report/findings; accepted proposal deltas must go through Operation Runtime receipts. |
-| `sg adapter` | `list`, `capabilities`, `test`, `sync` | Planned | Adapter capability/provenance report; observations remain untrusted. |
+| `sg adapter` | `catalog`, `enable`, `disable`, `show`, `run`, `audit` | Current | Adapter descriptor/config/capability/provenance report; observations remain untrusted. |
 | `sg proof` | `run`, future named proof scenarios | Partial | Human progress lines; JSON proof report with passed/failed scenario steps. |
 | `sg docs` | `check`, `cli-reference` | Current | Documentation validation/generation report. |
 | `sg release` | `check`, `evidence`, `validate`, `artifact add`, `record` | Current | Release evidence/checksum/signature report; `validate` checks graph-bound release evidence; `record` binds release version/tag/commit/validation/snapshot/artifact facts through Operation Runtime. |
@@ -203,6 +207,16 @@ Phase 7 adds the final product-surface command groups needed by release/docs/per
 - `sg perf budgets --check` enforces that every performance budget has a positive threshold.
 
 These commands support the global `--format json` / `--json` envelope convention.
+
+## Phase 11A Implemented CLI Contract Foundations
+
+Phase 11A starts the final JSON compatibility rollout without changing concise human output:
+
+- `CliEnvelope<T>` is the canonical JSON envelope shape with `schemaVersion`, `command`, `status`, `data`, `findings`, optional `receipt`, `warnings`, and `elapsedMs`.
+- Runtime errors in JSON mode are converted to a structured `specgraph.cli/v1` envelope. Finding-driven failures use code `cli.findings_failed` and preserve the blocking findings array.
+- `sg adapter audit --format json` uses the canonical envelope and remains a stable automation target for adapter-boundary validation.
+- `sg docs cli-reference --check <path>` detects generated CLI reference drift. Regenerate with `sg docs cli-reference --output docs/reference/cli.txt` when command help changes intentionally.
+- `docs/reference/cli.txt` is a checked-in generated reference and `sg docs check` treats it as required documentation.
 
 ## F.1 Implemented Project Baseline CLI
 

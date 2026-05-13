@@ -1,0 +1,57 @@
+SpecGraph OS MVP CLI
+
+Usage: sg [OPTIONS] <COMMAND>
+
+Commands:
+  init       Initialize .specgraph metadata in the current repository
+  project    Project profile and baseline commands
+  module     Module baseline and capability commands
+  spec       Spec authoring and validation commands
+  ontology   Ontology pack commands
+  operation  Operation ABI registry commands
+  identity   Actor identity, role, and permission commands
+  policy     Built-in policy engine commands
+  adopt      Existing repository adoption commands
+  workflow   Project-first agent/wizard workflow planner
+  impact     Impact analysis commands
+  adapter    Adapter catalog and capability commands
+  api        Transport-neutral API server surface commands
+  pr         Pull request and hosting-provider integration commands
+  proposal   Untrusted proposal commands
+  action     ActionGraph and CommitPlan commands
+  git        Git hook and commit binding commands
+  code       Code indexing and scope validation commands
+  data       DataGraph and migration observation commands
+  trace      Test traceability commands
+  test       Test runner integration commands
+  ci         CI aggregate validation command
+  security   Security boundary audit commands
+  docs       Documentation validation and generated reference commands
+  release    Release evidence and packaging commands
+  perf       Performance budget commands
+  proof      Proof-of-idea scenario runner
+  graph      Graph inspection and replay commands
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --root <DIR>
+          [default: .]
+
+      --format <FORMAT>
+          [default: human]
+          [possible values: human, json]
+
+      --json
+          
+
+      --quiet
+          
+
+      --no-color
+          
+
+  -h, --help
+          Print help
+
+  -V, --version
+          Print version
