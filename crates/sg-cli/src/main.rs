@@ -2,7 +2,12 @@ use anyhow::{bail, Context};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use serde_json::json;
-use sg_adapter_api::{built_in_adapter_catalog, validate_adapter_catalog};
+use sg_adapter_api::{
+    audit_adapter_registry, built_in_adapter_catalog, validate_adapter_catalog,
+    validate_adapter_output, wrap_adapter_output, AdapterCapability, AdapterCapabilityBroker,
+    AdapterConfigEntry, AdapterConfigFile, AdapterRegistry, AdapterRegistryEntry,
+    ADAPTER_CONFIG_RELATIVE_PATH,
+};
 use sg_adapter_code::{index_source_file_with_cache, observations_to_delta, CodeIndexObservation};
 use sg_adapter_hosting::{
     validate_provider_check_report, GitHubProvider, HostingProvider, ProviderCheckReport,
@@ -769,6 +774,48 @@ enum AdapterCommand {
         #[arg(long)]
         check: bool,
     },
+    /// Enable an adapter in .specgraph/adapters/config.yaml.
+    Enable(AdapterEnableArgs),
+    /// Disable an adapter and clear its capability grants.
+    Disable(AdapterDisableArgs),
+    /// Show one adapter or the full configured adapter registry.
+    Show(AdapterShowArgs),
+    /// Check runtime authorization and emit a provenance envelope for an adapter run.
+    Run(AdapterRunArgs),
+    /// Audit adapter catalog, config grants, and runtime boundary findings.
+    Audit(AdapterAuditArgs),
+}
+
+#[derive(Debug, Args)]
+struct AdapterEnableArgs {
+    id: String,
+    #[arg(long = "grant", value_parser = parse_adapter_capability)]
+    grants: Vec<AdapterCapability>,
+}
+
+#[derive(Debug, Args)]
+struct AdapterDisableArgs {
+    id: String,
+}
+
+#[derive(Debug, Args)]
+struct AdapterShowArgs {
+    id: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct AdapterRunArgs {
+    id: String,
+    #[arg(long = "capability", value_parser = parse_adapter_capability)]
+    capabilities: Vec<AdapterCapability>,
+    #[arg(long, default_value = "")]
+    input: String,
+}
+
+#[derive(Debug, Args)]
+struct AdapterAuditArgs {
+    #[arg(long)]
+    check: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1729,7 +1776,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Adopt(args) => handle_adopt(&store, &root, args)?,
         Commands::Workflow(args) => handle_workflow(&store, args, output)?,
         Commands::Impact(args) => handle_impact(&store, args)?,
-        Commands::Adapter(args) => handle_adapter(args)?,
+        Commands::Adapter(args) => handle_adapter(&root, args, output)?,
         Commands::Api(args) => handle_api(&store, &root, args)?,
         Commands::Pr(args) => handle_pr(&store, &root, args)?,
         Commands::Proposal(args) => handle_proposal(&store, &root, args)?,
@@ -2642,41 +2689,324 @@ fn handle_impact(store: &SpecGraphStore, args: ImpactArgs) -> anyhow::Result<()>
     Ok(())
 }
 
-fn handle_adapter(args: AdapterArgs) -> anyhow::Result<()> {
+fn handle_adapter(root: &Path, args: AdapterArgs, output: OutputConfig) -> anyhow::Result<()> {
     match args.command {
         AdapterCommand::Catalog { check } => {
             let catalog = built_in_adapter_catalog();
-            for adapter in &catalog {
-                let capabilities = adapter
-                    .capabilities
-                    .iter()
-                    .map(|capability| format!("{capability:?}"))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let signature = adapter
-                    .signature
-                    .as_ref()
-                    .map(|signature| signature.algorithm.as_str())
-                    .unwrap_or("none");
-                println!(
-                    "{} kind={} version={} trustLevel={:?} capabilities={} signature={}",
-                    adapter.id,
-                    adapter.kind,
-                    adapter.version,
-                    adapter.trust_level,
-                    capabilities,
-                    signature
-                );
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "adapters": catalog,
+                }))?;
+            } else if !output.quiet {
+                for adapter in &catalog {
+                    print_adapter_descriptor(adapter);
+                }
             }
             let findings = validate_adapter_catalog(&catalog);
-            print_findings(&findings);
+            if !output.json() {
+                print_findings(&findings);
+            }
             if check {
                 fail_on_errors(&findings, "adapter catalog validation")?;
-                println!("adapterCatalog: ok");
+                if !output.quiet && !output.json() {
+                    println!("adapterCatalog: ok");
+                }
+            }
+        }
+        AdapterCommand::Enable(args) => {
+            let mut config = load_adapter_config(root)?;
+            let catalog = built_in_adapter_catalog();
+            let descriptor = catalog
+                .iter()
+                .find(|adapter| adapter.id == args.id)
+                .with_context(|| format!("unknown adapter `{}`", args.id))?;
+            for grant in &args.grants {
+                if !descriptor.has_capability(*grant) {
+                    bail!(
+                        "adapter `{}` does not declare capability `{:?}`",
+                        descriptor.id,
+                        grant
+                    );
+                }
+            }
+            upsert_adapter_config_entry(
+                &mut config,
+                AdapterConfigEntry {
+                    id: args.id.clone(),
+                    enabled: true,
+                    capability_grants: args.grants.clone(),
+                },
+            );
+            save_adapter_config(root, &config)?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "adapter": args.id,
+                    "enabled": true,
+                    "capabilityGrants": args.grants,
+                    "configPath": adapter_config_path(root).display().to_string(),
+                }))?;
+            } else if !output.quiet {
+                println!("adapterEnabled: {}", args.id);
+                println!("config: {}", adapter_config_path(root).display());
+            }
+        }
+        AdapterCommand::Disable(args) => {
+            if !built_in_adapter_catalog()
+                .iter()
+                .any(|adapter| adapter.id == args.id)
+            {
+                bail!("unknown adapter `{}`", args.id);
+            }
+            let mut config = load_adapter_config(root)?;
+            upsert_adapter_config_entry(
+                &mut config,
+                AdapterConfigEntry {
+                    id: args.id.clone(),
+                    enabled: false,
+                    capability_grants: Vec::new(),
+                },
+            );
+            save_adapter_config(root, &config)?;
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "adapter": args.id,
+                    "enabled": false,
+                    "capabilityGrants": [],
+                    "configPath": adapter_config_path(root).display().to_string(),
+                }))?;
+            } else if !output.quiet {
+                println!("adapterDisabled: {}", args.id);
+                println!("config: {}", adapter_config_path(root).display());
+            }
+        }
+        AdapterCommand::Show(args) => {
+            let (registry, config_findings) = load_adapter_registry(root)?;
+            if output.json() {
+                let entries = selected_adapter_entries(&registry, args.id.as_deref())?;
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "configPath": adapter_config_path(root).display().to_string(),
+                    "entries": entries,
+                    "findings": config_findings,
+                }))?;
+            } else if !output.quiet {
+                println!("config: {}", adapter_config_path(root).display());
+                for entry in selected_adapter_entries(&registry, args.id.as_deref())? {
+                    print_adapter_descriptor(&entry.descriptor);
+                    println!(
+                        "  enabled={} grants={}",
+                        entry.enabled,
+                        format_adapter_capabilities(entry.granted_capabilities().iter())
+                    );
+                }
+                print_findings(&config_findings);
+            }
+        }
+        AdapterCommand::Run(args) => {
+            let (registry, mut findings) = load_adapter_registry(root)?;
+            let entry = registry
+                .entry(&args.id)
+                .with_context(|| format!("unknown adapter `{}`", args.id))?;
+            let required = if args.capabilities.is_empty() {
+                entry.granted_capabilities()
+            } else {
+                args.capabilities.clone()
+            };
+            let broker = AdapterCapabilityBroker::new(&registry);
+            let authorized_entry = match broker.authorize(&args.id, &required) {
+                Ok(entry) => Some(entry),
+                Err(auth_findings) => {
+                    findings.extend(auth_findings);
+                    None
+                }
+            };
+            if let Some(entry) = authorized_entry {
+                let output_envelope = wrap_adapter_output(
+                    entry,
+                    required.clone(),
+                    args.input.as_bytes(),
+                    GraphDelta::default(),
+                );
+                findings.extend(validate_adapter_output(entry, &output_envelope));
+                if output.json() {
+                    print_json(&json!({
+                        "schemaVersion": "specgraph.cli/v1",
+                        "adapter": args.id,
+                        "authorized": findings.iter().all(|finding| finding.severity != FindingSeverity::Error),
+                        "requiredCapabilities": required,
+                        "output": output_envelope,
+                        "findings": findings,
+                    }))?;
+                } else if !output.quiet {
+                    println!("adapterRun: authorized");
+                    println!("adapter: {}", args.id);
+                    println!(
+                        "capabilities: {}",
+                        format_adapter_capabilities(required.iter())
+                    );
+                    println!("outputHash: {}", output_envelope.provenance.output_hash);
+                    print_findings(&findings);
+                }
+            } else {
+                if output.json() {
+                    print_json(&json!({
+                        "schemaVersion": "specgraph.cli/v1",
+                        "adapter": args.id,
+                        "authorized": false,
+                        "requiredCapabilities": required,
+                        "findings": findings,
+                    }))?;
+                } else {
+                    print_findings(&findings);
+                }
+                fail_on_errors(&findings, "adapter runtime authorization")?;
+            }
+            fail_on_errors(&findings, "adapter runtime authorization")?;
+        }
+        AdapterCommand::Audit(args) => {
+            let (registry, mut findings) = load_adapter_registry(root)?;
+            findings.extend(audit_adapter_registry(&registry));
+            if output.json() {
+                print_json(&json!({
+                    "schemaVersion": "specgraph.cli/v1",
+                    "configPath": adapter_config_path(root).display().to_string(),
+                    "adapterCount": registry.adapters.len(),
+                    "findings": findings,
+                }))?;
+            } else if !output.quiet {
+                println!("adapterAudit: {} adapter(s)", registry.adapters.len());
+                println!("config: {}", adapter_config_path(root).display());
+                print_findings(&findings);
+            }
+            if args.check {
+                fail_on_errors(&findings, "adapter audit")?;
+                if !output.quiet && !output.json() {
+                    println!("adapterAudit: ok");
+                }
             }
         }
     }
     Ok(())
+}
+
+fn adapter_config_path(root: &Path) -> PathBuf {
+    root.join(ADAPTER_CONFIG_RELATIVE_PATH)
+}
+
+fn load_adapter_config(root: &Path) -> anyhow::Result<AdapterConfigFile> {
+    let path = adapter_config_path(root);
+    if path.exists() {
+        let contents = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        AdapterConfigFile::from_yaml_str(&contents)
+            .with_context(|| format!("failed to parse {}", path.display()))
+    } else {
+        Ok(AdapterConfigFile::least_privilege(
+            &built_in_adapter_catalog(),
+        ))
+    }
+}
+
+fn save_adapter_config(root: &Path, config: &AdapterConfigFile) -> anyhow::Result<()> {
+    let path = adapter_config_path(root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let yaml = config.to_yaml_string()?;
+    fs::write(&path, yaml).with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn load_adapter_registry(root: &Path) -> anyhow::Result<(AdapterRegistry, Vec<Finding>)> {
+    let config = load_adapter_config(root)?;
+    Ok(AdapterRegistry::from_config(
+        built_in_adapter_catalog(),
+        &config,
+    ))
+}
+
+fn upsert_adapter_config_entry(config: &mut AdapterConfigFile, entry: AdapterConfigEntry) {
+    if let Some(existing) = config
+        .adapters
+        .iter_mut()
+        .find(|candidate| candidate.id == entry.id)
+    {
+        *existing = entry;
+    } else {
+        config.adapters.push(entry);
+        config
+            .adapters
+            .sort_by(|left, right| left.id.cmp(&right.id));
+    }
+}
+
+fn selected_adapter_entries<'a>(
+    registry: &'a AdapterRegistry,
+    adapter_id: Option<&str>,
+) -> anyhow::Result<Vec<&'a AdapterRegistryEntry>> {
+    if let Some(adapter_id) = adapter_id {
+        let entry = registry
+            .entry(adapter_id)
+            .with_context(|| format!("unknown adapter `{adapter_id}`"))?;
+        Ok(vec![entry])
+    } else {
+        Ok(registry.adapters.values().collect())
+    }
+}
+
+fn print_adapter_descriptor(adapter: &sg_adapter_api::AdapterDescriptor) {
+    let signature = adapter
+        .signature
+        .as_ref()
+        .map(|signature| signature.algorithm.as_str())
+        .unwrap_or("none");
+    println!(
+        "{} kind={} version={} trustLevel={:?} capabilities={} signature={}",
+        adapter.id,
+        adapter.kind,
+        adapter.version,
+        adapter.trust_level,
+        format_adapter_capabilities(adapter.capabilities.iter()),
+        signature
+    );
+}
+
+fn format_adapter_capabilities<'a>(
+    capabilities: impl Iterator<Item = &'a AdapterCapability>,
+) -> String {
+    capabilities
+        .map(|capability| format!("{capability:?}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn parse_adapter_capability(value: &str) -> Result<AdapterCapability, String> {
+    let normalized = value
+        .chars()
+        .filter(|character| *character != '-' && *character != '_')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    match normalized.as_str() {
+        "readfilesystem" => Ok(AdapterCapability::ReadFilesystem),
+        "readgit" => Ok(AdapterCapability::ReadGit),
+        "readpackagemanifest" => Ok(AdapterCapability::ReadPackageManifest),
+        "readdatabaseschema" => Ok(AdapterCapability::ReadDatabaseSchema),
+        "indexcode" => Ok(AdapterCapability::IndexCode),
+        "emitobservations" => Ok(AdapterCapability::EmitObservations),
+        "emittestresults" => Ok(AdapterCapability::EmitTestResults),
+        "emitproviderchecks" => Ok(AdapterCapability::EmitProviderChecks),
+        "proposegraphdelta" => Ok(AdapterCapability::ProposeGraphDelta),
+        "proposecodepatch" => Ok(AdapterCapability::ProposeCodePatch),
+        "runvalidation" => Ok(AdapterCapability::RunValidation),
+        "runsandbox" => Ok(AdapterCapability::RunSandbox),
+        "denynetwork" => Ok(AdapterCapability::DenyNetwork),
+        "denysecrets" => Ok(AdapterCapability::DenySecrets),
+        "denyproduction" => Ok(AdapterCapability::DenyProduction),
+        _ => Err(format!("unknown adapter capability `{value}`")),
+    }
 }
 
 fn handle_api(store: &SpecGraphStore, root: &Path, args: ApiArgs) -> anyhow::Result<()> {

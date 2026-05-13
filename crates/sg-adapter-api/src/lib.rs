@@ -576,6 +576,44 @@ fn require_capability(
     }
 }
 
+pub fn audit_adapter_registry(registry: &AdapterRegistry) -> Vec<Finding> {
+    let catalog = registry
+        .adapters
+        .values()
+        .map(|entry| entry.descriptor.clone())
+        .collect::<Vec<_>>();
+    let mut findings = validate_adapter_catalog(&catalog);
+
+    for entry in registry.adapters.values() {
+        for grant in &entry.capability_grants {
+            if !entry.descriptor.has_capability(*grant) {
+                findings.push(security_finding(
+                    "adapter_audit.grant_not_declared",
+                    format!(
+                        "Adapter `{}` has config grant `{:?}` that is not declared by its descriptor.",
+                        entry.descriptor.id, grant
+                    ),
+                ));
+            }
+        }
+        if entry.enabled && entry.capability_grants.is_empty() {
+            findings.push(
+                Finding::new(
+                    "adapter_audit.enabled_without_grants",
+                    FindingSeverity::Warning,
+                    format!(
+                        "Adapter `{}` is enabled without capability grants; it can be discovered but cannot perform privileged work.",
+                        entry.descriptor.id
+                    ),
+                )
+                .with_validator(VALIDATOR_SECURITY_BOUNDARY, CORE_VALIDATOR_VERSION),
+            );
+        }
+    }
+
+    findings
+}
+
 pub fn validate_adapter_output(
     entry: &AdapterRegistryEntry,
     output: &AdapterOutputEnvelope,
@@ -981,6 +1019,53 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.code == "adapter.provenance_capability_not_granted"));
+    }
+
+    #[test]
+    fn adapter_output_validation_requires_envelope_integrity() {
+        let config = AdapterConfigFile {
+            adapters: vec![AdapterConfigEntry {
+                id: CODE_INDEXER_ADAPTER_ID.to_string(),
+                enabled: true,
+                capability_grants: vec![AdapterCapability::EmitObservations],
+            }],
+        };
+        let (registry, findings) =
+            AdapterRegistry::from_config(built_in_adapter_catalog(), &config);
+        assert!(findings.is_empty());
+        let entry = registry.entry(CODE_INDEXER_ADAPTER_ID).unwrap();
+        let mut output = wrap_adapter_output_at(
+            entry,
+            vec![AdapterCapability::EmitObservations],
+            b"input",
+            observed_delta(CODE_INDEXER_ADAPTER_ID),
+            "",
+        );
+        output.provenance.output_hash = "sha256:wrong".to_string();
+        output.provenance.trust_state = "Trusted".to_string();
+
+        let findings = validate_adapter_output(entry, &output);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "adapter.provenance_output_hash_mismatch"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "adapter.provenance_trust_required"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "adapter.provenance_timestamp_required"));
+    }
+
+    #[test]
+    fn adapter_audit_reports_config_findings() {
+        let mut registry = AdapterRegistry::built_in_disabled();
+        let entry = registry.adapters.get_mut(CODE_INDEXER_ADAPTER_ID).unwrap();
+        entry.enabled = true;
+
+        let findings = audit_adapter_registry(&registry);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "adapter_audit.enabled_without_grants"));
     }
 
     fn observed_delta(adapter_id: &str) -> GraphDelta {

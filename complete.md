@@ -156,8 +156,9 @@ Current completed slices:
 - **Phase 9A — LLM provider proposal generation foundations** added a provider trait, YAML/env-backed provider registry with offline mock provider, proposal request schema, provider provenance and output validation, and `sg proposal generate/explain` commands that record only untrusted Proposal facts.
 - **Phase 9B — Proposal acceptance invariant closure** added regression coverage for missing payload warnings and the unchanged `Proposal.Accept` path requiring validated proposal state, passed validation run, exact diff hash, passed sandbox evidence, and acceptance evidence nodes.
 - **Phase 10A — Adapter runtime boundary foundations** added versioned/trust-leveled adapter descriptors, disabled-by-default adapter registry/config models for `.specgraph/adapters/config.yaml`, a capability broker, provenance envelopes with input/output hashes, and adapter-output validation that keeps facts observed and rejects direct trust promotion.
+- **Phase 10B — Adapter CLI and audit closure** added `sg adapter enable/disable/show/run/audit`, config persistence for capability grants, runtime authorization/audit output, and tests/manual checks for disabled adapters, missing grants, envelope integrity, observed output, trust-promotion rejection, and audit findings.
 
-Next focus: **Phase 10B — Adapter CLI and audit closure**. Start from the latest `development`, add `sg adapter enable/disable/show/run/audit`, complete audit-report tests, and keep the five-checklist-item branch policy.
+Next focus: **Phase 11 — CLI JSON and UX Contract Completion**. Start from the latest `development` and continue the five-checklist-item branch policy with stable JSON/human output, exit-code semantics, and machine-readable finding contracts.
 
 ---
 
@@ -853,9 +854,9 @@ Turn adapter descriptors into an enforceable runtime boundary with capability ch
 
 - [x] **Enforce no direct trust promotion.** Update validators so adapter-created facts with `Trusted` state fail unless produced by an accepted operation that explicitly promotes them.
 
-- [ ] **Add CLI commands.** Add `sg adapter enable`, `sg adapter disable`, `sg adapter show`, `sg adapter run <id>`, and `sg adapter audit`.
+- [x] **Add CLI commands.** Add `sg adapter enable`, `sg adapter disable`, `sg adapter show`, `sg adapter run <id>`, and `sg adapter audit`.
 
-- [ ] **Add tests.** Cover disabled adapter cannot run, missing capability fails, provenance envelope required, observed facts accepted, direct trusted output rejected, and audit report findings.
+- [x] **Add tests.** Cover disabled adapter cannot run, missing capability fails, provenance envelope required, observed facts accepted, direct trusted output rejected, and audit report findings.
 
 ## Phase Gate
 
