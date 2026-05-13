@@ -218,6 +218,18 @@ Phase 11A starts the final JSON compatibility rollout without changing concise h
 - `sg docs cli-reference --check <path>` detects generated CLI reference drift. Regenerate with `sg docs cli-reference --output docs/reference/cli.txt` when command help changes intentionally.
 - `docs/reference/cli.txt` is a checked-in generated reference and `sg docs check` treats it as required documentation.
 
+## Phase 11B Implemented JSON Conversion Slice
+
+Phase 11B extends the envelope contract to more automation-facing commands while keeping human output concise:
+
+- `sg operation list` and `sg operation validators` emit inventory envelopes in JSON mode.
+- `sg policy check` and `sg policy non-waivable` suppress human lines in JSON mode and preserve finding failures through the structured error envelope.
+- `sg graph status` and `sg graph query` emit branch-aware JSON envelopes for status and query automation.
+- `sg ci validate` emits a JSON envelope with checks, status, and optional receipt when recording validation evidence.
+- `sg pr validate` and `sg release validate` no longer print pre-error JSON documents before structured JSON failures.
+- Golden CLI contract fixtures now cover adapter audit success, operation inventory, policy failure, CI report, release validation failure, graph branch query, provider-check failure, and structured finding errors.
+- The GitHub CI workflow consumes `sg adapter audit --format json --check` and validates the envelope shape before the proof scenario.
+
 ## F.1 Implemented Project Baseline CLI
 
 The project-first closure adds the first trusted ProjectGraph command group:

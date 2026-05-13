@@ -31,6 +31,16 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Cargo test
         run: cargo test --workspace --all-targets
+      - name: CLI JSON contract smoke
+        run: |
+          cargo run -q -p sg-cli -- --format json adapter audit --check > /tmp/sg-adapter-audit.json
+          python3 - <<'PY'
+          import json
+          report = json.load(open("/tmp/sg-adapter-audit.json"))
+          assert report["schemaVersion"] == "specgraph.cli/v1"
+          assert report["status"] == "passed"
+          assert report["data"]["adapterCount"] >= 1
+          PY
       - name: Proof scenario
         run: cargo run -p sg-cli -- proof run
       - name: SpecGraph CI validation

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg policy",
+  "status": "error",
+  "data": {
+    "error": {
+      "code": "cli.findings_failed",
+      "message": "policy check failed with 1 error finding(s)",
+      "remediation": null
+    }
+  },
+  "findings": [
+    {
+      "code": "policy.security.no_secret_files",
+      "severity": "Error",
+      "message": "Secret-like path `.env` cannot be changed without a stronger policy",
+      "validator": "validator.policy",
+      "validatorVersion": "0.1.0",
+      "relatedNodes": [],
+      "relatedEdges": []
+    }
+  ],
+  "elapsedMs": 0
+}

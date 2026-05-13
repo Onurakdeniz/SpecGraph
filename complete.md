@@ -158,8 +158,9 @@ Current completed slices:
 - **Phase 10A — Adapter runtime boundary foundations** added versioned/trust-leveled adapter descriptors, disabled-by-default adapter registry/config models for `.specgraph/adapters/config.yaml`, a capability broker, provenance envelopes with input/output hashes, and adapter-output validation that keeps facts observed and rejects direct trust promotion.
 - **Phase 10B — Adapter CLI and audit closure** added `sg adapter enable/disable/show/run/audit`, config persistence for capability grants, runtime authorization/audit output, and tests/manual checks for disabled adapters, missing grants, envelope integrity, observed output, trust-promotion rejection, and audit findings.
 - **Phase 11A — CLI envelope and reference-check foundations** added the typed `CliEnvelope<T>` JSON contract, structured JSON error envelopes with finding preservation, adapter-audit envelope coverage, generated CLI reference drift checking, checked-in CLI reference output, and starter CLI contract tests.
+- **Phase 11B — CLI JSON conversion and golden fixture expansion** moved operation inventory, policy checks, graph status/query, CI validation, PR provider checks, and release validation toward parseable JSON envelopes; added golden fixtures for adapter success, operation inventory, policy failure, CI report, release validation, branch query, and provider-check failure; and wired CI to consume the adapter-audit JSON path.
 
-Next focus: **Phase 11B — Complete CLI output conversion and golden coverage**. Start from the latest `development` and continue the five-checklist-item branch policy with full command output conversion, comprehensive golden fixtures, and CI JSON consumption.
+Next focus: **Phase 11C — Complete remaining CLI output conversion**. Start from the latest `development`, finish legacy command groups and the dry-run receipt golden fixture, then close the Phase 11 parseable-JSON gate.
 
 ---
 
@@ -885,13 +886,13 @@ Make CLI output stable for automation, CI, SDKs, and provider integrations.
 
 - [ ] **Add golden output tests.** Add fixtures for success, validation failure, policy failure, dry-run receipt, CI report, release validation, branch query, and provider check output.
 
-- [ ] **Add backward compatibility notes.** Where human output changes, keep it concise and production-safe. JSON is the compatibility contract.
+- [x] **Add backward compatibility notes.** Where human output changes, keep it concise and production-safe. JSON is the compatibility contract.
 
 ## Phase Gate
 
 - [ ] Every command emits parseable JSON with `--format json`.
 - [ ] Golden tests fail on accidental output drift.
-- [ ] CI consumes JSON output for at least one validation path.
+- [x] CI consumes JSON output for at least one validation path.
 
 ---
 

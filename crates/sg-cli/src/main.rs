@@ -1879,15 +1879,15 @@ fn run_cli(cli: Cli, output: OutputConfig) -> anyhow::Result<()> {
         Commands::Module(args) => handle_module(&store, &root, args, output)?,
         Commands::Spec(args) => handle_spec(&store, &root, args)?,
         Commands::Ontology(args) => handle_ontology(&store, &root, args)?,
-        Commands::Operation(args) => handle_operation(args),
+        Commands::Operation(args) => handle_operation(args, output)?,
         Commands::Identity(args) => handle_identity(&store, args)?,
-        Commands::Policy(args) => handle_policy(&store, args)?,
+        Commands::Policy(args) => handle_policy(&store, args, output)?,
         Commands::Adopt(args) => handle_adopt(&store, &root, args)?,
         Commands::Workflow(args) => handle_workflow(&store, args, output)?,
         Commands::Impact(args) => handle_impact(&store, args)?,
         Commands::Adapter(args) => handle_adapter(&root, args, output)?,
         Commands::Api(args) => handle_api(&store, &root, args)?,
-        Commands::Pr(args) => handle_pr(&store, &root, args)?,
+        Commands::Pr(args) => handle_pr(&store, &root, args, output)?,
         Commands::Proposal(args) => handle_proposal(&store, &root, args)?,
         Commands::Action(args) => handle_action(&store, args, output)?,
         Commands::Git(args) => handle_git(&store, &root, args)?,
@@ -1895,13 +1895,13 @@ fn run_cli(cli: Cli, output: OutputConfig) -> anyhow::Result<()> {
         Commands::Data(args) => handle_data(&store, &root, args)?,
         Commands::Trace(args) => handle_trace(&store, &root, args)?,
         Commands::Test(args) => handle_test(&store, args)?,
-        Commands::Ci(args) => handle_ci(&store, &root, args)?,
+        Commands::Ci(args) => handle_ci(&store, &root, args, output)?,
         Commands::Security(args) => handle_security(&store, &root, args)?,
         Commands::Docs(args) => handle_docs(&root, args, output)?,
         Commands::Release(args) => handle_release(&store, &root, args, output)?,
         Commands::Perf(args) => handle_perf(&root, args, output)?,
         Commands::Proof(args) => handle_proof(args)?,
-        Commands::Graph(args) => handle_graph(&store, &root, args)?,
+        Commands::Graph(args) => handle_graph(&store, &root, args, output)?,
     }
 
     Ok(())
@@ -2315,27 +2315,63 @@ fn handle_ontology(store: &SpecGraphStore, root: &Path, args: OntologyArgs) -> a
     Ok(())
 }
 
-fn handle_operation(args: OperationArgs) {
+fn handle_operation(args: OperationArgs, output: OutputConfig) -> anyhow::Result<()> {
     match args.command {
         OperationCommand::List => {
-            for operation in built_in_operations() {
-                println!(
-                    "{} category={} required={}",
-                    operation.name,
-                    operation.category,
-                    operation.required_input_fields.join(",")
-                );
+            let operations = built_in_operations();
+            if output.json() {
+                print_cli_envelope(
+                    "sg operation list",
+                    "passed",
+                    Some(json!({
+                        "count": operations.len(),
+                        "items": operations,
+                    })),
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+            } else if !output.quiet {
+                for operation in operations {
+                    println!(
+                        "{} category={} required={}",
+                        operation.name,
+                        operation.category,
+                        operation.required_input_fields.join(",")
+                    );
+                }
             }
         }
         OperationCommand::Validators => {
-            for validator in built_in_validators() {
-                println!(
-                    "{} version={} area={} description={}",
-                    validator.id, validator.version, validator.system_area, validator.description
-                );
+            let validators = built_in_validators();
+            if output.json() {
+                print_cli_envelope(
+                    "sg operation validators",
+                    "passed",
+                    Some(json!({
+                        "count": validators.len(),
+                        "items": validators,
+                    })),
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+            } else if !output.quiet {
+                for validator in validators {
+                    println!(
+                        "{} version={} area={} description={}",
+                        validator.id,
+                        validator.version,
+                        validator.system_area,
+                        validator.description
+                    );
+                }
             }
         }
     }
+    Ok(())
 }
 
 fn handle_identity(store: &SpecGraphStore, args: IdentityArgs) -> anyhow::Result<()> {
@@ -2370,7 +2406,11 @@ fn handle_identity(store: &SpecGraphStore, args: IdentityArgs) -> anyhow::Result
     Ok(())
 }
 
-fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()> {
+fn handle_policy(
+    store: &SpecGraphStore,
+    args: PolicyArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
     match args.command {
         PolicyCommand::Check(args) => {
             let replay = store.replay(ReplayOptions::checking())?;
@@ -2396,13 +2436,15 @@ fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()>
             } else {
                 evaluate_policies_with_manifests(&replay.graph, &input, &manifests)
             };
-            for decision in &report.decisions {
-                println!(
-                    "{:?} {}: {}",
-                    decision.effect, decision.policy, decision.message
-                );
+            if !output.json() && !output.quiet {
+                for decision in &report.decisions {
+                    println!(
+                        "{:?} {}: {}",
+                        decision.effect, decision.policy, decision.message
+                    );
+                }
+                print_findings(&report.findings);
             }
-            print_findings(&report.findings);
             if args.record {
                 let run_id = policy_run_id();
                 let receipt = store.record_policy_report(RecordPolicyReportOptions {
@@ -2413,16 +2455,63 @@ fn handle_policy(store: &SpecGraphStore, args: PolicyArgs) -> anyhow::Result<()>
                     graph_branch: args.graph_branch,
                     report: report.clone(),
                 })?;
-                println!("policyRunRecorded: {run_id}");
-                println!("operationId: {}", receipt.operation_id);
-                println!("stateHash: {}", receipt.post_state_hash);
+                if output.json() {
+                    fail_on_errors(&report.findings, "policy check")?;
+                    print_cli_envelope(
+                        "sg policy check",
+                        "passed",
+                        Some(json!({
+                            "policyRunId": run_id,
+                            "decisions": report.decisions,
+                        })),
+                        report.findings,
+                        Some(json!(receipt)),
+                        Vec::new(),
+                        output.started_at.elapsed(),
+                    )?;
+                } else if !output.quiet {
+                    println!("policyRunRecorded: {run_id}");
+                    println!("operationId: {}", receipt.operation_id);
+                    println!("stateHash: {}", receipt.post_state_hash);
+                }
+                return Ok(());
             }
             fail_on_errors(&report.findings, "policy check")?;
-            println!("policy: ok");
+            if output.json() {
+                print_cli_envelope(
+                    "sg policy check",
+                    "passed",
+                    Some(json!({
+                        "decisions": report.decisions,
+                    })),
+                    report.findings,
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+            } else if !output.quiet {
+                println!("policy: ok");
+            }
         }
         PolicyCommand::NonWaivable => {
-            for policy in built_in_non_waivable_policies() {
-                println!("{policy}");
+            let policies = built_in_non_waivable_policies();
+            if output.json() {
+                print_cli_envelope(
+                    "sg policy non-waivable",
+                    "passed",
+                    Some(json!({
+                        "count": policies.len(),
+                        "items": policies,
+                    })),
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+            } else if !output.quiet {
+                for policy in policies {
+                    println!("{policy}");
+                }
             }
         }
         PolicyCommand::RecordApproval(args) => {
@@ -3282,7 +3371,12 @@ fn read_api_operation_request(root: &Path, path: &Path) -> anyhow::Result<ApiOpe
     }
 }
 
-fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Result<()> {
+fn handle_pr(
+    store: &SpecGraphStore,
+    root: &Path,
+    args: PrArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
     match args.command {
         PrCommand::Sync(args) => {
             let replay = store.replay(ReplayOptions::checking())?;
@@ -3383,10 +3477,12 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
             ];
             let mut findings = Vec::new();
 
-            println!(
-                "replay: ok events={} stateHash={}",
-                replay.events_replayed, replay.state_hash
-            );
+            if !output.json() && !output.quiet {
+                println!(
+                    "replay: ok events={} stateHash={}",
+                    replay.events_replayed, replay.state_hash
+                );
+            }
 
             let spec_report = store.validate_specs()?;
             findings.extend(spec_report.findings);
@@ -3470,10 +3566,12 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
 
             if let Some(report_file) = args.report_file.as_ref() {
                 write_provider_check_report(root, report_file, &report)?;
-                println!(
-                    "providerCheckReport: {}",
-                    resolve_path(root, report_file.clone()).display()
-                );
+                if !output.json() && !output.quiet {
+                    println!(
+                        "providerCheckReport: {}",
+                        resolve_path(root, report_file.clone()).display()
+                    );
+                }
             }
 
             if args.record
@@ -3531,15 +3629,55 @@ fn handle_pr(store: &SpecGraphStore, root: &Path, args: PrArgs) -> anyhow::Resul
                     delta,
                     dry_run: false,
                 })?;
-                println!("validationRunRecorded: {run_id}");
-                println!("providerCheckRecorded: {}", args.number);
-                println!("operationId: {}", receipt.operation_id);
-                println!("stateHash: {}", receipt.post_state_hash);
+                if output.json() {
+                    print_cli_envelope(
+                        "sg pr validate",
+                        "passed",
+                        Some(json!({
+                            "checks": checks,
+                            "providerCheck": report,
+                            "providerCheckRecorded": args.number,
+                            "stateHash": replay.state_hash,
+                            "status": status,
+                            "validationRunId": run_id,
+                        })),
+                        Vec::new(),
+                        Some(json!(receipt)),
+                        Vec::new(),
+                        output.started_at.elapsed(),
+                    )?;
+                } else if !output.quiet {
+                    println!("validationRunRecorded: {run_id}");
+                    println!("providerCheckRecorded: {}", args.number);
+                    println!("operationId: {}", receipt.operation_id);
+                    println!("stateHash: {}", receipt.post_state_hash);
+                }
+                return Ok(());
             }
 
-            print_findings(&findings);
+            if !output.json() && !output.quiet {
+                print_findings(&findings);
+            }
             fail_on_errors(&findings, "PR validation")?;
-            println!("pr: ok status={status}");
+            if output.json() {
+                print_cli_envelope(
+                    "sg pr validate",
+                    "passed",
+                    Some(json!({
+                        "checks": checks,
+                        "providerCheck": report,
+                        "stateHash": replay.state_hash,
+                        "status": status,
+                        "validationRunId": run_id,
+                    })),
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+            } else if !output.quiet {
+                println!("pr: ok status={status}");
+            }
         }
     }
     Ok(())
@@ -4442,28 +4580,52 @@ fn parse_test_case_result(input: &str) -> anyhow::Result<TestCaseResult> {
     })
 }
 
-fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Result<()> {
+fn handle_ci(
+    store: &SpecGraphStore,
+    root: &Path,
+    args: CiArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
     match args.command {
         CiCommand::Validate(args) => {
             let replay = store.replay(ReplayOptions::checking())?;
             let mut checks = vec!["replay".to_string(), "spec".to_string()];
-            println!(
-                "replay: ok events={} stateHash={}",
-                replay.events_replayed, replay.state_hash
-            );
-            validate_specs_or_fail(store)?;
+            if !output.json() && !output.quiet {
+                println!(
+                    "replay: ok events={} stateHash={}",
+                    replay.events_replayed, replay.state_hash
+                );
+            }
+            let spec_report = store.validate_specs()?;
+            if !output.json() && !output.quiet {
+                println!("stateHash: {}", spec_report.state_hash);
+                if spec_report.findings.is_empty() {
+                    println!("findings: 0");
+                    println!("validation: ok");
+                } else {
+                    println!("findings: {}", spec_report.findings.len());
+                    print_findings(&spec_report.findings);
+                }
+            }
+            fail_on_errors(&spec_report.findings, "spec validation")?;
             if resolve_path(root, args.links_file.clone()).exists()
                 || has_acceptance_criteria(&replay)
             {
                 let manifest = read_links_manifest(root, &args.links_file)?;
                 let findings = validate_trace_links(&replay.graph, &manifest);
-                print_findings(&findings);
+                if !output.json() && !output.quiet {
+                    print_findings(&findings);
+                }
                 fail_on_errors(&findings, "trace validation")?;
-                println!("trace: ok");
+                if !output.json() && !output.quiet {
+                    println!("trace: ok");
+                }
                 checks.push("trace".to_string());
             }
             let test_findings = validate_required_tests_pass(&replay.graph);
-            print_findings(&test_findings);
+            if !output.json() && !output.quiet {
+                print_findings(&test_findings);
+            }
             fail_on_errors(&test_findings, "test evidence validation")?;
             checks.push("test".to_string());
             if !args.skip_git && root.join(".git").exists() {
@@ -4479,10 +4641,12 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
                     &[],
                     &replay.state_hash,
                 )?;
-                println!(
-                    "ciReport: {}",
-                    resolve_path(root, report_file.clone()).display()
-                );
+                if !output.json() && !output.quiet {
+                    println!(
+                        "ciReport: {}",
+                        resolve_path(root, report_file.clone()).display()
+                    );
+                }
             }
             if args.record {
                 let run_id = validation_run_id("ci");
@@ -4506,11 +4670,45 @@ fn handle_ci(store: &SpecGraphStore, root: &Path, args: CiArgs) -> anyhow::Resul
                     ),
                     dry_run: false,
                 })?;
-                println!("validationRunRecorded: {run_id}");
-                println!("operationId: {}", receipt.operation_id);
-                println!("stateHash: {}", receipt.post_state_hash);
+                if output.json() {
+                    print_cli_envelope(
+                        "sg ci validate",
+                        "passed",
+                        Some(json!({
+                            "checks": checks,
+                            "stateHash": replay.state_hash,
+                            "status": "Passed",
+                            "validationRunId": run_id,
+                        })),
+                        Vec::new(),
+                        Some(json!(receipt)),
+                        Vec::new(),
+                        output.started_at.elapsed(),
+                    )?;
+                } else if !output.quiet {
+                    println!("validationRunRecorded: {run_id}");
+                    println!("operationId: {}", receipt.operation_id);
+                    println!("stateHash: {}", receipt.post_state_hash);
+                }
+                return Ok(());
             }
-            println!("ci: ok");
+            if output.json() {
+                print_cli_envelope(
+                    "sg ci validate",
+                    "passed",
+                    Some(json!({
+                        "checks": checks,
+                        "stateHash": replay.state_hash,
+                        "status": "Passed",
+                    })),
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+            } else if !output.quiet {
+                println!("ci: ok");
+            }
         }
     }
     Ok(())
@@ -5328,12 +5526,17 @@ fn handle_release(
             let replay = store.replay(ReplayOptions::checking())?;
             let findings =
                 release_validation_findings(&replay.graph, &args.version, args.spec.as_deref());
-            if output.json() {
+            let has_errors = findings
+                .iter()
+                .any(|finding| finding.severity == FindingSeverity::Error);
+            if output.json() && has_errors {
+                fail_on_errors(&findings, "release validation")?;
+            } else if output.json() {
                 print_json(&json!({
                     "schemaVersion": "specgraph.release-validate/v1",
                     "version": args.version,
                     "spec": args.spec,
-                    "status": if findings.iter().any(|finding| finding.severity == FindingSeverity::Error) { "failed" } else { "passed" },
+                    "status": "passed",
                     "findings": findings,
                 }))?;
             } else {
@@ -5991,6 +6194,33 @@ fn print_cli_error(command: &str, error: &anyhow::Error, elapsed: Duration) -> a
     )
 }
 
+fn query_context_json(context: &QueryContext) -> serde_json::Value {
+    let target = match &context.target {
+        QueryTarget::Current { graph_branch } => json!({
+            "type": "current",
+            "graphBranch": graph_branch,
+        }),
+        QueryTarget::Branch { graph_branch } => json!({
+            "type": "branch",
+            "graphBranch": graph_branch,
+        }),
+        QueryTarget::Snapshot { snapshot_id } => json!({
+            "type": "snapshot",
+            "snapshotId": snapshot_id,
+        }),
+    };
+    json!({
+        "target": target,
+        "actor": context.actor,
+        "requirePermission": context.require_permission,
+        "limits": {
+            "maxDepth": context.limits.max_depth,
+            "maxNodes": context.limits.max_nodes,
+            "maxEdges": context.limits.max_edges,
+        }
+    })
+}
+
 fn budget_threshold_missing(budget: Option<&serde_json::Value>) -> bool {
     let Some(budget) = budget else {
         return true;
@@ -6318,7 +6548,12 @@ fn run_proof_scenario() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow::Result<()> {
+fn handle_graph(
+    store: &SpecGraphStore,
+    root: &Path,
+    args: GraphArgs,
+    output: OutputConfig,
+) -> anyhow::Result<()> {
     match args.command {
         GraphCommand::Replay(args) => {
             let report = store.replay(ReplayOptions {
@@ -6369,11 +6604,29 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
             for node in report.graph.nodes.values() {
                 *counts.entry(node.node_type.clone()).or_default() += 1;
             }
-            println!("branch: {}", args.branch);
-            println!("stateHash: {}", report.state_hash);
-            println!("events: {}", report.events_replayed);
-            for (node_type, count) in counts {
-                println!("{node_type}: {count}");
+            if output.json() {
+                print_cli_envelope(
+                    "sg graph status",
+                    "passed",
+                    Some(json!({
+                        "branch": args.branch,
+                        "stateHash": report.state_hash,
+                        "events": report.events_replayed,
+                        "lastSequence": report.last_sequence,
+                        "nodeCounts": counts,
+                    })),
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+            } else if !output.quiet {
+                println!("branch: {}", args.branch);
+                println!("stateHash: {}", report.state_hash);
+                println!("events: {}", report.events_replayed);
+                for (node_type, count) in counts {
+                    println!("{node_type}: {count}");
+                }
             }
         }
         GraphCommand::Branch(args) => match args.command {
@@ -6477,12 +6730,35 @@ fn handle_graph(store: &SpecGraphStore, root: &Path, args: GraphArgs) -> anyhow:
                 nodes.sort_by(|left, right| left.id.cmp(&right.id));
                 nodes
             };
-            println!("stateHash: {}", report.state_hash);
-            println!("nodes: {}", nodes.len());
-            println!("costNodes: {}", report.cost.nodes_scanned);
-            println!("costEdges: {}", report.cost.edges_scanned);
-            for node in nodes {
-                println!("{} {} {}", node.id, node.node_type, node.stable_key);
+            if output.json() {
+                print_cli_envelope(
+                    "sg graph query",
+                    "passed",
+                    Some(json!({
+                        "stateHash": report.state_hash,
+                        "nodes": nodes,
+                        "cost": {
+                            "nodesScanned": report.cost.nodes_scanned,
+                            "edgesScanned": report.cost.edges_scanned,
+                            "maxNodes": report.cost.max_nodes,
+                            "maxEdges": report.cost.max_edges,
+                            "maxDepth": report.cost.max_depth,
+                        },
+                        "context": query_context_json(&report.context),
+                    })),
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                    output.started_at.elapsed(),
+                )?;
+            } else if !output.quiet {
+                println!("stateHash: {}", report.state_hash);
+                println!("nodes: {}", nodes.len());
+                println!("costNodes: {}", report.cost.nodes_scanned);
+                println!("costEdges: {}", report.cost.edges_scanned);
+                for node in nodes {
+                    println!("{} {} {}", node.id, node.node_type, node.stable_key);
+                }
             }
         }
         GraphCommand::Diff(args) => {

@@ -1,0 +1,2536 @@
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg operation list",
+  "status": "passed",
+  "data": {
+    "count": 69,
+    "items": [
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "Project"
+        ],
+        "category": "project",
+        "description": "Initialize a SpecGraph store for a repository.",
+        "name": "Project.Init",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "projectName"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_PROJECT_TYPE",
+          "USES_LANGUAGE",
+          "HAS_ARCHITECTURE_STYLE",
+          "USES_PACKAGE_MANAGER",
+          "USES_TEST_RUNNER",
+          "USES_CI_PROVIDER"
+        ],
+        "allowedCreateNodeTypes": [
+          "Project",
+          "ProjectType",
+          "Language",
+          "ArchitectureStyle",
+          "PackageManager",
+          "TestRunner",
+          "CIProvider"
+        ],
+        "category": "project",
+        "description": "Create or update graph-native project profile facts.",
+        "name": "Project.ProfileUpsert",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "project",
+          "profile"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_MODULE",
+          "HAS_LAYER",
+          "HAS_PACKAGE",
+          "IN_LAYER",
+          "PACKAGE_IN_MODULE",
+          "HAS_CAPABILITY",
+          "EXPOSES_INTERFACE"
+        ],
+        "allowedCreateNodeTypes": [
+          "Module",
+          "Layer",
+          "Package",
+          "Capability",
+          "PublicInterface"
+        ],
+        "category": "module",
+        "description": "Create or update graph-native module, layer, package, capability, and interface facts.",
+        "name": "ModuleGraph.Upsert",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "module",
+          "relationships"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "Module"
+        ],
+        "category": "module",
+        "description": "Transition a trusted Module through Active, Deprecated, and Archived lifecycle states.",
+        "name": "ModuleGraph.Lifecycle",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "module",
+          "state"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_PORT",
+          "HAS_ADAPTER",
+          "USES_PORT",
+          "IMPLEMENTS",
+          "CALLS",
+          "FORBIDS_DEPENDENCY_ON",
+          "HAS_DEPENDENCY_BOUNDARY",
+          "HAS_ARCHITECTURE_CONSTRAINT",
+          "IN_LAYER"
+        ],
+        "allowedCreateNodeTypes": [
+          "Layer",
+          "Module",
+          "Port",
+          "Adapter",
+          "DependencyBoundary",
+          "ArchitectureConstraint",
+          "PublicInterface"
+        ],
+        "category": "architecture",
+        "description": "Create or update architecture layers, ports, adapters, dependency boundaries, and constraints.",
+        "name": "ArchitectureGraph.Upsert",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "architecture",
+          "constraints"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_TABLE",
+          "HAS_COLUMN",
+          "OWNS_TABLE",
+          "HAS_DATA_CONTRACT",
+          "OWNS_DATA_CONTRACT",
+          "COVERS_TABLE",
+          "CONSUMES_DATA_CONTRACT",
+          "READS_TABLE",
+          "WRITES_TABLE"
+        ],
+        "allowedCreateNodeTypes": [
+          "Table",
+          "Column",
+          "DataContract",
+          "ReadModel",
+          "Query"
+        ],
+        "category": "data",
+        "description": "Create or update graph-native tables, columns, ownership, and data contracts.",
+        "name": "DataGraph.Upsert",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "dataGraph"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "OWNED_BY_MODULE",
+          "AFFECTS_TABLE",
+          "HAS_ROLLBACK_PLAN",
+          "HAS_MIGRATION_TEST",
+          "HAS_MIGRATION_APPROVAL",
+          "HAS_MIGRATION_EXECUTION",
+          "HAS_MIGRATION_ROLLBACK_EXECUTION"
+        ],
+        "allowedCreateNodeTypes": [
+          "Migration",
+          "RollbackPlan",
+          "MigrationTestEvidence",
+          "Table",
+          "MigrationExecution",
+          "MigrationRollbackExecution"
+        ],
+        "category": "data",
+        "description": "Record migration planning and execution evidence including owner, rollback, tests, approvals, and affected tables.",
+        "name": "Migration.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "migration"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "TOUCHES_MODULE",
+          "HAS_REQUIREMENT",
+          "HAS_ACCEPTANCE_CRITERION",
+          "HAS_RISK",
+          "HAS_MITIGATION",
+          "HAS_BEHAVIOR",
+          "HAS_USE_CASE",
+          "HAS_ENDPOINT",
+          "HAS_ENTITY",
+          "HAS_EVENT",
+          "HAS_DATA_OBJECT",
+          "HAS_TEST_CASE"
+        ],
+        "allowedCreateNodeTypes": [
+          "Spec",
+          "Requirement",
+          "AcceptanceCriterion",
+          "Risk",
+          "Mitigation",
+          "Behavior",
+          "UseCase",
+          "Endpoint",
+          "DomainEntity",
+          "DomainEvent",
+          "DataObject",
+          "TestCase"
+        ],
+        "category": "spec",
+        "description": "Create a spec from CLI input.",
+        "name": "Spec.Create",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "spec"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "TOUCHES_MODULE",
+          "HAS_REQUIREMENT",
+          "HAS_ACCEPTANCE_CRITERION",
+          "HAS_RISK",
+          "HAS_MITIGATION",
+          "HAS_BEHAVIOR",
+          "HAS_USE_CASE",
+          "HAS_ENDPOINT",
+          "HAS_ENTITY",
+          "HAS_EVENT",
+          "HAS_DATA_OBJECT",
+          "HAS_TEST_CASE"
+        ],
+        "allowedCreateNodeTypes": [
+          "Spec",
+          "Requirement",
+          "AcceptanceCriterion",
+          "Risk",
+          "Mitigation",
+          "Behavior",
+          "UseCase",
+          "Endpoint",
+          "DomainEntity",
+          "DomainEvent",
+          "DataObject",
+          "TestCase"
+        ],
+        "category": "spec",
+        "description": "Import a YAML spec projection.",
+        "name": "Spec.Import",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "path",
+          "spec"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "Spec"
+        ],
+        "category": "spec",
+        "description": "Move a Spec through the evidence-gated full-system state machine.",
+        "name": "Spec.Transition",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "spec",
+          "state"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_INTENT_CLARIFICATION",
+          "CLARIFICATION_HAS_QUESTION",
+          "CLARIFICATION_HAS_ASSUMPTION",
+          "QUESTION_ANSWERED_BY",
+          "APPROVES_ASSUMPTION"
+        ],
+        "allowedCreateNodeTypes": [
+          "IntentClarification",
+          "IntentQuestion",
+          "IntentAnswer",
+          "IntentAssumption"
+        ],
+        "category": "intent",
+        "description": "Record accepted intent clarification questions, answers, assumptions, and approval links.",
+        "name": "Intent.RecordDecision",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "intent"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_HUMAN_DECISION",
+          "DECISION_HAS_OPTION",
+          "DECISION_HAS_RATIONALE",
+          "DECISION_HAS_SCOPE",
+          "DECISION_FOR_SPEC",
+          "DECISION_FOR_ACTION",
+          "DECISION_APPROVES_CODE_OBJECT",
+          "DECISION_HAS_APPROVAL"
+        ],
+        "allowedCreateNodeTypes": [
+          "HumanDecision",
+          "DecisionOption",
+          "DecisionRationale",
+          "DecisionScope"
+        ],
+        "category": "workflow",
+        "description": "Record a scoped human decision with options, rationale, scope, and authorized operation/spec/action links.",
+        "name": "HumanDecision.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "decision"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "BOUND_TO_BRANCH",
+          "STARTS_FROM_SNAPSHOT"
+        ],
+        "allowedCreateNodeTypes": [
+          "GitBranch",
+          "GraphSnapshot"
+        ],
+        "category": "git",
+        "description": "Bind a spec to a Git branch and graph snapshot.",
+        "name": "Spec.BindBranch",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "spec",
+          "branch"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_ACTION_GRAPH",
+          "HAS_ACTION_GROUP",
+          "HAS_ACTION",
+          "HAS_COMMIT_PLAN",
+          "ACTION_REQUIRES_VALIDATION_RECIPE",
+          "COMMIT_PLAN_REQUIRES_VALIDATION_RECIPE",
+          "VALIDATION_RECIPE_HAS_COMMAND",
+          "DEPENDS_ON"
+        ],
+        "allowedCreateNodeTypes": [
+          "ActionGraph",
+          "ActionGroup",
+          "ActionNode",
+          "CommitPlan",
+          "ValidationRecipe",
+          "ValidationCommand"
+        ],
+        "category": "action",
+        "description": "Generate the deterministic MVP ActionGraph template.",
+        "name": "ActionGraph.Generate",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "spec"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_EXECUTION_ATTEMPT",
+          "DEPENDS_ON",
+          "REPLANNED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "ActionNode",
+          "ExecutionAttempt"
+        ],
+        "category": "action",
+        "description": "Move an ActionNode to InProgress and record an execution attempt.",
+        "name": "Action.Start",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "action",
+          "state"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_EXECUTION_ATTEMPT",
+          "DEPENDS_ON",
+          "REPLANNED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "ActionNode",
+          "ExecutionAttempt"
+        ],
+        "category": "action",
+        "description": "Complete an ActionNode after required validation evidence exists.",
+        "name": "Action.Complete",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "action",
+          "state"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_EXECUTION_ATTEMPT",
+          "HAS_ACTION",
+          "DEPENDS_ON",
+          "REPLANNED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "ActionNode",
+          "ExecutionAttempt"
+        ],
+        "category": "action",
+        "description": "Mark an ActionNode as replanned and record the replan attempt.",
+        "name": "Action.Replan",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "action",
+          "state"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_EXECUTION_ATTEMPT",
+          "HAS_FAILURE_CAUSE",
+          "HAS_CORRECTION_PLAN",
+          "HAS_ESCALATION",
+          "RETRY_OF"
+        ],
+        "allowedCreateNodeTypes": [
+          "ActionNode",
+          "ExecutionAttempt",
+          "FailureCause",
+          "CorrectionPlan",
+          "EscalationRequired"
+        ],
+        "category": "action",
+        "description": "Record a failed execution attempt with failure cause, correction plan, retry, and escalation evidence.",
+        "name": "Action.Fail",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "action",
+          "state",
+          "failureCause",
+          "correctionPlan"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_GIT_REMOTE",
+          "HAS_GIT_BRANCH",
+          "HAS_GIT_COMMIT",
+          "HAS_GIT_TAG",
+          "TRACKS_REMOTE",
+          "POINTS_TO_COMMIT",
+          "PARENT_COMMIT",
+          "TAGS_COMMIT",
+          "MERGES_BASE",
+          "MERGES_HEAD",
+          "PRODUCES_COMMIT",
+          "MERGE_ACCEPTS_GRAPH_MERGE",
+          "HAS_PULL_REQUEST",
+          "HAS_RELEASE",
+          "RELEASES_TAG",
+          "RELEASES_COMMIT",
+          "RELEASE_HAS_VALIDATION_RUN",
+          "RELEASE_HAS_SNAPSHOT",
+          "RELEASE_HAS_ARTIFACT",
+          "RELEASE_HAS_CHECKSUM",
+          "RELEASE_HAS_EVIDENCE",
+          "ARTIFACT_HAS_CHECKSUM",
+          "SPEC_HAS_VALIDATION_RUN",
+          "SPEC_HAS_PULL_REQUEST",
+          "SPEC_HAS_RELEASE",
+          "SPEC_HAS_MERGE",
+          "PR_FROM_BRANCH",
+          "PR_TARGET_BRANCH",
+          "PR_HEAD_COMMIT",
+          "PR_BASE_COMMIT",
+          "PR_HAS_VALIDATION_RUN",
+          "PR_HAS_CHECK_RUN",
+          "CHECK_FOR_VALIDATION_RUN",
+          "CHECK_HAS_ANNOTATION"
+        ],
+        "allowedCreateNodeTypes": [
+          "GitRemote",
+          "GitBranch",
+          "GitCommit",
+          "GitTag",
+          "GitMerge",
+          "Release",
+          "ReleaseArtifact",
+          "ArtifactChecksum",
+          "ReleaseEvidence",
+          "PullRequest",
+          "ProviderCheckRun",
+          "ProviderCheckAnnotation"
+        ],
+        "category": "git",
+        "description": "Record branch, commit, tag, remote, merge, and PR placeholder facts.",
+        "name": "GitGraph.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "gitGraph"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_GIT_BRANCH",
+          "HAS_GIT_COMMIT",
+          "POINTS_TO_COMMIT",
+          "HAS_PULL_REQUEST",
+          "PR_FROM_BRANCH",
+          "PR_TARGET_BRANCH",
+          "PR_HEAD_COMMIT",
+          "PR_BASE_COMMIT",
+          "SPEC_HAS_PULL_REQUEST",
+          "SPEC_HAS_VALIDATION_RUN",
+          "PR_HAS_VALIDATION_RUN",
+          "PR_HAS_CHECK_RUN",
+          "CHECK_FOR_VALIDATION_RUN",
+          "CHECK_HAS_ANNOTATION",
+          "VALIDATED_BY",
+          "HAS_VALIDATOR_EXECUTION",
+          "HAS_FINDING"
+        ],
+        "allowedCreateNodeTypes": [
+          "GitBranch",
+          "GitCommit",
+          "PullRequest",
+          "ProviderCheckRun",
+          "ProviderCheckAnnotation",
+          "ValidationRun",
+          "ValidatorExecution",
+          "Finding"
+        ],
+        "category": "hosting",
+        "description": "Record observed pull request metadata and provider-native check annotations without trusting provider data directly.",
+        "name": "Hosting.Sync",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "provider",
+          "pullRequest"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_RELEASE",
+          "SPEC_HAS_RELEASE",
+          "RELEASES_TAG",
+          "RELEASES_COMMIT",
+          "RELEASE_HAS_VALIDATION_RUN",
+          "SPEC_HAS_VALIDATION_RUN",
+          "RELEASE_HAS_SNAPSHOT",
+          "RELEASE_HAS_ARTIFACT",
+          "RELEASE_HAS_CHECKSUM",
+          "RELEASE_HAS_EVIDENCE",
+          "ARTIFACT_HAS_CHECKSUM",
+          "RELEASE_INCLUDES_MIGRATION"
+        ],
+        "allowedCreateNodeTypes": [
+          "Release",
+          "GitTag",
+          "GitCommit",
+          "GraphSnapshot",
+          "ReleaseArtifact",
+          "ArtifactChecksum",
+          "ReleaseEvidence"
+        ],
+        "category": "release",
+        "description": "Record graph-bound release evidence linked to tag, commit, and validation run facts.",
+        "name": "Release.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "version",
+          "tag",
+          "commit"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "IMPLEMENTS_ACTION_GROUP",
+          "FOLLOWS_COMMIT_PLAN",
+          "CHANGES_FILE"
+        ],
+        "allowedCreateNodeTypes": [
+          "GitCommit",
+          "CodeFile"
+        ],
+        "category": "git",
+        "description": "Record a validated Git commit and changed files.",
+        "name": "GitCommit.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "commit",
+          "message",
+          "changedFiles"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "Actor"
+        ],
+        "category": "identity",
+        "description": "Create or update an actor identity graph fact.",
+        "name": "Identity.UpsertActor",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "actorId"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_ROLE",
+          "GRANTS_PERMISSION"
+        ],
+        "allowedCreateNodeTypes": [
+          "Role",
+          "Permission"
+        ],
+        "category": "identity",
+        "description": "Grant a role and optional permissions to a registered actor.",
+        "name": "Identity.GrantRole",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "actorId",
+          "role"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_APPROVAL"
+        ],
+        "allowedCreateNodeTypes": [
+          "Approval"
+        ],
+        "category": "policy",
+        "description": "Record graph-native approval evidence linked to an approver actor.",
+        "name": "Policy.RecordApproval",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "approval",
+          "approvedBy"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_WAIVER"
+        ],
+        "allowedCreateNodeTypes": [
+          "Waiver"
+        ],
+        "category": "policy",
+        "description": "Record graph-native waiver evidence linked to an approver actor.",
+        "name": "Policy.CreateWaiver",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "policy",
+          "reason",
+          "approvedBy"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_POLICY_DECISION"
+        ],
+        "allowedCreateNodeTypes": [
+          "PolicyDecision"
+        ],
+        "category": "policy",
+        "description": "Persist policy decisions from a policy evaluation as graph facts.",
+        "name": "Policy.RecordDecision",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "policyRunId",
+          "checkedOperation",
+          "decisions"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "DEFINES_SYMBOL",
+          "HAS_IMPORT",
+          "IMPORTS_FILE",
+          "DECLARES_ROUTE",
+          "HANDLED_BY_SYMBOL",
+          "OWNED_BY_MODULE",
+          "IMPLEMENTS_BEHAVIOR",
+          "ADDRESSES_RISK"
+        ],
+        "allowedCreateNodeTypes": [
+          "CodeFile",
+          "CodeSymbol",
+          "CodeImport",
+          "CodeRoute"
+        ],
+        "category": "code",
+        "description": "Record changed files and observed source symbols as code facts.",
+        "name": "Code.Index",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "changedFiles"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "DEFINES_SYMBOL",
+          "HAS_IMPORT",
+          "IMPORTS_FILE",
+          "DECLARES_ROUTE",
+          "HANDLED_BY_SYMBOL",
+          "OWNED_BY_MODULE",
+          "IMPLEMENTS_BEHAVIOR",
+          "ADDRESSES_RISK"
+        ],
+        "allowedCreateNodeTypes": [
+          "CodeFile",
+          "CodeSymbol",
+          "CodeImport",
+          "CodeRoute"
+        ],
+        "category": "code",
+        "description": "Record accepted CodeGraph semantic facts and traceability links.",
+        "name": "CodeGraph.Upsert",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "codeGraph"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "DECLARES_CODE_OBJECT",
+          "OWNED_BY_MODULE",
+          "CODE_OBJECT_EXPECTS_FILE",
+          "CODE_OBJECT_PARENT_SYMBOL",
+          "CODE_OBJECT_PARENT_OBJECT",
+          "CODE_OBJECT_FOR_ENDPOINT",
+          "CODE_OBJECT_FOR_USE_CASE",
+          "CODE_OBJECT_IMPLEMENTS",
+          "CODE_OBJECT_REALIZED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "CodeObjectDeclaration",
+          "CodeFile"
+        ],
+        "category": "code",
+        "description": "Declare a planned implementation object with spec, module ownership, placement, and parent/link constraints before coding.",
+        "name": "CodeObject.Declare",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "codeObject"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "CODE_OBJECT_REALIZED_BY"
+        ],
+        "allowedCreateNodeTypes": [],
+        "category": "code",
+        "description": "Link a declared planned code object to an existing CodeSymbol, CodeFile, or CodeRoute instead of creating a duplicate implementation.",
+        "name": "CodeObject.LinkExisting",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "codeObject",
+          "existing"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "CODE_OBJECT_EXPECTS_FILE",
+          "CODE_OBJECT_REALIZED_BY",
+          "CODE_OBJECT_IMPLEMENTS",
+          "HAS_IMPACT_ANALYSIS",
+          "IMPACTS"
+        ],
+        "allowedCreateNodeTypes": [
+          "CodeObjectDeclaration",
+          "CodeFile",
+          "CodeSymbol",
+          "CodeRoute",
+          "ImpactAnalysis"
+        ],
+        "category": "code",
+        "description": "Record an update to an existing declared code object with ownership, placement, and evidence validation.",
+        "name": "CodeObject.Update",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "codeObject",
+          "change"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "CODE_OBJECT_HAS_ALIAS",
+          "CODE_OBJECT_REALIZED_BY",
+          "CODE_OBJECT_IMPLEMENTS"
+        ],
+        "allowedCreateNodeTypes": [
+          "CodeObjectDeclaration",
+          "CodeObjectAlias",
+          "CodeSymbol",
+          "CodeRoute"
+        ],
+        "category": "code",
+        "description": "Rename an existing declared code object while preserving owner, module placement, and previous-name evidence.",
+        "name": "CodeObject.Rename",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "codeObject",
+          "newName",
+          "reason"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "CODE_OBJECT_HAS_ALIAS",
+          "CODE_OBJECT_EXPECTS_FILE"
+        ],
+        "allowedCreateNodeTypes": [
+          "CodeObjectDeclaration",
+          "CodeObjectAlias",
+          "CodeFile"
+        ],
+        "category": "code",
+        "description": "Move an existing declared code object to a new owned file path with placement validation.",
+        "name": "CodeObject.Move",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "codeObject",
+          "newFile",
+          "reason"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "CODE_OBJECT_IMPLEMENTS"
+        ],
+        "allowedCreateNodeTypes": [
+          "CodeObjectDeclaration"
+        ],
+        "category": "code",
+        "description": "Mark an existing declared code object as deprecated with reason and replacement evidence.",
+        "name": "CodeObject.Deprecate",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "codeObject",
+          "reason"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "CodeObjectDeclaration"
+        ],
+        "category": "code",
+        "description": "Mark an existing declared code object for deletion with impact and approval evidence.",
+        "name": "CodeObject.Delete",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "codeObject",
+          "reason",
+          "impact"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_REFACTOR_PLAN",
+          "PRESERVES_BEHAVIOR",
+          "HAS_EQUIVALENCE_VALIDATION",
+          "REFACTORS_CODE_OBJECT"
+        ],
+        "allowedCreateNodeTypes": [
+          "RefactorSpec",
+          "PreservedBehavior",
+          "RefactorPlan",
+          "EquivalenceValidation"
+        ],
+        "category": "code",
+        "description": "Record a refactor-only plan with preserved behavior and equivalence validation evidence.",
+        "name": "Refactor.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "refactor"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "GENERATED_FROM",
+          "GENERATED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "GeneratedFile",
+          "Generator",
+          "GenerationSource",
+          "CodeFile"
+        ],
+        "category": "governance",
+        "description": "Record generated files, generators, and source artifacts so agents edit sources instead of generated outputs.",
+        "name": "GeneratedCode.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "generated"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_API_CONTRACT",
+          "CONTRACT_HAS_REQUEST_TYPE",
+          "CONTRACT_HAS_RESPONSE_TYPE",
+          "CONTRACT_HAS_CONSUMER",
+          "CONTRACT_HAS_COMPATIBILITY_CHECK",
+          "CONTRACT_HAS_BREAKING_CHANGE",
+          "CONTRACT_DOCUMENTED_BY",
+          "CONTRACT_HAS_EXAMPLE_UPDATE",
+          "CONTRACT_HAS_CHANGELOG_ENTRY",
+          "GENERATION_SOURCE_FOR_CONTRACT",
+          "CONTRACT_HAS_APPROVAL"
+        ],
+        "allowedCreateNodeTypes": [
+          "ApiContract",
+          "RequestType",
+          "ResponseType",
+          "Consumer",
+          "CompatibilityCheck",
+          "BreakingChange",
+          "DocumentationUpdate",
+          "ExampleUpdate",
+          "ChangelogEntry",
+          "GenerationSource"
+        ],
+        "category": "governance",
+        "description": "Record public API contract, request/response types, consumers, compatibility checks, breaking changes, docs, examples, and changelog evidence.",
+        "name": "PublicContract.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "contract"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_PACKAGE_MANIFEST",
+          "MANIFEST_HAS_DEPENDENCY",
+          "DEPENDENCY_HAS_VERSION",
+          "MANIFEST_HAS_LOCKFILE",
+          "DEPENDENCY_HAS_LICENSE",
+          "DEPENDENCY_HAS_ADVISORY",
+          "DEPENDENCY_HAS_APPROVAL",
+          "DEPENDENCY_DOCUMENTED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "Dependency",
+          "DependencyVersion",
+          "PackageManifest",
+          "Lockfile",
+          "License",
+          "AdvisoryEvidence",
+          "DocumentationUpdate"
+        ],
+        "category": "governance",
+        "description": "Declare a new package dependency with manifest, lockfile, license, advisory, and approval evidence.",
+        "name": "Dependency.Add",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "dependency",
+          "manifest",
+          "lockfile"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_PACKAGE_MANIFEST",
+          "MANIFEST_HAS_DEPENDENCY",
+          "DEPENDENCY_HAS_VERSION",
+          "MANIFEST_HAS_LOCKFILE",
+          "DEPENDENCY_HAS_LICENSE",
+          "DEPENDENCY_HAS_ADVISORY",
+          "DEPENDENCY_HAS_APPROVAL",
+          "DEPENDENCY_DOCUMENTED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "Dependency",
+          "DependencyVersion",
+          "PackageManifest",
+          "Lockfile",
+          "License",
+          "AdvisoryEvidence",
+          "DocumentationUpdate"
+        ],
+        "category": "governance",
+        "description": "Update a package dependency with manifest, lockfile, license, advisory, and approval evidence.",
+        "name": "Dependency.Update",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "dependency",
+          "manifest",
+          "lockfile"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_PACKAGE_MANIFEST",
+          "MANIFEST_HAS_DEPENDENCY",
+          "DEPENDENCY_HAS_VERSION",
+          "MANIFEST_HAS_LOCKFILE",
+          "DEPENDENCY_HAS_LICENSE",
+          "DEPENDENCY_HAS_ADVISORY",
+          "DEPENDENCY_HAS_APPROVAL",
+          "DEPENDENCY_DOCUMENTED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "Dependency",
+          "DependencyVersion",
+          "PackageManifest",
+          "Lockfile",
+          "License",
+          "AdvisoryEvidence",
+          "DocumentationUpdate"
+        ],
+        "category": "governance",
+        "description": "Remove or deprecate a package dependency with manifest, lockfile, advisory, and approval evidence.",
+        "name": "Dependency.Remove",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "dependency",
+          "manifest",
+          "lockfile"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_CONFIG_VARIABLE",
+          "HAS_SECRET_REFERENCE",
+          "HAS_ENVIRONMENT_REQUIREMENT",
+          "HAS_RUNTIME_CONFIG",
+          "CONFIG_HAS_ENVIRONMENT_REQUIREMENT",
+          "CONFIG_DOCUMENTED_BY",
+          "CONFIG_HAS_APPROVAL"
+        ],
+        "allowedCreateNodeTypes": [
+          "ConfigVariable",
+          "SecretReference",
+          "EnvironmentRequirement",
+          "RuntimeConfig",
+          "DocumentationUpdate"
+        ],
+        "category": "governance",
+        "description": "Declare runtime config variables, secret references, environment requirements, and required docs before code uses them.",
+        "name": "Config.Declare",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "config"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [],
+        "category": "workflow",
+        "description": "Dry-run a coding work permit for intended spec/action/files/symbols before editing source files.",
+        "name": "Implementation.Authorize",
+        "postconditions": [],
+        "preconditions": [],
+        "requiredInputFields": [
+          "spec",
+          "action",
+          "wants"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_WORK_RESERVATION",
+          "RESERVES_SPEC",
+          "RESERVES_ACTION",
+          "RESERVES_COMMIT_PLAN",
+          "RESERVES_CODE_OBJECT",
+          "RESERVES_FILE",
+          "RESERVES_SYMBOL",
+          "RESERVES_MODULE"
+        ],
+        "allowedCreateNodeTypes": [
+          "WorkReservation"
+        ],
+        "category": "workflow",
+        "description": "Reserve files, symbols, modules, specs, actions, or commit plans before a coding agent edits.",
+        "name": "WorkReservation.Create",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "reservation"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "WorkReservation"
+        ],
+        "category": "workflow",
+        "description": "Extend an active work reservation expiration while preserving its scope and owner.",
+        "name": "WorkReservation.Extend",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "reservationId",
+          "expiresAt"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "WorkReservation"
+        ],
+        "category": "workflow",
+        "description": "Release a work reservation owned by the current actor or same-action participant.",
+        "name": "WorkReservation.Release",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "reservationId",
+          "reason"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "DECISION_HAS_APPROVAL"
+        ],
+        "allowedCreateNodeTypes": [
+          "WorkReservation"
+        ],
+        "category": "workflow",
+        "description": "Force release a work reservation with scoped approval or administrative evidence.",
+        "name": "WorkReservation.ForceRelease",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "reservationId",
+          "reason",
+          "approvalId"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "CODE_OBJECT_REALIZED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "CodeObjectDeclaration",
+          "CodeSymbol",
+          "CodeFile",
+          "CodeRoute"
+        ],
+        "category": "code",
+        "description": "Reconcile observed CodeGraph facts to declared or accepted-baseline code objects after indexing.",
+        "name": "CodeObject.Reconcile",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "codeObjects"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "VERIFIES",
+          "IMPLEMENTS_USE_CASE",
+          "ROUTES_TO_ENDPOINT",
+          "TESTS_BEHAVIOR",
+          "TESTS_RISK",
+          "TESTS_REGRESSION",
+          "TESTS_POLICY"
+        ],
+        "allowedCreateNodeTypes": [
+          "TestCase",
+          "Regression",
+          "PolicyRequirement"
+        ],
+        "category": "trace",
+        "description": "Import manifest, annotation, and inferred traceability links.",
+        "name": "Trace.Import",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "links"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "TRACE_TO_CODE",
+          "TRACE_TO_TEST",
+          "TRACE_TO_POLICY"
+        ],
+        "allowedCreateNodeTypes": [],
+        "category": "trace",
+        "description": "Record architecture, data, and security traceability to code, tests, and policies.",
+        "name": "Trace.CrossDomain",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "links"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_TEST_RUN",
+          "HAS_TEST_RESULT",
+          "TEST_RESULT_FOR"
+        ],
+        "allowedCreateNodeTypes": [
+          "TestRun",
+          "TestResult",
+          "ValidationRun"
+        ],
+        "category": "test",
+        "description": "Record normalized test-run and test-result evidence linked to a ValidationRun.",
+        "name": "TestRun.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "runId",
+          "runner",
+          "results"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "VALIDATED_BY",
+          "HAS_VALIDATOR_EXECUTION",
+          "HAS_FINDING",
+          "VALIDATION_RUN_SATISFIES_RECIPE",
+          "VALIDATION_RUN_HAS_BUILD",
+          "VALIDATION_RUN_HAS_TYPECHECK",
+          "VALIDATION_RUN_HAS_LINT",
+          "VALIDATION_RUN_HAS_FORMAT_CHECK"
+        ],
+        "allowedCreateNodeTypes": [
+          "ValidationRun",
+          "ValidatorExecution",
+          "Finding",
+          "BuildRun",
+          "TypecheckRun",
+          "LintRun",
+          "FormatCheck"
+        ],
+        "category": "validation",
+        "description": "Record validation run evidence and findings.",
+        "name": "Validation.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "runId",
+          "status",
+          "checks"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "ACTION_REQUIRES_VALIDATION_RECIPE",
+          "COMMIT_PLAN_REQUIRES_VALIDATION_RECIPE",
+          "VALIDATION_RECIPE_HAS_COMMAND"
+        ],
+        "allowedCreateNodeTypes": [
+          "ValidationRecipe",
+          "ValidationCommand"
+        ],
+        "category": "validation",
+        "description": "Record required validation recipes and declared commands without executing tool-specific adapters.",
+        "name": "ValidationRecipe.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "recipe"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "SPEC_HAS_TEST_INTENT",
+          "ACCEPTANCE_CRITERION_HAS_TEST_INTENT",
+          "TEST_INTENT_HAS_ASSERTION",
+          "TEST_INTENT_HAS_POSITIVE_CASE",
+          "TEST_INTENT_HAS_NEGATIVE_CASE",
+          "TEST_INTENT_HAS_REGRESSION_CASE",
+          "TEST_INTENT_HAS_SECURITY_CASE",
+          "TEST_INTENT_VALIDATED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "TestIntent",
+          "TestAssertion",
+          "PositiveCase",
+          "NegativeCase",
+          "RegressionCase",
+          "SecurityCase"
+        ],
+        "category": "test",
+        "description": "Record acceptance-criterion test intent, assertions, and positive/negative/regression/security scenario cases.",
+        "name": "TestIntent.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "testIntent"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "SPEC_HAS_REVIEW",
+          "ACTION_HAS_REVIEW",
+          "PR_HAS_REVIEW",
+          "REVIEW_HAS_COMMENT",
+          "REVIEW_REQUESTS_CHANGE",
+          "REQUESTED_CHANGE_RESOLVED_BY",
+          "REQUESTED_CHANGE_APPROVED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "Review",
+          "ReviewComment",
+          "RequestedChange",
+          "ReviewResolution",
+          "ReviewApproval"
+        ],
+        "category": "review",
+        "description": "Record manual/provider review comments, requested changes, resolutions, and scoped review approvals.",
+        "name": "Review.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "review"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "RELEASE_HAS_ROLLOUT_PLAN",
+          "ROLLOUT_USES_FEATURE_FLAG",
+          "RELEASE_HAS_ROLLBACK_STRATEGY",
+          "RELEASE_HAS_POST_RELEASE_CHECK",
+          "RELEASE_HAS_HEALTH_CHECK",
+          "RELEASE_OBSERVES_METRIC",
+          "RELEASE_OBSERVES_LOG_EVENT",
+          "RELEASE_OBSERVES_TRACE_SPAN",
+          "RELEASE_HAS_AUDIT_EVENT",
+          "RELEASE_HAS_OPERATIONAL_ALERT",
+          "RELEASE_HAS_SLO",
+          "POST_RELEASE_CHECK_CREATED_ISSUE",
+          "POST_RELEASE_CHECK_TRIGGERED_ROLLBACK",
+          "POST_RELEASE_CHECK_REQUIRES_REPLAN"
+        ],
+        "allowedCreateNodeTypes": [
+          "RolloutPlan",
+          "FeatureFlag",
+          "RollbackStrategy",
+          "PostReleaseCheck",
+          "ReleaseHealthCheck",
+          "Metric",
+          "LogEvent",
+          "TraceSpan",
+          "AuditEvent",
+          "OperationalAlert",
+          "SLO",
+          "Issue",
+          "ActionNode"
+        ],
+        "category": "release",
+        "description": "Record rollout, rollback, observability, and post-release validation evidence for risky releases.",
+        "name": "ReleaseGovernance.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "releaseGovernance"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_ISSUE_EVIDENCE",
+          "HAS_REPRODUCTION",
+          "HAS_FAILING_TEST",
+          "HAS_ROOT_CAUSE",
+          "HAS_FIX_SPEC",
+          "HAS_REGRESSION_TEST",
+          "HAS_CLOSURE_EVIDENCE",
+          "ROOT_CAUSE_TARGETS_CODE_OBJECT"
+        ],
+        "allowedCreateNodeTypes": [
+          "Issue",
+          "ReproductionStep",
+          "FailingTest",
+          "RootCause",
+          "FixSpec",
+          "RegressionTest",
+          "ClosureEvidence"
+        ],
+        "category": "issue",
+        "description": "Record IssueGraph lifecycle facts for bugs, reproduction, root cause, fix spec, regression, and closure evidence.",
+        "name": "IssueGraph.Record",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "issue"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_IMPACT_ANALYSIS",
+          "IMPACTS",
+          "HAS_EXECUTION_ATTEMPT",
+          "HAS_ACTION",
+          "DEPENDS_ON",
+          "REPLANNED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "ImpactAnalysis",
+          "RevalidationQueue",
+          "ActionNode",
+          "ExecutionAttempt"
+        ],
+        "category": "impact",
+        "description": "Record policy/impact invalidation and require affected actions to replan before continuation.",
+        "name": "PolicyImpact.Replan",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "changedPolicies",
+          "queue"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_IMPACT_ANALYSIS",
+          "IMPACTS",
+          "HAS_EXECUTION_ATTEMPT",
+          "HAS_ACTION",
+          "DEPENDS_ON",
+          "REPLANNED_BY"
+        ],
+        "allowedCreateNodeTypes": [
+          "ImpactAnalysis",
+          "RevalidationQueue",
+          "ActionNode",
+          "ExecutionAttempt"
+        ],
+        "category": "impact",
+        "description": "Record impact-driven revalidation queue facts and replan invalidated actions.",
+        "name": "Impact.Revalidate",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "roots",
+          "queue"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "*"
+        ],
+        "allowedCreateNodeTypes": [
+          "*"
+        ],
+        "category": "graph",
+        "description": "Accept a ready semantic graph merge or rebase after dry-run conflict detection and post-merge validation.",
+        "name": "GraphMerge.Accept",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "mode",
+          "sourceBranch",
+          "targetBranch"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_CONFLICT"
+        ],
+        "allowedCreateNodeTypes": [
+          "GraphMerge",
+          "MergeConflict"
+        ],
+        "category": "graph",
+        "description": "Record graph merge or rebase dry-run evidence, conflicts, blockers, and post-merge validation intent.",
+        "name": "GraphMerge.DryRun",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "mode",
+          "sourceBranch",
+          "targetBranch"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "CodeFile",
+          "AdoptionReport",
+          "AdoptionBaseline"
+        ],
+        "category": "adoption",
+        "description": "Record observed CodeFile baseline facts for an existing repo.",
+        "name": "ExistingRepo.Adopt",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "mode"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "PROPOSES_DELTA",
+          "PROPOSES_PATCH",
+          "PROPOSES_TEST",
+          "PROPOSES_ONTOLOGY_CHANGE",
+          "PROPOSES_POLICY_CHANGE"
+        ],
+        "allowedCreateNodeTypes": [
+          "Proposal",
+          "ProposedGraphDelta",
+          "ProposedCodePatch",
+          "ProposedTestSuggestion",
+          "ProposedOntologyChange",
+          "ProposedPolicyChange"
+        ],
+        "category": "proposal",
+        "description": "Store an untrusted proposal node.",
+        "name": "Proposal.Create",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "proposal"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "PROPOSAL_HAS_SANDBOX_RUN"
+        ],
+        "allowedCreateNodeTypes": [
+          "PatchSandboxRun"
+        ],
+        "category": "proposal",
+        "description": "Record isolated patch sandbox validation evidence for an untrusted proposal.",
+        "name": "Proposal.Sandbox",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "proposal",
+          "sandboxRun"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_PROPOSAL_ACCEPTANCE",
+          "ACCEPTED_WITH_VALIDATION"
+        ],
+        "allowedCreateNodeTypes": [
+          "Proposal",
+          "ProposalAcceptance"
+        ],
+        "category": "proposal",
+        "description": "Accept a validated proposal through Operation Runtime with exact diff and validation evidence.",
+        "name": "Proposal.Accept",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "proposal",
+          "validationRunId",
+          "exactDiffHash"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "Proposal"
+        ],
+        "category": "proposal",
+        "description": "Move a proposal through the trust-state lifecycle.",
+        "name": "Proposal.Transition",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "proposal",
+          "state"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [
+          "HAS_ONTOLOGY_CHANGE_EVIDENCE",
+          "HAS_ONTOLOGY_TEST",
+          "HAS_COMPATIBILITY_CHECK",
+          "HAS_PACK_RELEASE_EVIDENCE"
+        ],
+        "allowedCreateNodeTypes": [
+          "OntologyChange",
+          "OntologyTest",
+          "OntologyMigration",
+          "CompatibilityCheck",
+          "PackReleaseEvidence",
+          "UpgradeRun"
+        ],
+        "category": "ontology",
+        "description": "Record ontology change proposal evidence including tests, migrations, compatibility checks, and release evidence.",
+        "name": "OntologyChange.Propose",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "change"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      },
+      {
+        "allowedCreateEdgeTypes": [],
+        "allowedCreateNodeTypes": [
+          "OntologyPack",
+          "OntologyVersion",
+          "OntologyMigration"
+        ],
+        "category": "ontology",
+        "description": "Install and lock an ontology pack manifest.",
+        "name": "OntologyPack.Install",
+        "postconditions": [
+          "created_and_updated_nodes_exist",
+          "created_and_updated_edges_exist",
+          "deleted_nodes_absent",
+          "deleted_edges_absent"
+        ],
+        "preconditions": [
+          "created_node_ids_do_not_exist",
+          "created_edge_ids_do_not_exist",
+          "updated_node_ids_exist",
+          "updated_edge_ids_exist",
+          "deleted_node_ids_exist",
+          "deleted_edge_ids_exist"
+        ],
+        "requiredInputFields": [
+          "name",
+          "version",
+          "path"
+        ],
+        "schemaVersion": "specgraph.operation-definition/v1"
+      }
+    ]
+  },
+  "elapsedMs": 0
+}

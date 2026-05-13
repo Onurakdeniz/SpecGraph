@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg release",
+  "status": "error",
+  "data": {
+    "error": {
+      "code": "cli.findings_failed",
+      "message": "release validation failed with 1 error finding(s)",
+      "remediation": null
+    }
+  },
+  "findings": [
+    {
+      "code": "release.missing",
+      "severity": "Error",
+      "message": "Release `v0.1.0` is not recorded.",
+      "validator": "validator.git_binding",
+      "validatorVersion": "0.1.0",
+      "locations": [
+        {
+          "type": "command",
+          "target": "sg release validate"
+        }
+      ],
+      "relatedNodes": [],
+      "relatedEdges": []
+    }
+  ],
+  "elapsedMs": 0
+}

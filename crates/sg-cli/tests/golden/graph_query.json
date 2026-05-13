@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg graph query",
+  "status": "passed",
+  "data": {
+    "context": {
+      "actor": null,
+      "limits": {
+        "maxDepth": 4,
+        "maxEdges": 5000,
+        "maxNodes": 1000
+      },
+      "requirePermission": false,
+      "target": {
+        "graphBranch": "main",
+        "type": "branch"
+      }
+    },
+    "cost": {
+      "edgesScanned": 0,
+      "maxDepth": 4,
+      "maxEdges": 5000,
+      "maxNodes": 1000,
+      "nodesScanned": 1
+    },
+    "nodes": [
+      {
+        "attributes": {
+          "createdBy": "local:user",
+          "name": "Test"
+        },
+        "id": "node_project",
+        "nodeType": "Project",
+        "stableKey": "project:Test"
+      }
+    ],
+    "stateHash": "sha256:0c254156981dfa24ce39f093a940b427a6edafbcfad6138aca9d5cdaa3f65389"
+  },
+  "elapsedMs": 0
+}

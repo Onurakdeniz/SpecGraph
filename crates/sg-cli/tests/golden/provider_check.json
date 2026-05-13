@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg pr",
+  "status": "error",
+  "data": {
+    "error": {
+      "code": "cli.findings_failed",
+      "message": "PR validation failed with 1 error finding(s)",
+      "remediation": null
+    }
+  },
+  "findings": [
+    {
+      "code": "pr_hosting.pr_missing",
+      "severity": "Error",
+      "message": "PullRequest `github/1` is not synced. Remediation: run `sg pr sync --provider github --number 1 --branch <branch> --target-branch <target>` before validating or recording provider checks.",
+      "validator": "validator.pr_hosting",
+      "validatorVersion": "0.1.0",
+      "locations": [
+        {
+          "type": "command",
+          "target": "sg pr validate"
+        }
+      ],
+      "relatedNodes": [],
+      "relatedEdges": []
+    }
+  ],
+  "elapsedMs": 0
+}

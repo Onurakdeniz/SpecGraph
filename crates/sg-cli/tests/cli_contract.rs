@@ -16,8 +16,50 @@ fn temp_root(name: &str) -> std::path::PathBuf {
     path
 }
 
+fn parse_stdout(output: &std::process::Output) -> serde_json::Value {
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "stdout was not valid JSON: {error}\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+fn normalize_envelope(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(object) = value.as_object_mut() {
+        if object.contains_key("elapsedMs") {
+            object.insert("elapsedMs".to_string(), serde_json::json!(0));
+        }
+        if let Some(data) = object.get_mut("data").and_then(|data| data.as_object_mut()) {
+            if data.contains_key("configPath") {
+                data.insert(
+                    "configPath".to_string(),
+                    serde_json::json!("<TEMP>/.specgraph/adapters/config.yaml"),
+                );
+            }
+        }
+    }
+    value
+}
+
+fn golden(path: &str) -> serde_json::Value {
+    let contents = match path {
+        "golden/adapter_audit.json" => include_str!("golden/adapter_audit.json"),
+        "golden/ci_report.json" => include_str!("golden/ci_report.json"),
+        "golden/graph_query.json" => include_str!("golden/graph_query.json"),
+        "golden/json_error_findings.json" => include_str!("golden/json_error_findings.json"),
+        "golden/operation_list.json" => include_str!("golden/operation_list.json"),
+        "golden/policy_failure.json" => include_str!("golden/policy_failure.json"),
+        "golden/provider_check.json" => include_str!("golden/provider_check.json"),
+        "golden/release_validation.json" => include_str!("golden/release_validation.json"),
+        _ => panic!("unknown golden fixture {path}"),
+    };
+    serde_json::from_str(contents).unwrap()
+}
+
 #[test]
-fn adapter_audit_json_uses_cli_envelope() {
+fn adapter_audit_json_matches_golden_envelope() {
     let root = temp_root("adapter-audit-json");
     let output = Command::new(sg())
         .args([
@@ -37,16 +79,32 @@ fn adapter_audit_json_uses_cli_envelope() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["schemaVersion"], "specgraph.cli/v1");
-    assert_eq!(value["command"], "sg adapter audit");
-    assert_eq!(value["status"], "passed");
-    assert!(value["elapsedMs"].is_number());
-    assert_eq!(value["data"]["adapterCount"], 10);
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/adapter_audit.json")
+    );
 }
 
 #[test]
-fn json_errors_are_structured_and_include_findings() {
+fn operation_list_json_matches_golden_inventory() {
+    let output = Command::new(sg())
+        .args(["--format", "json", "operation", "list"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/operation_list.json")
+    );
+}
+
+#[test]
+fn json_errors_match_golden_and_include_findings() {
     let root = temp_root("adapter-error-json");
     let output = Command::new(sg())
         .args([
@@ -64,15 +122,196 @@ fn json_errors_are_structured_and_include_findings() {
         .unwrap();
 
     assert!(!output.status.success());
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["schemaVersion"], "specgraph.cli/v1");
-    assert_eq!(value["status"], "error");
-    assert_eq!(value["data"]["error"]["code"], "cli.findings_failed");
-    assert!(value["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| finding["code"] == "adapter_runtime.disabled"));
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/json_error_findings.json")
+    );
+}
+
+#[test]
+fn policy_failure_json_matches_golden() {
+    let root = temp_root("policy-failure-json");
+    let init = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "init",
+            "--project-name",
+            "Test",
+        ])
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+
+    let output = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "--format",
+            "json",
+            "policy",
+            "check",
+            "--operation",
+            "Merge",
+            "--changed-file",
+            ".env",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/policy_failure.json")
+    );
+}
+
+#[test]
+fn graph_branch_query_json_matches_golden() {
+    let root = temp_root("graph-query-json");
+    let init = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "init",
+            "--project-name",
+            "Test",
+        ])
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+
+    let output = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "--format",
+            "json",
+            "graph",
+            "query",
+            "--branch",
+            "main",
+            "--node-type",
+            "Project",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/graph_query.json")
+    );
+}
+
+#[test]
+fn ci_report_json_matches_golden() {
+    let root = temp_root("ci-report-json");
+    let init = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "init",
+            "--project-name",
+            "Test",
+        ])
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+
+    let output = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "--format",
+            "json",
+            "ci",
+            "validate",
+            "--skip-git",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/ci_report.json")
+    );
+}
+
+#[test]
+fn release_validation_json_matches_golden() {
+    let root = temp_root("release-validation-json");
+    let init = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "init",
+            "--project-name",
+            "Test",
+        ])
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+
+    let output = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "--format",
+            "json",
+            "release",
+            "validate",
+            "--version",
+            "v0.1.0",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/release_validation.json")
+    );
+}
+
+#[test]
+fn provider_check_json_matches_golden() {
+    let root = temp_root("provider-check-json");
+    let init = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "init",
+            "--project-name",
+            "Test",
+        ])
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+
+    let output = Command::new(sg())
+        .args([
+            "--root",
+            root.to_str().unwrap(),
+            "--format",
+            "json",
+            "pr",
+            "validate",
+            "--provider",
+            "github",
+            "--number",
+            "1",
+            "--skip-git",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert_eq!(
+        normalize_envelope(parse_stdout(&output)),
+        golden("golden/provider_check.json")
+    );
 }
 
 #[test]

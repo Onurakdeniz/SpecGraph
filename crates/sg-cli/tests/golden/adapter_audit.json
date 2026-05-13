@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg adapter audit",
+  "status": "passed",
+  "data": {
+    "adapterCount": 10,
+    "configPath": "<TEMP>/.specgraph/adapters/config.yaml"
+  },
+  "elapsedMs": 0
+}

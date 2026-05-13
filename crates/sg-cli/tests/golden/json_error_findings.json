@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "specgraph.cli/v1",
+  "command": "sg adapter",
+  "status": "error",
+  "data": {
+    "error": {
+      "code": "cli.findings_failed",
+      "message": "adapter runtime authorization failed with 2 error finding(s)",
+      "remediation": null
+    }
+  },
+  "findings": [
+    {
+      "code": "adapter_runtime.disabled",
+      "severity": "Error",
+      "message": "Adapter `adapter:code-indexer.lightweight` is disabled. Remediation: explicitly enable it in .specgraph/adapters/config.yaml.",
+      "validator": "validator.security_boundary",
+      "validatorVersion": "0.1.0",
+      "relatedNodes": [],
+      "relatedEdges": []
+    },
+    {
+      "code": "adapter_runtime.capability_not_granted",
+      "severity": "Error",
+      "message": "Adapter `adapter:code-indexer.lightweight` lacks granted capability `ReadFilesystem`. Remediation: grant only the required capability in .specgraph/adapters/config.yaml.",
+      "validator": "validator.security_boundary",
+      "validatorVersion": "0.1.0",
+      "relatedNodes": [],
+      "relatedEdges": []
+    }
+  ],
+  "elapsedMs": 0
+}
