@@ -14048,6 +14048,90 @@ acceptanceCriteria:
                 count: 1,
             } if operation == "Proposal.Accept"
         ));
+
+        let sandbox_id = node_id("patch_sandbox_run", &format!("{proposal_id}/sha256-ok"));
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Proposal.Sandbox".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "proposal": proposal_id,
+                    "sandboxRun": "sha256:ok",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: sandbox_id.clone(),
+                        stable_key: format!("patch-sandbox-run:{proposal_id}/sha256:ok"),
+                        node_type: "PatchSandboxRun".to_string(),
+                        attributes: BTreeMap::from([
+                            ("proposalId".to_string(), json!(proposal_id)),
+                            ("status".to_string(), json!("Passed")),
+                            ("exactDiffHash".to_string(), json!("sha256:ok")),
+                        ]),
+                    }],
+                    create_edges: vec![edge(
+                        &proposal_node_id,
+                        "PROPOSAL_HAS_SANDBOX_RUN",
+                        &sandbox_id,
+                    )],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
+
+        let accepted = Node {
+            id: proposal_node_id.clone(),
+            stable_key: format!("proposal:{proposal_id}"),
+            node_type: "Proposal".to_string(),
+            attributes: BTreeMap::from([
+                ("id".to_string(), json!(proposal_id)),
+                ("title".to_string(), json!("Validated proposal")),
+                ("trustState".to_string(), json!("Accepted")),
+                ("acceptedValidationRunId".to_string(), json!(run_id)),
+                ("acceptedExactDiffHash".to_string(), json!("sha256:ok")),
+            ]),
+        };
+        let acceptance_id = node_id(
+            "proposal_acceptance",
+            &format!("{proposal_id}/{run_id}/sha256-ok"),
+        );
+        append_operation(
+            tmp.path(),
+            AppendOperationOptions {
+                operation: "Proposal.Accept".to_string(),
+                actor: "test".to_string(),
+                graph_branch: "main".to_string(),
+                input: json!({
+                    "proposal": proposal_id,
+                    "validationRunId": run_id,
+                    "exactDiffHash": "sha256:ok",
+                }),
+                dry_run: false,
+                delta: GraphDelta {
+                    create_nodes: vec![Node {
+                        id: acceptance_id.clone(),
+                        stable_key: format!("proposal-acceptance:{proposal_id}/{run_id}/sha256-ok"),
+                        node_type: "ProposalAcceptance".to_string(),
+                        attributes: BTreeMap::from([
+                            ("proposalId".to_string(), json!(proposal_id)),
+                            ("validationRunId".to_string(), json!(run_id)),
+                            ("exactDiffHash".to_string(), json!("sha256:ok")),
+                        ]),
+                    }],
+                    update_nodes: vec![accepted],
+                    create_edges: vec![
+                        edge(&proposal_node_id, "HAS_PROPOSAL_ACCEPTANCE", &acceptance_id),
+                        edge(&acceptance_id, "ACCEPTED_WITH_VALIDATION", &run_node_id),
+                    ],
+                    ..GraphDelta::default()
+                },
+            },
+        )
+        .unwrap();
     }
 
     #[test]

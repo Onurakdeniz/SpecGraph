@@ -559,6 +559,17 @@ mod tests {
     }
 
     #[test]
+    fn proposal_schema_warns_on_missing_payload() {
+        let proposal = Proposal::new("PROP-empty".into(), "empty".into());
+        let findings = validate_proposal_schema(&proposal);
+
+        assert!(findings.iter().any(|finding| {
+            finding.code == "proposal.payload_missing"
+                && finding.severity == FindingSeverity::Warning
+        }));
+    }
+
+    #[test]
     fn patch_sandbox_rejects_secret_path_and_network_command() {
         let mut proposal = Proposal::new("PROP-2".into(), "demo".into());
         proposal.code_patch = Some(ProposedCodePatch {

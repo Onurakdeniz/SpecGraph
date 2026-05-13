@@ -154,8 +154,9 @@ Current completed slices:
 - **Phase 8A — Migration observation and risk policy foundations** added deterministic SQL/Prisma/Knex/TypeORM migration observers, `sg data observe --from`, observed-only migration/table facts, migration risk classification, and destructive/production-sensitive migration evidence policy checks.
 - **Phase 8B — Migration execution evidence and release gates** added `MigrationExecution` and `MigrationRollbackExecution` evidence facts, release-to-migration links, release validation blockers for missing migration execution/rollback evidence, and Phase 8 gate tests.
 - **Phase 9A — LLM provider proposal generation foundations** added a provider trait, YAML/env-backed provider registry with offline mock provider, proposal request schema, provider provenance and output validation, and `sg proposal generate/explain` commands that record only untrusted Proposal facts.
+- **Phase 9B — Proposal acceptance invariant closure** added regression coverage for missing payload warnings and the unchanged `Proposal.Accept` path requiring validated proposal state, passed validation run, exact diff hash, passed sandbox evidence, and acceptance evidence nodes.
 
-Next focus after Phase 9A: **Phase 9B — Proposal acceptance invariants and provider tests**. Continue the five-checklist-item branch policy with acceptance-path regression coverage, direct-trust bypass tests, and remaining Phase 9 gates.
+Next focus: **Phase 10 — Adapter Runtime and Provenance Hardening**. Start from the latest `development` and continue the five-checklist-item branch policy with adapter registry/config, capability broker, provenance envelopes, and trust-promotion enforcement.
 
 ---
 
@@ -821,15 +822,15 @@ Allow real LLM providers to create proposals while preserving the rule that LLMs
 
 - [x] **Add CLI commands.** Add `sg proposal generate --provider <id> --spec <spec>` and `sg proposal explain --id <id>`. Generation records only a Proposal node through Operation Runtime.
 
-- [ ] **Keep acceptance path unchanged.** Proposal acceptance must still require validation run id, exact diff hash, sandbox evidence from the existing sandbox flow, and `Proposal.Accept` Operation Runtime validation.
+- [x] **Keep acceptance path unchanged.** Proposal acceptance must still require validation run id, exact diff hash, sandbox evidence from the existing sandbox flow, and `Proposal.Accept` Operation Runtime validation.
 
-- [ ] **Add tests.** Cover mock provider proposal generation, provenance fields, rejected trusted-born proposal, missing payload warning, accepted proposal requiring validation/sandbox evidence, and no direct trusted fact creation.
+- [x] **Add tests.** Cover mock provider proposal generation, provenance fields, rejected trusted-born proposal, missing payload warning, accepted proposal requiring validation/sandbox evidence, and no direct trusted fact creation.
 
 ## Phase Gate
 
 - [x] Provider-generated proposal is untrusted and provenance-rich.
 - [x] Proposal cannot bypass Operation Runtime.
-- [ ] Proposal acceptance still requires validation and exact evidence.
+- [x] Proposal acceptance still requires validation and exact evidence.
 
 ---
 
